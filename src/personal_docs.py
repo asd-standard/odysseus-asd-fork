@@ -273,6 +273,35 @@ class PersonalDocsManager:
         self._save_excluded()
         self.index = [f for f in self.index if os.path.abspath(f.get("path", "")) != os.path.abspath(filepath)]
 
+    def add_file(self, filename: str, content: str) -> dict:
+        """Write a text file into the personal docs directory and refresh the index.
+
+        Args:
+            filename: e.g. ``"notes.md"`` — must not contain path separators.
+            content: the full file body as a string.
+
+        Returns:
+            ``{"success": True, "path": <abs>, "size": <int>}`` on success,
+            ``{"error": <msg>}`` on failure.
+        """
+        if not isinstance(filename, str) or not filename.strip():
+            return {"error": "add_file: filename is required."}
+        filename = filename.strip()
+        if "/" in filename or "\\" in filename or os.path.sep in filename:
+            return {"error": "add_file: filename must not contain path separators (name only, e.g. 'notes.md')."}
+        if not isinstance(content, str):
+            return {"error": "add_file: content must be a string."}
+
+        try:
+            filepath = os.path.join(self.personal_dir, filename)
+            os.makedirs(self.personal_dir, exist_ok=True)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
+            self.refresh_index()
+            return {"success": True, "path": filepath, "size": len(content)}
+        except OSError as e:
+            return {"error": f"add_file: could not write '{filename}': {e}"}
+
     def add_directory(self, directory: str, *, index: bool = True, owner: str = None):
         """Add a directory to the tracking list and optionally index it."""
         # Normalize the path
@@ -422,6 +451,13 @@ class PersonalDocsManager:
     def get_file_list(self) -> List[Dict[str, Any]]:
         """Get list of indexed files with metadata."""
         return [{"name": f["name"], "size": f["size"]} for f in self.index]
+
+    def get_file_content(self, name: str) -> str | None:
+        """Return the full extracted text of an indexed file by its display name."""
+        for entry in self.index:
+            if entry.get("name") == name:
+                return "".join(entry.get("chunks", []))
+        return None
 
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about indexed documents."""

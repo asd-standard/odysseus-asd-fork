@@ -164,6 +164,51 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "list_library_files",
+            "description": "List all files in the personal docs library (indexed documents the user has added). Shows file names and sizes. Use this to discover what files are available before reading one with read_library_file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {"type": "string", "description": "Optional keyword to filter file names"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_library_file",
+            "description": "Read the text content of a specific file from the personal docs library. Use list_library_files first to see available files, then pass the exact name shown there. Long files are returned in pages of ~20000 chars: the response includes next_offset when more content remains, so keep calling with offset=next_offset to read the whole file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Exact file name as shown by list_library_files"},
+                    "offset": {"type": "integer", "description": "Character offset to start reading from (use next_offset from a previous response to continue reading a long file)"},
+                    "limit": {"type": "integer", "description": "Maximum number of characters to return (default 20000, max 20000)"}
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "make_library_file",
+            "description": "Save a text file to the personal docs library. Provide a filename (e.g. 'notes.md') and the full text content. The file will be immediately available via list_library_files and read_library_file. Only supports text-based formats — NOT PDFs, images, or binary files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Filename (e.g. 'notes.md', 'report.txt'). Must not contain path separators — bare name only."},
+                    "content": {"type": "string", "description": "Full text content of the file"}
+                },
+                "required": ["name", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Write/save a file to disk",
             "parameters": {
@@ -1441,6 +1486,16 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = json.dumps(args) if args else "{}"
     elif tool_type == "get_workspace":
         content = ""
+    elif tool_type == "list_library_files":
+        content = json.dumps({"filter": args.get("filter", "")})
+    elif tool_type == "read_library_file":
+        content = json.dumps({
+            "name": args.get("name", ""),
+            "offset": args.get("offset"),
+            "limit": args.get("limit"),
+        })
+    elif tool_type == "make_library_file":
+        content = json.dumps({"name": args.get("name", ""), "content": args.get("content", "")})
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
     elif tool_type == "edit_file":

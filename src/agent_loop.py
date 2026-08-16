@@ -481,6 +481,13 @@ _DOMAIN_RULES = {
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
 - Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
+    "library": """\
+## Library rules
+- The personal docs library contains the user's indexed documents (PDFs, notes, spreadsheets, etc.).
+- Use `list_library_files` to discover what's available; filter by keyword when the user names a specific document.
+- Use `read_library_file` to read the full content of a specific file by the exact name shown in the listing.
+- Use `make_library_file` to save text content as a file in the library (e.g. save research results, notes, reports).
+- These tools read from the library index; do not use `read_file`/`grep`/`bash` to find library documents — those only see workspace files.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -506,6 +513,7 @@ _DOMAIN_TOOL_MAP = {
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "apply_patch", "todowrite", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
+    "library": {"list_library_files", "read_library_file", "make_library_file"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
@@ -611,6 +619,27 @@ Maintain a structured task list for multi-step coding work. Use it when the task
 ```get_workspace
 ```
 Return the absolute path of the active workspace folder. File tools are CONFINED to it (paths can be RELATIVE to it); the shell starts there (cwd) but is NOT sandboxed. Call this first when the user says "the project"/"the code"/"this folder" without a path, instead of asking them. No arguments.""",
+
+    "list_library_files": """\
+```list_library_files
+filter: /optional keyword/
+```
+List all files in the personal docs library — the user's indexed documents. Shows filename and size. Use this to discover what files are available before reading a specific one. The optional `filter` narrows results by filename substring.""",
+
+    "read_library_file": """\
+```read_library_file
+name: the-file-name.pdf
+offset: /optional char offset/
+limit: /optional max chars (default 20000)/
+```
+Read the text content of a specific file from the personal docs library by name. Pass the exact filename shown by list_library_files. Long files are returned in pages (~20000 chars): when the response includes next_offset, call again with offset=next_offset to continue reading until you have the whole document. Use for reading PDFs, notes, or other indexed documents the user has in their library.""",
+
+    "make_library_file": """\
+```make_library_file
+name: my-notes.md
+content: <full file body>
+```
+Save a text file to the personal docs library. Takes a simple filename (no path separators; just the name, e.g. 'notes.md' or 'report.txt') and the complete body text. The file appears immediately in list_library_files and is readable by read_library_file. Use this to persist research results, save notes, or store generated documents in the library. Only creates text files — cannot create PDFs, images, or binary files.""",
 
     "create_document": """\
 ```create_document
@@ -1318,6 +1347,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("documents")
     if "notes_calendar_tasks" not in domains and has(r"\bwrite\b"):
         domains.add("documents")
+    if has(r"\b(library\s+files?|personal\s+docs?|my\s+library|docs\s+library|indexed\s+documents?|uploaded\s+files?|open\s+the\s+library|browse\s+my\s+files?)\b"):
+        domains.add("library")
     if has(r"\b(search|web|google|look up|latest|news|current|weather|forecast|stock price|price of|website|url|https?://|www\.)\b"):
         domains.add("web")
     if has(

@@ -21,7 +21,7 @@ from src.constants import GENERATED_IMAGES_DIR
 server = Server("image_gen")
 
 
-async def handle_list_tools(request) -> ListToolsResult:
+async def handle_list_tools(ctx, request) -> ListToolsResult:
     return ListToolsResult(tools=[
         Tool(
             name="generate_image",
@@ -43,7 +43,7 @@ async def handle_list_tools(request) -> ListToolsResult:
 server.add_request_handler("tools/list", ListToolsRequest, handle_list_tools)
 
 
-async def handle_call_tool(request) -> CallToolResult:
+async def handle_call_tool(ctx, request) -> CallToolResult:
     name = request.params.name
     arguments = request.params.arguments or {}
     if name != "generate_image":

@@ -109,8 +109,12 @@ def _process_text_file(path: str) -> str:
         return result
 
 
-def _process_pdf(path: str, owner: str | None = None) -> str:
-    """Process PDF file with text extraction (pypdf). Uses VL model for image-heavy pages."""
+def _process_pdf(path: str, owner: str | None = None, max_chars: int | None = 15000) -> str:
+    """Process PDF file with text extraction (pypdf). Uses VL model for image-heavy pages.
+
+    ``max_chars=None`` returns the full extracted text (used when persisting the
+    document body); the default caps it for inline chat context.
+    """
     try:
         from pypdf import PdfReader
         pdf_text = ""
@@ -146,8 +150,8 @@ def _process_pdf(path: str, owner: str | None = None) -> str:
                         continue
 
         if pdf_text:
-            if len(pdf_text) > 15000:
-                pdf_text = pdf_text[:15000] + "\n[PDF content truncated]"
+            if max_chars is not None and len(pdf_text) > max_chars:
+                pdf_text = pdf_text[:max_chars] + "\n[PDF content truncated]"
             return f"\n\n[PDF content]:{pdf_text}"
         else:
             return "\n\n[PDF processed but no readable content found]"
@@ -484,9 +488,11 @@ def build_user_content(
                         )
                         title = os.path.splitext(os.path.basename(display_name))[0]
                         # Pull the PDF prose once — used as either intro_text
-                        # (form path) or the doc body (plain path).
+                        # (form path) or the doc body (plain path). Request the
+                        # FULL text here so the persisted document is not cut
+                        # off; the inline chat copy is truncated separately below.
                         try:
-                            pdf_body_text = strip_pdf_content_marker(_process_pdf(path, owner=owner))
+                            pdf_body_text = strip_pdf_content_marker(_process_pdf(path, owner=owner, max_chars=None))
                         except Exception:
                             pdf_body_text = None
 

@@ -2093,7 +2093,7 @@ def _download_attachment(uid, index, folder="INBOX", account=None):
 # ── MCP Tool Registration ──
 
 
-async def handle_list_tools(request) -> ListToolsResult:
+async def handle_list_tools(ctx, request) -> ListToolsResult:
     # The user may have multiple IMAP accounts configured. Every tool accepts an
     # optional `account` param — match by name (e.g. "work"), email address,
     # or account id. Leave it out to use the default account.
@@ -2461,7 +2461,7 @@ async def handle_list_tools(request) -> ListToolsResult:
 server.add_request_handler("tools/list", ListToolsRequest, handle_list_tools)
 
 
-async def handle_call_tool(request) -> CallToolResult:
+async def handle_call_tool(ctx, request) -> CallToolResult:
     name = request.params.name
     arguments = dict(request.params.arguments or {})
     owner = str(arguments.pop(_MCP_OWNER_ARG, "") or "").strip()

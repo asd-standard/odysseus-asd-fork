@@ -42,6 +42,12 @@ ALWAYS_AVAILABLE = frozenset({
     "ask_user",
     # Write back to the active plan (tick steps done / revise) during execution.
     "update_plan",
+    # Library tools — browse, read, and save files in the personal docs
+    # library. Always available so the agent can access indexed documents
+    # without needing ChromaDB or keyword matching.
+    "list_library_files",
+    "read_library_file",
+    "make_library_file",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -76,6 +82,9 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "glob": "Find FILES by glob pattern (e.g. '**/*.py'), newest first. Use to locate files by name/extension — prefer over bash find/ls.",
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
     "get_workspace": "Return the absolute path of the active workspace folder the user is working in. File tools are confined to it; the shell starts there but is not sandboxed. Call this first when the user refers to 'the project'/'the code'/'this folder' without giving a path, instead of asking them.",
+    "list_library_files": "List all files in the personal docs library — the user's indexed documents. Shows filename and size. Use this to see what's available before reading a specific file.",
+    "read_library_file": "Read the text content of a specific file from the personal docs library by name. Pass the exact filename shown by list_library_files. Long files page in ~20000-char chunks: the response includes next_offset when more remains, so call again with offset=next_offset to read the whole document.",
+    "make_library_file": "Save a text file to the personal docs library. Provide a name (e.g. 'notes.md') and the full body text. File appears immediately in list_library_files. Use to persist research results, save notes, or create new documents in the library.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",
     "apply_patch": "Apply a multi-file patch to source files ON DISK. Use for implementation, refactors, and bug fixes where several edits belong together. Workspace-confined and returns a diff. Prefer over bash redirects/heredocs/sed.",
@@ -457,8 +466,18 @@ class ToolIndex:
                    "open the", "open my", "open document", "open doc", "find the",
                    "find my", "find document", "read the", "read my", "show me the",
                    "show my", "the file", "my file", "the report", "the write-up",
-                   "the writeup", "saved document", "in my library", "in the library"}):
+                    "the writeup", "saved document", "in my library", "in the library"}):
             {"manage_documents", "edit_document"},
+        # Personal docs library tools (list_library_files, read_library_file)
+        frozenset({"library files", "personal docs", "docs library", "indexed documents",
+                   "uploaded documents", "my uploaded", "what files", "my files in",
+                   "documents in my", "browse my files", "file in my library",
+                   "show my library", "list my files", "open the library"}):
+            {"list_library_files", "read_library_file"},
+        frozenset({"save to library", "save as file", "write to library",
+                   "store in library", "add to library", "save this as",
+                   "save the result", "save my notes", "save to my"}):
+            {"make_library_file"},
         # Theme / UI control intent
         frozenset({"theme", "color scheme", "colors of the ui", "make it dark",
                    "make it light", "make the ui", "switch theme", "change theme",
