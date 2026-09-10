@@ -26,6 +26,16 @@ _HISTORY_INLINE_MEDIA_THRESHOLD = 200_000
 _DATA_IMAGE_RE = re.compile(r"data:image/[^;,\"]+;base64,[A-Za-z0-9+/=\s]+")
 
 
+def _auto_compact_threshold() -> int:
+    """Return the configured auto-compaction threshold (percent) for the UI."""
+    try:
+        from src.context_compactor import _compact_threshold_pct
+
+        return _compact_threshold_pct()
+    except Exception:
+        return 85
+
+
 def _history_display_content(content: Any) -> Any:
     """Return a lightweight browser-display copy of stored message content.
 
@@ -742,7 +752,7 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
                 "compacted_messages": compacted_messages,
                 "can_compact": can_compact,
                 "should_compact": pct >= 70,
-                "auto_compact_threshold": 85,
+                "auto_compact_threshold": _auto_compact_threshold(),
             }
         except Exception as e:
             logger.error(f"Context usage error {session_id}: {e}")

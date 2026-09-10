@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
 
 from sqlalchemy import case, func, or_
-from core.database import SessionLocal, Document, DocumentVersion
+from core.database import SessionLocal, Document, DocumentVersion, Folder
 from core.database import Session as DbSession
 from src.auth_helpers import get_current_user, _auth_disabled
 from src.constants import MAIL_ATTACHMENTS_DIR
@@ -71,6 +71,7 @@ from routes.document_helpers import (
     DocumentCreate, DocumentUpdate, DocumentPatch,
     _doc_to_dict, _version_to_dict,
     _verify_doc_owner, _owner_session_filter,
+    _verify_folder_owner,
     _slug, _resolve_user_upload_path, _assert_pdf_marker_upload_owned, _derive_title,
     _PDF_RENDER_SCALE,
 )
@@ -136,6 +137,15 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             _reserve_document_uploads(user, req.content)
             _assert_pdf_marker_upload_owned(request, req.content, user, upload_handler)
 
+            folder_id = None
+            if req.folder_id:
+                from core.database import Folder
+                folder = db.query(Folder).filter(Folder.id == req.folder_id).first()
+                if not folder:
+                    raise HTTPException(404, "Folder not found")
+                _verify_folder_owner(db, folder, user)
+                folder_id = folder.id
+
             # Reply drafts are keyed to the source email. If a UI/tool path tries
             # to create a second draft for the same email in the same chat,
             # update the existing draft instead so quoted thread history stays
@@ -185,6 +195,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 current_content=req.content,
                 version_count=1,
                 is_active=True,
+                folder_id=folder_id,
                 # Stamp ownership directly so the doc survives its session
                 # being deleted. Fall back to the session's owner when the
                 # request is unauthenticated (single-user / localhost bypass).
@@ -329,6 +340,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         offset: int = Query(0, ge=0),
         limit: int = Query(20, ge=1, le=50),
         archived: bool = Query(False),
+        folder_id: Optional[str] = Query(None),
     ) -> Dict[str, Any]:
         user = get_current_user(request)
         db = SessionLocal()
@@ -370,11 +382,19 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
             # Base query
             q = (
-                db.query(Document, DbSession.name)
+                db.query(Document, DbSession.name, Folder.name)
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
+                .outerjoin(Folder, Document.folder_id == Folder.id)
                 .filter(Document.is_active == True).filter(_arch_cond)
             )
             q = _owner_session_filter(q, user)
+
+            # Folder filter. `folder_id` omitted/None → all files; "unfiled" →
+            # documents with no folder; a folder id → that folder's direct docs.
+            if folder_id == "unfiled":
+                q = q.filter(Document.folder_id.is_(None))
+            elif folder_id:
+                q = q.filter(Document.folder_id == folder_id)
 
             # Search filter — split on whitespace and require EACH term to
             # match (title OR content). A single `%foo bar%` LIKE only matched
@@ -416,7 +436,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             rows = q.offset(offset).limit(limit).all()
 
             documents = []
-            for doc, session_name in rows:
+            for doc, session_name, folder_name in rows:
                 documents.append({
                     "id": doc.id,
                     "session_id": doc.session_id,
@@ -425,6 +445,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     "language": _library_language_for_document(doc),
                     "preview": (doc.current_content or "")[:500],
                     "version_count": doc.version_count,
+                    "folder_id": doc.folder_id,
+                    "folder_name": folder_name,
                     "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
                     "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
                 })
@@ -722,6 +744,16 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                         clear_active_document(doc_id)
                     except Exception as e:
                         logger.warning("Failed to clear active document %r on detach", doc_id, exc_info=e)
+            if req.folder_id is not None:
+                if req.folder_id == "":
+                    doc.folder_id = None
+                else:
+                    from core.database import Folder
+                    folder = db.query(Folder).filter(Folder.id == req.folder_id).first()
+                    if not folder:
+                        raise HTTPException(404, "Folder not found")
+                    _verify_folder_owner(db, folder, user)
+                    doc.folder_id = folder.id
             db.commit()
             db.refresh(doc)
             return _doc_to_dict(doc)

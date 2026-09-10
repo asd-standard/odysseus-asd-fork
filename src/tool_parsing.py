@@ -735,10 +735,11 @@ def _raw_openai_tool_call_to_block(value) -> Optional[ToolBlock]:
     elif tool_type in ("get_workspace", "list_models"):
         content = args.get("filter", "") if tool_type == "list_models" else ""
     elif tool_type == "list_library_files":
-        content = json.dumps({"filter": args.get("filter", "")})
+        content = json.dumps({"filter": args.get("filter", ""), "folder": args.get("folder", "")})
     elif tool_type == "read_library_file":
         content = json.dumps({
             "name": args.get("name", ""),
+            "folder": args.get("folder", ""),
             "offset": args.get("offset"),
             "limit": args.get("limit"),
         })

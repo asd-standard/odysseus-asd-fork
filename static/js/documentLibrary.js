@@ -95,6 +95,11 @@ let _libraryImportMode = false;
 let _libScrollBound = false;   // infinite-scroll listener attached once
 let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
+// ── Library folders ──
+let _libraryFolders = [];       // nested tree from GET /api/folders
+let _libraryFolderId = null;    // null = "All files", 'unfiled', or a folder id
+let _libraryUnfiledCount = 0;
+
 // ---- Library animation helpers ----
 
   /** Collapse an expanded card */
@@ -231,6 +236,9 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     dd.style.top = (rect.bottom + 2) + 'px';
     dd.style.display = 'block';
     dd.style.zIndex = String(topPortalZ());
+    dd.style.maxHeight = 'min(50vh, 420px)';
+    dd.style.overflowY = 'auto';
+    dd.style.overflowX = 'hidden';
     requestAnimationFrame(() => {
       const mr = dd.getBoundingClientRect();
       if (mr.bottom > window.innerHeight - 8) {
@@ -327,6 +335,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     if (_librarySearch) params.set('search', _librarySearch);
     if (_libraryActiveLanguage) params.set('language', _libraryActiveLanguage);
     if (_libraryArchivedView) params.set('archived', 'true');
+    if (_libraryFolderId) params.set('folder_id', _libraryFolderId);
 
     try {
       const res = await fetch(`${API_BASE}/api/documents/library?${params}`);
@@ -342,6 +351,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       _libraryTotal = data.total;
       _libraryLanguages = data.languages;
       _librarySessionCount = data.session_count;
+
+      // Keep the sidebar's "All files" count in sync without re-rendering the
+      // whole folder tree (which would drop expand/collapse state).
+      const allCount = document.querySelector('#doclib-folder-tree .doclib-folder-pseudo .doclib-folder-count');
+      if (allCount) allCount.textContent = _libraryTotal;
 
       libraryRenderStats();
       libraryRenderLangChips();
@@ -438,6 +452,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     if (_libraryDocs.length === 0) {
       if (_librarySearch || _libraryActiveLanguage) {
         grid.innerHTML = '<div class="doclib-empty">No documents match your search.</div>';
+      } else if (_libraryFolderId) {
+        grid.innerHTML = '<div class="doclib-empty">This folder is empty. Drag documents here or use the card menu to move them.</div>';
       } else {
         const _impIco = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin:0 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
         grid.innerHTML =
@@ -516,10 +532,507 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     }, true);
   }
 
+  // ── Library folders ──
+  async function folderFetch() {
+    try {
+      const res = await fetch(`${API_BASE}/api/folders`, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+      _libraryFolders = data.folders || [];
+      _libraryUnfiledCount = data.unfiled_count || 0;
+      folderRender();
+    } catch (e) { console.error('Folder fetch error:', e); }
+  }
+
+  function _flattenFolders(nodes, depth, out) {
+    for (const n of (nodes || [])) {
+      out.push({ id: n.id, name: n.name, depth: depth, children: n.children || [] });
+      _flattenFolders(n.children, depth + 1, out);
+    }
+    return out;
+  }
+
+  function _folderFind(nodes, id) {
+    for (const n of (nodes || [])) {
+      if (n.id === id) return n;
+      const hit = _folderFind(n.children, id);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function _folderCurrentLabel() {
+    if (_libraryFolderId === 'unfiled') return 'Unfiled';
+    if (!_libraryFolderId) return 'All files';
+    const node = _folderFind(_libraryFolders, _libraryFolderId);
+    return node ? node.name : 'Folder';
+  }
+
+  async function _moveDocToFolder(docId, folderId) {
+    try {
+      const body = { folder_id: folderId === '' ? '' : folderId };
+      const res = await fetch(`${API_BASE}/api/document/${docId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || res.statusText);
+      }
+      if (uiModule) uiModule.showToast(folderId === '' ? 'Moved to Unfiled' : 'Moved');
+      await Promise.all([folderFetch(), libraryFetch(false)]);
+    } catch (e) {
+      if (uiModule) uiModule.showError('Failed to move document: ' + (e.message || ''));
+    }
+  }
+
+  // ── Collapsed folder-tree picker (for "Move to…") ──
+
+  function _injectFolderPickerStyles() {
+    if (document.getElementById('doclib-folder-picker-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'doclib-folder-picker-styles';
+    s.textContent = '.doclib-fp-row{display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 8px;border-radius:6px;font-size:11px;color:var(--fg,inherit)}.doclib-fp-row:hover{background:color-mix(in srgb, var(--accent, var(--red)) 10%, transparent)}.doclib-fp-toggle{background:none;border:none;color:inherit;cursor:pointer;font-size:10px;width:12px;padding:0;opacity:0.6;flex-shrink:0}.doclib-fp-label{flex:1;text-align:left;background:none;border:none;color:inherit;cursor:pointer;font-size:11px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}';
+    document.head.appendChild(s);
+  }
+
+  function _folderPickerNode(node, depth, excluded, onPick) {
+    const wrap = document.createElement('div');
+    const row = document.createElement('div');
+    row.className = 'doclib-fp-row';
+    row.style.paddingLeft = (8 + depth * 14) + 'px';
+
+    const visibleChildren = (node.children || []).filter((c) => !excluded.has(c.id));
+    const hasChildren = visibleChildren.length > 0;
+
+    const toggle = document.createElement('button');
+    toggle.className = 'doclib-fp-toggle';
+    toggle.textContent = hasChildren ? '\u25B8' : '\u00A0';
+    toggle.style.visibility = hasChildren ? 'visible' : 'hidden';
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const kids = wrap.querySelector(':scope > .doclib-fp-children');
+      if (kids) {
+        const hidden = kids.style.display === 'none';
+        kids.style.display = hidden ? '' : 'none';
+        toggle.textContent = hidden ? '\u25BE' : '\u25B8';
+      }
+    });
+
+    const label = document.createElement('button');
+    label.className = 'doclib-fp-label';
+    label.textContent = '📁 ' + node.name;
+    label.title = node.name;
+    label.addEventListener('click', (e) => { e.stopPropagation(); onPick(node.id); });
+
+    row.appendChild(toggle);
+    row.appendChild(label);
+    wrap.appendChild(row);
+
+    const kids = document.createElement('div');
+    kids.className = 'doclib-fp-children';
+    for (const child of (node.children || [])) {
+      if (excluded.has(child.id)) continue;
+      kids.appendChild(_folderPickerNode(child, depth + 1, excluded, onPick));
+    }
+    kids.style.display = 'none';   // collapsed by default
+    wrap.appendChild(kids);
+    return wrap;
+  }
+
+  function _openFolderTreeDropdown(anchor, opts) {
+    opts = opts || {};
+    _injectFolderPickerStyles();
+    document.querySelectorAll('._lib-dd').forEach(dismissOrRemove);
+    const dd = document.createElement('div');
+    dd.className = 'dropdown session-dropdown-menu _lib-dd';
+
+    if (opts.topLabel) {
+      const top = document.createElement('div');
+      top.className = 'dropdown-item-compact';
+      top.innerHTML = '<span>' + opts.topLabel + '</span>';
+      top.addEventListener('click', (e) => { e.stopPropagation(); teardown(); if (opts.topAction) opts.topAction(); });
+      dd.appendChild(top);
+    }
+
+    const treeWrap = document.createElement('div');
+    const excluded = opts.exclude || new Set();
+    const onPick = (id) => { teardown(); if (opts.onPick) opts.onPick(id); };
+    for (const node of _libraryFolders) {
+      if (excluded.has(node.id)) continue;
+      treeWrap.appendChild(_folderPickerNode(node, 0, excluded, onPick));
+    }
+    dd.appendChild(treeWrap);
+
+    document.body.appendChild(dd);
+    const rect = anchor.getBoundingClientRect();
+    dd.style.right = (window.innerWidth - rect.right) + 'px';
+    dd.style.top = (rect.bottom + 2) + 'px';
+    dd.style.display = 'block';
+    dd.style.zIndex = String(topPortalZ());
+    dd.style.maxHeight = 'min(50vh, 420px)';
+    dd.style.overflowY = 'auto';
+    dd.style.overflowX = 'hidden';
+    requestAnimationFrame(() => {
+      const mr = dd.getBoundingClientRect();
+      if (mr.bottom > window.innerHeight - 8) {
+        dd.style.top = (rect.top - mr.height - 2) + 'px';
+      }
+      if (mr.left < 8) { dd.style.left = '8px'; dd.style.right = 'auto'; }
+    });
+
+    let _unreg = () => {};
+    const teardown = () => {
+      _unreg(); _unreg = () => {};
+      document.removeEventListener('click', close);
+      dd.remove();
+    };
+    const close = (e) => { if (!dd.contains(e.target)) teardown(); };
+    setTimeout(() => document.addEventListener('click', close), 0);
+    _unreg = registerMenuDismiss(teardown);
+    dd._dismiss = teardown;
+
+    // Swipe-down-to-dismiss (mirrors _showLibDropdown).
+    let _swipeStart = null;
+    let _swipeDy = 0;
+    dd.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      _swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      _swipeDy = 0;
+      dd.style.transition = '';
+    }, { passive: true });
+    dd.addEventListener('touchmove', (e) => {
+      if (!_swipeStart || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - _swipeStart.x;
+      const dy = e.touches[0].clientY - _swipeStart.y;
+      if (Math.abs(dy) < Math.abs(dx)) { _swipeStart = null; return; }
+      if (dy > 0) {
+        _swipeDy = dy;
+        dd.style.transform = 'translateY(' + dy + 'px)';
+        dd.style.opacity = String(Math.max(0.3, 1 - dy / 240));
+      }
+    }, { passive: true });
+    dd.addEventListener('touchend', () => {
+      if (!_swipeStart) return;
+      _swipeStart = null;
+      if (_swipeDy > 60) {
+        dd.style.transition = 'transform 0.15s ease, opacity 0.15s ease';
+        dd.style.transform = 'translateY(120px)';
+        dd.style.opacity = '0';
+        _unreg(); _unreg = () => {};
+        document.removeEventListener('click', close);
+        setTimeout(() => dd.remove(), 160);
+      } else {
+        dd.style.transition = 'transform 0.18s ease, opacity 0.18s ease';
+        dd.style.transform = '';
+        dd.style.opacity = '';
+      }
+    });
+  }
+
+  // Collapsed-tree picker for moving a document. anchor is a DOM element the
+  // dropdown positions against.
+  function _openDocMovePicker(anchor, doc) {
+    _openFolderTreeDropdown(anchor, {
+      topLabel: 'Unfiled (root)',
+      topAction: () => _moveDocToFolder(doc.id, ''),
+      onPick: (folderId) => _moveDocToFolder(doc.id, folderId),
+    });
+  }
+
+  async function folderCreate(parentId) {
+    const name = await uiModule.styledPrompt('Name the new folder.', {
+      title: 'New folder', placeholder: 'e.g. Work', confirmText: 'Create', maxLength: 120,
+    });
+    if (name == null) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/folders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ name, parent_id: parentId || null }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || res.statusText);
+      }
+      await folderFetch();
+      if (parentId) folderRender();
+    } catch (e) {
+      if (uiModule) uiModule.showError('Failed to create folder: ' + (e.message || ''));
+    }
+  }
+
+  async function folderRename(id, currentName) {
+    const name = await uiModule.styledPrompt(`Rename "${currentName}".`, {
+      title: 'Rename folder', defaultValue: currentName, confirmText: 'Rename', maxLength: 120,
+    });
+    if (name == null || name === currentName) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/folders/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || res.statusText);
+      }
+      await folderFetch();
+      if (_libraryFolderId === id) libraryFetch(false);
+    } catch (e) {
+      if (uiModule) uiModule.showError('Failed to rename folder: ' + (e.message || ''));
+    }
+  }
+
+  async function folderDelete(id, name) {
+    const ok = await uiModule.styledConfirm(`Delete folder "${name}" and everything inside it?`, {
+      title: 'Delete folder', confirmText: 'Delete', cancelText: 'Cancel', danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/folders/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || res.statusText);
+      }
+      if (_libraryFolderId === id) _libraryFolderId = null;
+      await folderFetch();
+      await libraryFetch(false);
+    } catch (e) {
+      if (uiModule) uiModule.showError('Failed to delete folder: ' + (e.message || ''));
+    }
+  }
+
+  function _folderDescendants(id) {
+    const node = _folderFind(_libraryFolders, id);
+    const ids = new Set();
+    if (node) _flattenFolders(node.children, 0, []).forEach(f => ids.add(f.id));
+    return ids;
+  }
+
+  async function _moveFolderTo(id, parentId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/folders/${id}/move`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ parent_id: parentId || null }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || res.statusText);
+      }
+      await folderFetch();
+    } catch (e) {
+      if (uiModule) uiModule.showError('Failed to move folder: ' + (e.message || ''));
+    }
+  }
+
+  // Folder context menu: Rename / New subfolder / Move to… / Delete.
+  function _openFolderMenu(anchor, node) {
+    const descendants = _folderDescendants(node.id);
+    const items = [
+      { label: 'Rename', action: () => folderRename(node.id, node.name) },
+      {
+        label: 'Copy name',
+        action: async () => {
+          const name = node.name || '';
+          try {
+            if (uiModule && uiModule.copyToClipboard) {
+              await uiModule.copyToClipboard(name);
+            } else {
+              await navigator.clipboard.writeText(name);
+            }
+            if (uiModule) uiModule.showToast('Name copied');
+          } catch {
+            if (uiModule) uiModule.showError('Failed to copy name');
+          }
+        },
+      },
+      { label: 'New subfolder', action: () => folderCreate(node.id) },
+    ];
+    const excluded = new Set([node.id, ...descendants]);
+    items.push({
+      label: 'Move to…',
+      action: () => _openFolderTreeDropdown(anchor, {
+        topLabel: 'Root',
+        topAction: () => _moveFolderTo(node.id, null),
+        onPick: (folderId) => _moveFolderTo(node.id, folderId),
+        exclude: excluded,
+      }),
+    });
+    items.push({ label: 'Delete', danger: true, action: () => folderDelete(node.id, node.name) });
+    _showLibDropdown(anchor, items);
+  }
+
+  function folderSelect(id) {
+    _libraryFolderId = id;
+    _folderSetActive();
+    libraryFetch(false);
+  }
+
+  function _folderSetActive() {
+    const tree = document.getElementById('doclib-folder-tree');
+    if (tree) {
+      // dataset.folderId serializes the null "All files" id to the string "null".
+      const key = _libraryFolderId === null ? 'null' : String(_libraryFolderId);
+      tree.querySelectorAll('.doclib-folder-row').forEach((row) => {
+        row.classList.toggle('active', row.dataset.folderId === key);
+      });
+    }
+    const crumb = document.getElementById('doclib-folder-crumb');
+    if (crumb) crumb.textContent = _libraryFolderId ? ('in ' + _folderCurrentLabel()) : '';
+  }
+
+  function _folderNodeRow(node, depth) {
+    const row = document.createElement('div');
+    row.className = 'doclib-folder-row';
+    row.dataset.folderId = node.id;
+    row.draggable = true;
+    row.style.paddingLeft = (8 + depth * 14) + 'px';
+
+    row.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      e.dataTransfer.setData('application/x-odysseus-folder', node.id);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    const toggle = document.createElement('button');
+    toggle.className = 'doclib-folder-toggle';
+    const hasChildren = (node.children || []).length > 0;
+    toggle.textContent = hasChildren ? '\u25B8' : '\u00A0';
+    toggle.style.visibility = hasChildren ? 'visible' : 'hidden';
+    row.appendChild(toggle);
+
+    const label = document.createElement('button');
+    label.className = 'doclib-folder-label';
+    label.textContent = node.name;
+    label.title = node.name;
+    row.appendChild(label);
+
+    const count = document.createElement('span');
+    count.className = 'doclib-folder-count';
+    count.textContent = node.doc_count || 0;
+    row.appendChild(count);
+
+    const menu = document.createElement('button');
+    menu.className = 'doclib-folder-menu';
+    menu.textContent = '\u22EF';
+    menu.addEventListener('click', (e) => { e.stopPropagation(); _openFolderMenu(menu, node); });
+    row.appendChild(menu);
+
+    if (_libraryFolderId === node.id) row.classList.add('active');
+
+    label.addEventListener('click', () => {
+      // Clicking the chevron area toggles; clicking the label selects.
+      folderSelect(node.id);
+    });
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const kids = row.nextElementSibling;
+      if (kids && kids.classList.contains('doclib-folder-children')) {
+        const hidden = kids.style.display === 'none';
+        kids.style.display = hidden ? '' : 'none';
+        toggle.textContent = hidden ? '\u25BE' : '\u25B8';
+      }
+    });
+    row.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('doclib-folder-drop'); });
+    row.addEventListener('dragleave', () => row.classList.remove('doclib-folder-drop'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      row.classList.remove('doclib-folder-drop');
+      const docId = e.dataTransfer.getData('application/x-odysseus-doc');
+      const folderId = e.dataTransfer.getData('application/x-odysseus-folder');
+      if (docId) { _moveDocToFolder(docId, node.id); }
+      else if (folderId && folderId !== node.id) { _moveFolderTo(folderId, node.id); }
+    });
+    return row;
+  }
+
+  function _folderTreeNode(node, depth) {
+    const frag = document.createDocumentFragment();
+    const row = _folderNodeRow(node, depth);
+    frag.appendChild(row);
+    const kids = document.createElement('div');
+    kids.className = 'doclib-folder-children';
+    for (const child of (node.children || [])) {
+      kids.appendChild(_folderTreeNode(child, depth + 1));
+    }
+    kids.style.display = 'none';
+    frag.appendChild(kids);
+    return frag;
+  }
+
+  function _dropZoneRow(id, label, count, opts) {
+    const acceptDoc = opts.acceptDoc;
+    const acceptFolder = opts.acceptFolder;
+    const docTarget = opts.docTarget;          // folder id, or '' for unfiled
+    const folderTarget = opts.folderTarget;    // folder id, or null for root
+    const row = document.createElement('div');
+    row.className = 'doclib-folder-row doclib-folder-pseudo';
+    row.dataset.folderId = id;
+    row.style.paddingLeft = '8px';
+    if (_libraryFolderId === id) row.classList.add('active');
+
+    const labelBtn = document.createElement('button');
+    labelBtn.className = 'doclib-folder-label';
+    labelBtn.textContent = label;
+    labelBtn.addEventListener('click', () => folderSelect(id));
+    row.appendChild(labelBtn);
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'doclib-folder-count';
+    countSpan.textContent = count;
+    row.appendChild(countSpan);
+
+    row.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('doclib-folder-drop'); });
+    row.addEventListener('dragleave', () => row.classList.remove('doclib-folder-drop'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      row.classList.remove('doclib-folder-drop');
+      const docId = e.dataTransfer.getData('application/x-odysseus-doc');
+      const folderId = e.dataTransfer.getData('application/x-odysseus-folder');
+      if (docId && acceptDoc) { _moveDocToFolder(docId, docTarget); }
+      else if (folderId && acceptFolder) { _moveFolderTo(folderId, folderTarget); }
+    });
+    return row;
+  }
+
+  function folderRender() {
+    if (!document.getElementById('doclib-folder-styles')) {
+      const s = document.createElement('style');
+      s.id = 'doclib-folder-styles';
+      s.textContent = '.doclib-folder-row{display:flex;align-items:center;gap:4px;padding:2px 4px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--fg,inherit)}.doclib-folder-row:hover{background:color-mix(in srgb, var(--accent, var(--red)) 12%, transparent)}.doclib-folder-row.active{background:color-mix(in srgb, var(--accent, var(--red)) 18%, transparent)}.doclib-folder-label{flex:1;text-align:left;background:none;border:none;color:inherit;cursor:pointer;font-size:12px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.doclib-folder-count{font-size:10px;opacity:0.5}.doclib-folder-menu{background:none;border:none;color:inherit;cursor:pointer;opacity:0;padding:0 2px;font-size:12px;flex-shrink:0}.doclib-folder-row:hover .doclib-folder-menu{opacity:0.6}.doclib-folder-menu:hover{opacity:1!important}.doclib-folder-toggle{background:none;border:none;color:inherit;cursor:pointer;font-size:10px;width:12px;padding:0;opacity:0.6;flex-shrink:0}.doclib-folder-pseudo .doclib-folder-label{font-weight:600}.doclib-folder-drop{outline:1px dashed var(--accent, var(--red));background:color-mix(in srgb, var(--accent, var(--red)) 10%, transparent)}';
+      document.head.appendChild(s);
+    }
+    const tree = document.getElementById('doclib-folder-tree');
+    if (!tree) return;
+    tree.innerHTML = '';
+    tree.appendChild(_dropZoneRow(null, 'All files', _libraryTotal, { acceptDoc: false, acceptFolder: true, folderTarget: null }));
+    tree.appendChild(_dropZoneRow('unfiled', 'Unfiled', _libraryUnfiledCount, { acceptDoc: true, acceptFolder: false, docTarget: '' }));
+    for (const node of _libraryFolders) {
+      tree.appendChild(_folderTreeNode(node, 0));
+    }
+    const crumb = document.getElementById('doclib-folder-crumb');
+    if (crumb) crumb.textContent = _libraryFolderId ? ('in ' + _folderCurrentLabel()) : '';
+  }
+
+  // ── End library folders ──
+
   function libraryCreateCard(doc) {
     const card = document.createElement('div');
     card.className = 'doclib-card memory-item';
     card.dataset.docId = doc.id;
+    card.draggable = true;
+    card.addEventListener('dragstart', (e) => {
+      if (_librarySelectMode) return;
+      e.dataTransfer.setData('application/x-odysseus-doc', doc.id);
+      e.dataTransfer.effectAllowed = 'move';
+    });
     if (_librarySelectMode && _librarySelectedIds.has(doc.id)) {
       card.classList.add('selected');
     }
@@ -700,6 +1213,39 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     cloneItem.title = 'Clone to active session';
     cloneItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryImportDocument(doc); });
     dropdown.appendChild(cloneItem);
+
+    // Copy name
+    const _copyIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>';
+    const copyNameItem = document.createElement('button');
+    copyNameItem.className = 'dropdown-item-compact';
+    copyNameItem.style.cssText = 'background:none;border:none;width:100%;';
+    copyNameItem.innerHTML = _di(_copyIco) + '<span>Copy name</span>';
+    copyNameItem.title = 'Copy the file name to the clipboard';
+    copyNameItem.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideCardDropdown();
+      const name = doc.title || '';
+      try {
+        if (uiModule && uiModule.copyToClipboard) {
+          await uiModule.copyToClipboard(name);
+        } else {
+          await navigator.clipboard.writeText(name);
+        }
+        if (uiModule) uiModule.showToast('Name copied');
+      } catch {
+        if (uiModule) uiModule.showError('Failed to copy name');
+      }
+    });
+    dropdown.appendChild(copyNameItem);
+
+    // Move to folder…
+    const _moveIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 17 15 14"/></svg>';
+    const moveItem = document.createElement('button');
+    moveItem.className = 'dropdown-item-compact';
+    moveItem.style.cssText = 'background:none;border:none;width:100%;';
+    moveItem.innerHTML = _di(_moveIco) + '<span>Move to…</span>';
+    moveItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); _openDocMovePicker(menuBtn, doc); });
+    dropdown.appendChild(moveItem);
 
     // Export
     const _exportIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
@@ -1598,7 +2144,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     modal.className = 'modal';
     modal.id = 'doclib-modal';
     modal.innerHTML = `
-      <div class="modal-content doclib-modal-content" style="width:min(640px, 92vw);background:var(--bg);">
+      <div class="modal-content doclib-modal-content" style="width:min(900px, 94vw);background:var(--bg);">
         <div class="modal-header">
           <!-- Header title + icon mirror the currently-active sub-tab (Chats /
                Documents / Research / Archive) so the user sees ONE icon at
@@ -1702,30 +2248,41 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
               <button class="memory-toolbar-btn" id="doclib-import-file-btn" title="Import files from disk" style="margin-left:auto;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:2px;"><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="21" x2="19" y2="21"/></svg> Import</button>
               <button class="memory-toolbar-btn" id="doclib-create-btn" title="Create new blank document"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> Create</button>
             </div>
-            <p class="memory-desc doclib-desc">Open documents in a session, clone to a new or import new files.</p>
-            <div class="memory-toolbar">
-              <div class="memory-category-filters">
-                <select class="memory-sort-select" id="doclib-sort">
-                  <option value="recent">Recent</option>
-                  <option value="oldest">Oldest</option>
-                  <option value="edits">Most edits</option>
-                  <option value="alpha">A\u2013Z</option>
-                </select>
-                <button class="memory-toolbar-btn" id="doclib-select-btn" title="Select documents">Select</button>
-                <button class="memory-toolbar-btn" id="doclib-tidy-btn" title="Tidy: remove empty / junk / duplicate documents">Tidy</button>
+            <div style="display:flex;flex:1;min-height:0;">
+              <div id="doclib-folder-sidebar" style="width:200px;min-width:160px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:4px 4px 8px 6px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;padding:0 4px;">
+                  <span style="font-size:10px;opacity:0.6;text-transform:uppercase;letter-spacing:0.05em;">Folders</span>
+                  <button class="memory-toolbar-btn" id="doclib-new-folder-btn" title="New folder" style="padding:1px 7px;font-size:12px;line-height:1;">+</button>
+                </div>
+                <div id="doclib-folder-tree"></div>
               </div>
-              <input type="text" id="doclib-search" placeholder="Search titles &amp; content\u2026" class="memory-search-input" />
-              <div id="doclib-chips" class="doclib-lang-chips"></div>
+              <div style="flex:1;display:flex;flex-direction:column;min-width:0;padding-left:10px;">
+                <p class="memory-desc doclib-desc">Open documents in a session, clone to a new or import new files. <span id="doclib-folder-crumb" style="font-weight:600;opacity:0.75;"></span></p>
+                <div class="memory-toolbar">
+                  <div class="memory-category-filters">
+                    <select class="memory-sort-select" id="doclib-sort">
+                      <option value="recent">Recent</option>
+                      <option value="oldest">Oldest</option>
+                      <option value="edits">Most edits</option>
+                      <option value="alpha">A\u2013Z</option>
+                    </select>
+                    <button class="memory-toolbar-btn" id="doclib-select-btn" title="Select documents">Select</button>
+                    <button class="memory-toolbar-btn" id="doclib-tidy-btn" title="Tidy: remove empty / junk / duplicate documents">Tidy</button>
+                  </div>
+                  <input type="text" id="doclib-search" placeholder="Search titles &amp; content\u2026" class="memory-search-input" />
+                  <div id="doclib-chips" class="doclib-lang-chips"></div>
+                </div>
+                <input type="file" id="doclib-file-input" multiple style="display:none" />
+                <div id="doclib-bulk-bar" class="memory-bulk-bar hidden" style="margin-bottom:5px;">
+                  <label class="memory-bulk-check-all" style="position:relative;top:0px;left:1px;"><input type="checkbox" id="doclib-select-all" /> All</label>
+                  <span id="doclib-selected-count">0 Selected</span>
+                  <button id="doclib-bulk-actions" class="memory-toolbar-btn" style="position:relative;top:-2px;margin-left:auto;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>Actions <span style="opacity:0.55;font-size:9px;">&#9660;</span></button>
+                  <button id="doclib-bulk-cancel" class="memory-toolbar-btn" title="Cancel (Esc)" style="margin-left:4px;margin-right:4px;padding:3px 6px;position:relative;top:-2px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                </div>
+                <div class="doclib-grid" id="doclib-grid"></div>
+                <button class="doclib-load-more" id="doclib-load-more" style="display:none">Load more</button>
+              </div>
             </div>
-            <input type="file" id="doclib-file-input" multiple style="display:none" />
-            <div id="doclib-bulk-bar" class="memory-bulk-bar hidden" style="margin-bottom:5px;">
-              <label class="memory-bulk-check-all" style="position:relative;top:0px;left:1px;"><input type="checkbox" id="doclib-select-all" /> All</label>
-              <span id="doclib-selected-count">0 Selected</span>
-              <button id="doclib-bulk-actions" class="memory-toolbar-btn" style="position:relative;top:-2px;margin-left:auto;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>Actions <span style="opacity:0.55;font-size:9px;">&#9660;</span></button>
-              <button id="doclib-bulk-cancel" class="memory-toolbar-btn" title="Cancel (Esc)" style="margin-left:4px;margin-right:4px;padding:3px 6px;position:relative;top:-2px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-            </div>
-            <div class="doclib-grid" id="doclib-grid"></div>
-            <button class="doclib-load-more" id="doclib-load-more" style="display:none">Load more</button>
           </div>
         </div>
       </div>
@@ -3383,6 +3940,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     // Toggle active on tool button
     const btn = document.getElementById('tool-doclib-btn');
     if (btn) btn.classList.add('active');
+
+    // Folder sidebar wiring
+    const newFolderBtn = document.getElementById('doclib-new-folder-btn');
+    if (newFolderBtn) newFolderBtn.addEventListener('click', () => folderCreate(null));
+    folderFetch();
 
     libraryFetch(false);
     if (window.innerWidth >= 768) searchInput.focus();

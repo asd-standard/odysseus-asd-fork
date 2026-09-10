@@ -165,11 +165,12 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_library_files",
-            "description": "List all files in the personal docs library (indexed documents the user has added). Shows file names and sizes. Use this to discover what files are available before reading one with read_library_file.",
+            "description": "List files in the document library. With no `folder`, shows the root view: top-level folders and unfiled documents. Pass `folder` (a folder id or name) to list that folder's child folders and documents.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filter": {"type": "string", "description": "Optional keyword to filter file names"}
+                    "filter": {"type": "string", "description": "Optional keyword to filter file names"},
+                    "folder": {"type": "string", "description": "Optional folder id or name; lists that folder's contents instead of the root"}
                 },
                 "required": []
             }
@@ -179,15 +180,16 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "read_library_file",
-            "description": "Read the text content of a specific file from the personal docs library. Use list_library_files first to see available files, then pass the exact name shown there. Long files are returned in pages of ~20000 chars: the response includes next_offset when more content remains, so keep calling with offset=next_offset to read the whole file.",
+            "description": "Read the text content of a document from the library, OR bulk-read every document in a folder. Pass `name` for a single document (exact name shown by list_library_files). Pass `folder` (a folder id or name) to read every document in that folder concatenated with per-file headers. Long content is paged in ~20000-char chunks: the response includes next_offset when more remains, so keep calling with offset=next_offset.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Exact file name as shown by list_library_files"},
+                    "name": {"type": "string", "description": "Exact file name as shown by list_library_files (single-file read)"},
+                    "folder": {"type": "string", "description": "Folder id or name; read every file in the folder (bulk read)"},
                     "offset": {"type": "integer", "description": "Character offset to start reading from (use next_offset from a previous response to continue reading a long file)"},
                     "limit": {"type": "integer", "description": "Maximum number of characters to return (default 20000, max 20000)"}
                 },
-                "required": ["name"]
+                "required": []
             }
         }
     },
@@ -195,7 +197,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "make_library_file",
-            "description": "Save a text file to the personal docs library. Provide a filename (e.g. 'notes.md') and the full text content. The file will be immediately available via list_library_files and read_library_file. Only supports text-based formats — NOT PDFs, images, or binary files.",
+            "description": "Create a new document in the library (Unfiled). Provide a filename (e.g. 'notes.md') and the full text content. The document is immediately available via list_library_files and read_library_file. Only supports text-based formats — NOT PDFs, images, or binary files.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1487,10 +1489,11 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type == "get_workspace":
         content = ""
     elif tool_type == "list_library_files":
-        content = json.dumps({"filter": args.get("filter", "")})
+        content = json.dumps({"filter": args.get("filter", ""), "folder": args.get("folder", "")})
     elif tool_type == "read_library_file":
         content = json.dumps({
             "name": args.get("name", ""),
+            "folder": args.get("folder", ""),
             "offset": args.get("offset"),
             "limit": args.get("limit"),
         })

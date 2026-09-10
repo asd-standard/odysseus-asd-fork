@@ -2323,6 +2323,18 @@
                 <label class="settings-label">Max steps per message</label>
                 <input id="set-agentMaxRounds" type="text" inputmode="numeric" placeholder="20" class="settings-select" style="width:120px;">
               </div>
+              <div class="settings-row">
+                <label class="settings-label">Input token budget</label>
+                <input id="set-agentInputBudget" type="text" inputmode="numeric" placeholder="6000 = auto, 0 = off" class="settings-select" style="width:120px;" title="6000 = auto (scale to the model's context window). Set another value to cap the agent's input; 0 disables soft-trimming.">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Input budget hard max</label>
+                <input id="set-agentHardMax" type="text" inputmode="numeric" placeholder="200000" class="settings-select" style="width:120px;" title="Ceiling for the auto-scaled input budget. No effect on an explicit budget.">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Auto-compact threshold (%)</label>
+                <input id="set-agentCompactThreshold" type="text" inputmode="numeric" placeholder="85" class="settings-select" style="width:120px;" title="Context usage percentage at which auto-compaction triggers.">
+              </div>
               <div id="set-agentMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
             </div>
           </div>

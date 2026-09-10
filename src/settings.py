@@ -124,6 +124,10 @@ DEFAULT_SETTINGS = {
     # want to actually use (e.g. 900_000 to fill a 1M-context model). See
     # `compute_input_token_budget`.
     "agent_input_token_hard_max": 200_000,
+    # Percentage of the model's context window at which auto-compaction kicks in
+    # (see src.context_compactor.COMPACT_THRESHOLD, previously a hardcoded 85%).
+    # Clamped to 50..99 on save; values below 50 would compact almost every turn.
+    "auto_compact_threshold": 85,
     "agent_stream_timeout_seconds": 300,
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each

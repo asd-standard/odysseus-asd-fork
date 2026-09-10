@@ -1,7 +1,6 @@
-import asyncio
-
 import mcp_servers.memory_server as memory_server
 from src.memory import MemoryManager
+from tests.helpers.mcp_call import call_tool_sync
 
 
 class FakeVector:
@@ -19,7 +18,7 @@ class FakeVector:
 
 
 def _tool_text(arguments):
-    result = asyncio.run(memory_server.call_tool("manage_memory", arguments))
+    result = call_tool_sync(memory_server, "manage_memory", arguments)
     return result[0].text
 
 

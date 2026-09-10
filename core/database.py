@@ -307,10 +307,34 @@ class Document(TimestampMixin, Base):
     source_email_folder      = Column(String, nullable=True)
     source_email_account_id  = Column(String, nullable=True)
     source_email_message_id  = Column(String, nullable=True, index=True)
+    # Folder in the library file-manager. NULL = "Unfiled" (root). The folder
+    # itself is a row in the `folders` table (see Folder below); deletion of a
+    # folder sets its documents back to NULL via ondelete="SET NULL".
+    folder_id       = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True)
 
     session  = relationship("Session", backref=backref("documents", cascade="save-update, merge"))
     versions = relationship("DocumentVersion", back_populates="document",
                            cascade="all, delete-orphan", order_by="DocumentVersion.version_number")
+    folder   = relationship("Folder", back_populates="documents")
+
+
+class Folder(TimestampMixin, Base):
+    """A library folder — virtual, owner-scoped, arbitrarily nestable.
+
+    Mirrors the ``sessions.folder`` idea but as a first-class table so the
+    library can offer an OS-like tree: folders have a parent (``parent_id``),
+    and documents reference their folder via ``Document.folder_id``.
+    """
+    __tablename__ = "folders"
+
+    id          = Column(String, primary_key=True, index=True)
+    name        = Column(String, nullable=False)
+    parent_id   = Column(String, ForeignKey("folders.id", ondelete="CASCADE"), nullable=True, index=True)
+    owner       = Column(String, nullable=True, index=True)
+    sort_order  = Column(Integer, default=0, nullable=False)
+
+    parent      = relationship("Folder", remote_side=[id], backref=backref("children", order_by=lambda: (Folder.sort_order, Folder.name)))
+    documents   = relationship("Document", back_populates="folder")
 
 
 class DocumentVersion(Base):
@@ -840,6 +864,68 @@ def _migrate_add_document_archived_column():
             logging.getLogger(__name__).info("Migrated: added 'archived' to documents")
     except Exception as e:
         logging.getLogger(__name__).warning(f"documents.archived migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_add_folders_table():
+    """Create the `folders` table (library folder tree). Idempotent + additive:
+    existing installs get an empty table; fresh installs already have it via
+    ``Base.metadata.create_all``."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS folders (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                parent_id VARCHAR,
+                owner VARCHAR,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_folders_parent_id ON folders(parent_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_folders_owner ON folders(owner)")
+        conn.commit()
+        logging.getLogger(__name__).info("Migrated: created 'folders' table")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"folders table migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_add_document_folder_column():
+    """Add ``folder_id`` to documents + index. Idempotent; NULL = unfiled."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(documents)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "folder_id" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN folder_id VARCHAR")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_documents_folder_id ON documents(folder_id)")
+        conn.commit()
+        logging.getLogger(__name__).info("Migrated: added 'folder_id' to documents")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"documents.folder_id migration failed: {e}")
     finally:
         try:
             conn.close()
@@ -1938,6 +2024,8 @@ def init_db():
     _migrate_add_task_run_model_column()
     _migrate_add_owner_column()
     _migrate_add_document_archived_column()
+    _migrate_add_folders_table()
+    _migrate_add_document_folder_column()
     _migrate_add_last_message_at_column()
     _migrate_add_folder_column()
     _migrate_add_token_columns()

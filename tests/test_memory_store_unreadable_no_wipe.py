@@ -32,6 +32,7 @@ import os
 import pytest
 
 from src.memory import MemoryManager, MemoryStoreUnreadable
+from tests.helpers.mcp_call import call_tool_sync
 
 _SEED = [
     {"id": "m1", "text": "user prefers dark mode", "owner": "alice"},
@@ -215,9 +216,11 @@ def test_mcp_memory_add_does_not_overwrite_unreadable_store(tmp_path, monkeypatc
     for key in memory_server._OWNER_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
 
-    result = asyncio.run(memory_server.call_tool(
-        "manage_memory", {"action": "add", "text": "user prefers tabs"}
-    ))
+    result = call_tool_sync(
+        memory_server,
+        "manage_memory",
+        {"action": "add", "text": "user prefers tabs"},
+    )
 
     assert _on_disk(manager) == before, "the unreadable store was overwritten"
     assert b"m3" in _on_disk(manager)

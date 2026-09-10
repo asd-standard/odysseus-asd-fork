@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from core.database import Document, DocumentVersion
+from core.database import Document, DocumentVersion, Folder
 from core.database import Session as DbSession
 from src.auth_helpers import _auth_disabled
 from src.upload_handler import UploadHandler
@@ -25,6 +25,7 @@ class DocumentCreate(BaseModel):
     title: str = "Untitled"
     language: Optional[str] = None
     content: str = ""
+    folder_id: Optional[str] = None
 
 class DocumentUpdate(BaseModel):
     content: str
@@ -35,6 +36,7 @@ class DocumentPatch(BaseModel):
     title: Optional[str] = None
     language: Optional[str] = None
     session_id: Optional[str] = None  # link/unlink document to a session
+    folder_id: Optional[str] = None   # move into a library folder (None = unfiled)
 
 
 # ---- Helpers ----
@@ -57,6 +59,8 @@ def _doc_to_dict(doc: Document) -> Dict[str, Any]:
         "source_email_folder":     getattr(doc, "source_email_folder", None),
         "source_email_account_id": getattr(doc, "source_email_account_id", None),
         "source_email_message_id": getattr(doc, "source_email_message_id", None),
+        "folder_id":               getattr(doc, "folder_id", None),
+        "folder_name":             getattr(getattr(doc, "folder", None), "name", None),
     }
 
 def _version_to_dict(v: DocumentVersion) -> Dict[str, Any]:
@@ -113,6 +117,25 @@ def _owner_session_filter(q, user):
         return q.filter(False)
     return q.filter(Document.owner == user)
 
+
+
+def _folder_owner_filter(q, user):
+    """Restrict a folders query to those owned by `user` (mirrors _owner_session_filter)."""
+    if not user:
+        if user == "" or _auth_disabled():
+            return q
+        return q.filter(False)
+    return q.filter(Folder.owner == user)
+
+
+def _verify_folder_owner(db, folder, user: Optional[str]):
+    """Raise 404 unless `user` owns `folder` (or auth is disabled)."""
+    if user is None and _auth_disabled():
+        return
+    if folder.owner is not None and folder.owner != user:
+        raise HTTPException(404, "Folder not found")
+    if folder.owner is None and user:
+        raise HTTPException(404, "Folder not found")
 
 
 def _slug(name: str) -> str:

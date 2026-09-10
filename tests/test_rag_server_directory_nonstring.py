@@ -4,18 +4,17 @@
 try, so a non-string `directory` in the tool args (e.g. a number) raised
 AttributeError out of call_tool. Coerce non-strings to "".
 """
-import asyncio
-
 import pytest
 
 pytest.importorskip("mcp")
 
 import mcp_servers.rag_server as rs
+from tests.helpers.mcp_call import call_tool_sync
 
 
 def _call(monkeypatch, action, directory):
     monkeypatch.setattr(rs, "_ensure_init", lambda: None)
-    return asyncio.run(rs.call_tool("manage_rag", {"action": action, "directory": directory}))
+    return call_tool_sync(rs, "manage_rag", {"action": action, "directory": directory})
 
 
 def test_add_directory_non_string_does_not_crash(monkeypatch):

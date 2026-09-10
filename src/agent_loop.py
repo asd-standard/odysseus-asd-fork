@@ -483,11 +483,12 @@ _DOMAIN_RULES = {
 - Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
     "library": """\
 ## Library rules
-- The personal docs library contains the user's indexed documents (PDFs, notes, spreadsheets, etc.).
+- The document library holds the user's documents (notes, reports, spreadsheets, etc.), organized into folders.
 - Use `list_library_files` to discover what's available; filter by keyword when the user names a specific document.
-- Use `read_library_file` to read the full content of a specific file by the exact name shown in the listing.
-- Use `make_library_file` to save text content as a file in the library (e.g. save research results, notes, reports).
-- These tools read from the library index; do not use `read_file`/`grep`/`bash` to find library documents — those only see workspace files.""",
+- Use `list_library_files folder=<name|id>` to list a folder's contents; with no folder it shows folders + unfiled documents.
+- Use `read_library_file folder=<name|id>` to read EVERY document in a folder in one call; use `name=` for a single document.
+- Use `make_library_file` to create a new document in the library (it lands in 'Unfiled documents'; e.g. save research results, notes, reports).
+- These tools read the document library; do not use `read_file`/`grep`/`bash` to find library documents — those only see workspace files.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -623,23 +624,25 @@ Return the absolute path of the active workspace folder. File tools are CONFINED
     "list_library_files": """\
 ```list_library_files
 filter: /optional keyword/
+folder: /optional folder id or name/
 ```
-List all files in the personal docs library — the user's indexed documents. Shows filename and size. Use this to discover what files are available before reading a specific one. The optional `filter` narrows results by filename substring.""",
+List files in the document library. With no `folder`, lists the ROOT view — top-level folders and unfiled documents. Pass `folder` (a folder id or name) to list that folder's child folders and documents. Use this to discover folders and files before reading.""",
 
     "read_library_file": """\
 ```read_library_file
-name: the-file-name.pdf
+name: the-file-name.md
+folder: /or a folder id/name to read every file in it/
 offset: /optional char offset/
 limit: /optional max chars (default 20000)/
 ```
-Read the text content of a specific file from the personal docs library by name. Pass the exact filename shown by list_library_files. Long files are returned in pages (~20000 chars): when the response includes next_offset, call again with offset=next_offset to continue reading until you have the whole document. Use for reading PDFs, notes, or other indexed documents the user has in their library.""",
+Read a document from the library, OR bulk-read every document in a folder. Pass `name` for a single document (exact name shown by list_library_files). Pass `folder` (id or name) to read ALL documents in that folder concatenated with `### <title> (id)` headers — one call, no per-file loop. Long content pages in ~20000-char chunks: when the response includes next_offset, call again with offset=next_offset until you have everything.""",
 
     "make_library_file": """\
 ```make_library_file
 name: my-notes.md
 content: <full file body>
 ```
-Save a text file to the personal docs library. Takes a simple filename (no path separators; just the name, e.g. 'notes.md' or 'report.txt') and the complete body text. The file appears immediately in list_library_files and is readable by read_library_file. Use this to persist research results, save notes, or store generated documents in the library. Only creates text files — cannot create PDFs, images, or binary files.""",
+Create a new document in the library (Unfiled). Takes a simple filename (no path separators; just the name, e.g. 'notes.md' or 'report.txt') and the complete body text. The document appears immediately in list_library_files (under 'Unfiled documents') and is readable by read_library_file. Use this to persist research results, save notes, or store generated documents in the library. Only creates text documents — cannot create PDFs, images, or binary files.""",
 
     "create_document": """\
 ```create_document

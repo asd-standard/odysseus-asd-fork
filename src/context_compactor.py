@@ -38,6 +38,8 @@ def _content_as_text(content: Any) -> str:
 
 
 COMPACT_THRESHOLD = 0.85  # Trigger compaction at 85% of context window
+COMPACT_THRESHOLD_MIN = 50  # floor for the user-tunable threshold (percent)
+COMPACT_THRESHOLD_MAX = 99  # ceiling for the user-tunable threshold (percent)
 SUMMARY_MAX_TOKENS = 1024
 SMALL_CONTEXT_LIMIT = 8192  # Models with context <= this get aggressive trimming
 
@@ -77,6 +79,23 @@ def normalize_compaction_summary(summary: str) -> str:
     text = re.sub(r"^(?:#{1,3}\s*)?Conversation Summary\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^\*\*Conversation Summary\*\*\s*", "", text, flags=re.IGNORECASE)
     return text.lstrip()
+
+
+def _compact_threshold_pct() -> int:
+    """Return the auto-compaction threshold as a whole-number percent.
+
+    Reads ``auto_compact_threshold`` from settings (default 85, matching the
+    historic ``COMPACT_THRESHOLD`` constant) and clamps it to a sane range so a
+    malformed or over-aggressive value can't compact on every turn or never.
+    """
+    try:
+        from src.settings import get_setting
+
+        raw = get_setting("auto_compact_threshold", int(COMPACT_THRESHOLD * 100))
+        pct = int(raw)
+    except (TypeError, ValueError, ImportError):
+        pct = int(COMPACT_THRESHOLD * 100)
+    return max(COMPACT_THRESHOLD_MIN, min(COMPACT_THRESHOLD_MAX, pct))
 
 
 def _sanitize_tool_messages(msgs: List[Dict]) -> List[Dict]:
@@ -334,7 +353,7 @@ async def maybe_compact(
     used = estimate_tokens(messages)
     pct = (used / context_length) * 100 if context_length else 0
 
-    if pct < COMPACT_THRESHOLD * 100:
+    if pct < _compact_threshold_pct():
         return messages, context_length, False
 
     logger.info(

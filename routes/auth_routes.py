@@ -655,6 +655,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         _INT_RANGES = {
             "agent_max_rounds": (1, 200),
             "agent_max_tool_calls": (0, 1000),  # 0 = unlimited
+            "agent_input_token_budget": (0, 2_000_000),  # 0 = disable soft-trim
+            "agent_input_token_hard_max": (1000, 2_000_000),
+            "auto_compact_threshold": (50, 99),
         }
         for key in DEFAULT_SETTINGS:
             if key not in body:
