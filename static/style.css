@@ -17179,6 +17179,103 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   .doclib-btn-hint { display: none !important; }
 }
 
+/* Bottom-right document preview panel (replaces inline expand for the
+   Documents tab). Anchored inside the documents admin-card, so it moves with
+   the library widget and stays above the folder sidebar + grid. */
+.doclib-preview-panel {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: min(440px, 55%);
+  max-height: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  z-index: 50;
+}
+.doclib-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  flex: 0 0 auto;
+}
+.doclib-preview-title {
+  font-weight: 600;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doclib-preview-lang {
+  font-size: 10px;
+  opacity: 0.5;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.doclib-preview-menu,
+.doclib-preview-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0.6;
+  flex-shrink: 0;
+  line-height: 1;
+  font-size: 14px;
+}
+.doclib-preview-menu:hover,
+.doclib-preview-close:hover { opacity: 1; }
+.doclib-preview-close { margin-left: auto; }
+.doclib-preview-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  font-family: 'Berkeley Mono', 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--code-fg, var(--hl-fg, var(--fg)));
+}
+.doclib-preview-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.doclib-preview-body code.hljs {
+  background: none;
+  padding: 0;
+}
+.doclib-preview-pdf {
+  width: 100%;
+  height: 100%;
+  min-height: 60vh;
+  border: none;
+}
+.doclib-preview-loading,
+.doclib-preview-error {
+  padding: 12px;
+  opacity: 0.6;
+  font-size: 11px;
+  font-family: var(--font-family, 'Fira Code', monospace);
+}
+@media (max-width: 768px) {
+  .doclib-preview-panel {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    max-height: calc(100% - 16px);
+  }
+}
+
 /* Chat row expand preview — matches the documents-tab expand style. */
 .doclib-chat-row { flex-direction: column; align-items: stretch; }
 .doclib-chat-row .doclib-card-chevron {

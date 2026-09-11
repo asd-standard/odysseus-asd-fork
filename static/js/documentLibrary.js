@@ -99,6 +99,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 let _libraryFolders = [];       // nested tree from GET /api/folders
 let _libraryFolderId = null;    // null = "All files", 'unfiled', or a folder id
 let _libraryUnfiledCount = 0;
+let _libraryPreviewId = null;   // id of the doc currently shown in the preview panel
+let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview panel
 
 // ---- Library animation helpers ----
 
@@ -1023,6 +1025,111 @@ let _libraryUnfiledCount = 0;
 
   // ── End library folders ──
 
+  // ── Shared document action items (card ⋮ menu + preview ⋮ menu) ──
+
+  const _DOC_ACTION_ICONS = {
+    open: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    clone: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    copy: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>',
+    move: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 17 15 14"/></svg>',
+    export: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    archive: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
+    delete: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
+  };
+
+  // Returns the full action set shown by a document's ⋮ menu. `anchor` is the
+  // DOM node the "Move to…" folder picker positions against; `card` is the
+  // originating card (used to animate a single-card delete) or null when the
+  // menu was opened from the preview panel.
+  function _docActionItems(doc, anchor, card) {
+    const items = [];
+
+    items.push({
+      label: 'Open',
+      icon: _DOC_ACTION_ICONS.open,
+      title: doc.session_id ? 'Open in original session' : 'Open in the editor',
+      run: () => { if (doc.session_id) libraryOpenInSession(doc); else libraryOpenDocument(doc); },
+    });
+
+    items.push({
+      label: 'Clone',
+      icon: _DOC_ACTION_ICONS.clone,
+      title: 'Clone to active session',
+      run: () => libraryImportDocument(doc),
+    });
+
+    items.push({
+      label: 'Copy name',
+      icon: _DOC_ACTION_ICONS.copy,
+      title: 'Copy the file name to the clipboard',
+      run: async () => {
+        const name = doc.title || '';
+        try {
+          if (uiModule && uiModule.copyToClipboard) {
+            await uiModule.copyToClipboard(name);
+          } else {
+            await navigator.clipboard.writeText(name);
+          }
+          if (uiModule) uiModule.showToast('Name copied');
+        } catch {
+          if (uiModule) uiModule.showError('Failed to copy name');
+        }
+      },
+    });
+
+    items.push({
+      label: 'Move to…',
+      icon: _DOC_ACTION_ICONS.move,
+      run: () => _openDocMovePicker(anchor, doc),
+    });
+
+    items.push({
+      label: 'Export',
+      icon: _DOC_ACTION_ICONS.export,
+      run: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/document/${doc.id}`);
+          if (!res.ok) throw new Error('Failed');
+          const full = await res.json();
+          const extMap = { javascript: '.js', python: '.py', html: '.html', css: '.css', markdown: '.md', json: '.json', yaml: '.yml', bash: '.sh', sql: '.sql', rust: '.rs', go: '.go', java: '.java', c: '.c', cpp: '.cpp', typescript: '.ts', ruby: '.rb', php: '.php', xml: '.xml', toml: '.toml', ini: '.ini' };
+          const ext = extMap[full.language] || '.txt';
+          const blob = new Blob([full.current_content || ''], { type: 'text/plain' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = (full.title || 'document') + ext;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        } catch { if (uiModule) uiModule.showError('Failed to export document'); }
+      },
+    });
+
+    items.push({
+      label: _libraryArchivedView ? 'Restore' : 'Archive',
+      icon: _DOC_ACTION_ICONS.archive,
+      title: _libraryArchivedView ? 'Restore to active documents' : 'Archive (hide from the main list)',
+      run: async () => {
+        const toArchived = !_libraryArchivedView;
+        try {
+          const res = await fetch(`${API_BASE}/api/document/${doc.id}/archive?archived=${toArchived}`, { method: 'POST', credentials: 'same-origin' });
+          if (!res.ok) throw new Error('failed');
+          libraryRemoveDocumentFromState(doc.id);
+          libraryRenderGrid();
+          libraryHidePreview();
+          if (uiModule) uiModule.showToast(toArchived ? 'Archived' : 'Restored');
+        } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
+      },
+    });
+
+    items.push({
+      label: 'Delete',
+      icon: _DOC_ACTION_ICONS.delete,
+      danger: true,
+      run: () => { libraryHidePreview(); libraryDeleteSingle(doc.id, card); },
+    });
+
+    return items;
+  }
+
   function libraryCreateCard(doc) {
     const card = document.createElement('div');
     card.className = 'doclib-card memory-item';
@@ -1187,121 +1294,16 @@ let _libraryUnfiledCount = 0;
     dropdown._dismiss = hideCardDropdown;   // bulk removers tear down through this
 
     const _di = (svg) => `<span class="dropdown-icon">${svg}</span>`;
-    const _openIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
-    // Open
-    const openItem = document.createElement('button');
-    openItem.className = 'dropdown-item-compact';
-    openItem.style.cssText = 'background:none;border:none;width:100%;';
-    openItem.innerHTML = _di(_openIco) + '<span>Open</span>';
-    if (doc.session_id) {
-      openItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryOpenInSession(doc); });
-    } else {
-      // Orphaned doc (closed / session detached) is still openable in the editor
-      // by id — libraryOpenDocument handles the no-session case (#1602).
-      openItem.title = 'Open in the editor';
-      openItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryOpenDocument(doc); });
+    for (const item of _docActionItems(doc, menuBtn, card)) {
+      const btn = document.createElement('button');
+      btn.className = 'dropdown-item-compact' + (item.danger ? ' dropdown-item-danger' : '');
+      btn.style.cssText = 'background:none;border:none;width:100%;';
+      btn.innerHTML = _di(item.icon) + '<span>' + item.label + '</span>';
+      if (item.title) btn.title = item.title;
+      btn.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); item.run(); });
+      dropdown.appendChild(btn);
     }
-    dropdown.appendChild(openItem);
-
-    // Clone
-    const _cloneIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    const cloneItem = document.createElement('button');
-    cloneItem.className = 'dropdown-item-compact';
-    cloneItem.style.cssText = 'background:none;border:none;width:100%;';
-    cloneItem.innerHTML = _di(_cloneIco) + '<span>Clone</span>';
-    cloneItem.title = 'Clone to active session';
-    cloneItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryImportDocument(doc); });
-    dropdown.appendChild(cloneItem);
-
-    // Copy name
-    const _copyIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>';
-    const copyNameItem = document.createElement('button');
-    copyNameItem.className = 'dropdown-item-compact';
-    copyNameItem.style.cssText = 'background:none;border:none;width:100%;';
-    copyNameItem.innerHTML = _di(_copyIco) + '<span>Copy name</span>';
-    copyNameItem.title = 'Copy the file name to the clipboard';
-    copyNameItem.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      hideCardDropdown();
-      const name = doc.title || '';
-      try {
-        if (uiModule && uiModule.copyToClipboard) {
-          await uiModule.copyToClipboard(name);
-        } else {
-          await navigator.clipboard.writeText(name);
-        }
-        if (uiModule) uiModule.showToast('Name copied');
-      } catch {
-        if (uiModule) uiModule.showError('Failed to copy name');
-      }
-    });
-    dropdown.appendChild(copyNameItem);
-
-    // Move to folder…
-    const _moveIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 11 12 17"/><polyline points="9 14 12 17 15 14"/></svg>';
-    const moveItem = document.createElement('button');
-    moveItem.className = 'dropdown-item-compact';
-    moveItem.style.cssText = 'background:none;border:none;width:100%;';
-    moveItem.innerHTML = _di(_moveIco) + '<span>Move to…</span>';
-    moveItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); _openDocMovePicker(menuBtn, doc); });
-    dropdown.appendChild(moveItem);
-
-    // Export
-    const _exportIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-    const exportItem = document.createElement('button');
-    exportItem.className = 'dropdown-item-compact';
-    exportItem.style.cssText = 'background:none;border:none;width:100%;';
-    exportItem.innerHTML = _di(_exportIco) + '<span>Export</span>';
-    exportItem.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      hideCardDropdown();
-      try {
-        const res = await fetch(`${API_BASE}/api/document/${doc.id}`);
-        if (!res.ok) throw new Error('Failed');
-        const full = await res.json();
-        const extMap = { javascript: '.js', python: '.py', html: '.html', css: '.css', markdown: '.md', json: '.json', yaml: '.yml', bash: '.sh', sql: '.sql', rust: '.rs', go: '.go', java: '.java', c: '.c', cpp: '.cpp', typescript: '.ts', ruby: '.rb', php: '.php', xml: '.xml', toml: '.toml', ini: '.ini' };
-        const ext = extMap[full.language] || '.txt';
-        const blob = new Blob([full.current_content || ''], { type: 'text/plain' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = (full.title || 'document') + ext;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      } catch { if (uiModule) uiModule.showError('Failed to export document'); }
-    });
-    dropdown.appendChild(exportItem);
-
-    // Archive / Restore — soft-archive a doc out of the main list, or bring it back.
-    const _archiveIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
-    const archiveItem = document.createElement('button');
-    archiveItem.className = 'dropdown-item-compact';
-    archiveItem.style.cssText = 'background:none;border:none;width:100%;';
-    archiveItem.innerHTML = _di(_archiveIco) + `<span>${_libraryArchivedView ? 'Restore' : 'Archive'}</span>`;
-    archiveItem.title = _libraryArchivedView ? 'Restore to active documents' : 'Archive (hide from the main list)';
-    archiveItem.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      hideCardDropdown();
-      const toArchived = !_libraryArchivedView;
-      try {
-        const res = await fetch(`${API_BASE}/api/document/${doc.id}/archive?archived=${toArchived}`, { method: 'POST', credentials: 'same-origin' });
-        if (!res.ok) throw new Error('failed');
-        // Drop it from the current view (it no longer belongs here) and refresh.
-        libraryRemoveDocumentFromState(doc.id);
-        libraryRenderGrid();
-        if (uiModule) uiModule.showToast(toArchived ? 'Archived' : 'Restored');
-      } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
-    });
-    dropdown.appendChild(archiveItem);
-
-    // Delete
-    const _deleteIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-    const deleteItem = document.createElement('button');
-    deleteItem.className = 'dropdown-item-compact dropdown-item-danger';
-    deleteItem.style.cssText = 'background:none;border:none;width:100%;';
-    deleteItem.innerHTML = _di(_deleteIco) + '<span>Delete</span>';
-    deleteItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryDeleteSingle(doc.id, card); });
-    dropdown.appendChild(deleteItem);
 
     menuWrap.appendChild(dropdown);
     actionsWrap.appendChild(menuWrap);
@@ -1410,7 +1412,7 @@ let _libraryUnfiledCount = 0;
         const cb = card.querySelector('.memory-select-cb');
         if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
       } else {
-        libraryExpandCard(card, doc);
+        libraryShowPreview(doc);
       }
     });
     _attachLongPressMenu(card, '.memory-item-btn');
@@ -1530,6 +1532,107 @@ let _libraryUnfiledCount = 0;
       }
       if (actionsBar && !preview.contains(actionsBar)) preview.appendChild(actionsBar);
     }
+  }
+
+  // ── Bottom-right preview panel (replaces inline expand for documents) ──
+
+  function libraryHidePreview() {
+    if (_libraryPreviewUnreg) { _libraryPreviewUnreg(); _libraryPreviewUnreg = null; }
+    document.querySelectorAll('.doclib-preview-panel').forEach(p => p.remove());
+    _libraryPreviewId = null;
+  }
+
+  async function _renderDocContent(body, doc) {
+    try {
+      const res = await fetch(`${API_BASE}/api/document/${doc.id}`);
+      if (!res.ok) throw new Error('Failed');
+      const full = await res.json();
+      const content = full.current_content || '';
+      const lang = full.language || doc.language || 'text';
+
+      // PDF-backed docs show the rendered PDF in an iframe instead of source.
+      const isPdfDoc = /<!--\s*pdf_(?:form_)?source\s+upload_id="[^"]+"/.test(content);
+      if (isPdfDoc) {
+        const frame = document.createElement('iframe');
+        frame.className = 'doclib-preview-pdf';
+        frame.src = `${API_BASE}/api/document/${doc.id}/render-pdf?t=${Date.now()}`;
+        body.innerHTML = '';
+        body.appendChild(frame);
+        return;
+      }
+
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      // Cap syntax highlighting so a large doc doesn't freeze the UI.
+      const HL_CAP = 20000;
+      try {
+        if (lang && lang !== 'text' && lang !== 'markdown' && window.hljs && content.length <= HL_CAP) {
+          code.innerHTML = window.hljs.highlight(content, { language: lang }).value;
+        } else {
+          code.textContent = content;
+        }
+      } catch {
+        code.textContent = content;
+      }
+      pre.appendChild(code);
+      body.innerHTML = '';
+      body.appendChild(pre);
+    } catch {
+      body.innerHTML = '<div class="doclib-preview-error">Failed to load</div>';
+    }
+  }
+
+  function libraryShowPreview(doc) {
+    const host = document.querySelector('[data-doclib-panel="documents"]');
+    if (!host) return;
+
+    libraryHidePreview();
+    _libraryPreviewId = doc.id;
+
+    const panel = document.createElement('div');
+    panel.className = 'doclib-preview-panel';
+    panel.dataset.docId = doc.id;
+
+    const header = document.createElement('div');
+    header.className = 'doclib-preview-header';
+
+    const title = document.createElement('div');
+    title.className = 'doclib-preview-title';
+    title.textContent = doc.title || 'Untitled';
+    header.appendChild(title);
+
+    const lang = document.createElement('span');
+    lang.className = 'doclib-preview-lang';
+    lang.textContent = (doc.language && doc.language !== 'text') ? doc.language : '';
+    header.appendChild(lang);
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'doclib-preview-menu';
+    menuBtn.title = 'Actions';
+    menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _showLibDropdown(menuBtn, _docActionItems(doc, menuBtn, null));
+    });
+    header.appendChild(menuBtn);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'doclib-preview-close';
+    closeBtn.title = 'Close preview';
+    closeBtn.innerHTML = '\u2716';
+    closeBtn.addEventListener('click', (e) => { e.stopPropagation(); libraryHidePreview(); });
+    header.appendChild(closeBtn);
+
+    panel.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'doclib-preview-body';
+    body.innerHTML = '<div class="doclib-preview-loading">Loading…</div>';
+    panel.appendChild(body);
+
+    host.appendChild(panel);
+    _libraryPreviewUnreg = registerMenuDismiss(libraryHidePreview);
+    _renderDocContent(body, doc);
   }
 
   function libraryRenderLoadMore() {
@@ -2242,7 +2345,7 @@ let _libraryUnfiledCount = 0;
             </div>
             <div id="doclib-research-grid" class="doclib-grid"></div>
           </div>
-          <div data-doclib-panel="documents" class="admin-card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+          <div data-doclib-panel="documents" class="admin-card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;">
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;">
               <h2 style="margin:0;padding:0;line-height:1;">Documents <span id="doclib-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal"></span></h2>
               <button class="memory-toolbar-btn" id="doclib-import-file-btn" title="Import files from disk" style="margin-left:auto;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:2px;"><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="21" x2="19" y2="21"/></svg> Import</button>
@@ -3926,10 +4029,9 @@ let _libraryUnfiledCount = 0;
     // Escape key
     _libraryEscHandler = (e) => {
       if (e.key === 'Escape') {
-        // Collapse expanded card first, then close modal on second Escape
-        const expanded = document.querySelector('#doclib-grid .doclib-card-expanded');
-        if (expanded) {
-          _collapseExpandedCard(expanded);
+        // Close the preview panel first, then the modal on a second Escape.
+        if (_libraryPreviewId) {
+          libraryHidePreview();
         } else {
           closeLibrary();
         }
@@ -3956,6 +4058,7 @@ let _libraryUnfiledCount = 0;
     _librarySelectMode = false;
     _librarySelectedIds.clear();
     _libraryImportMode = false;
+    libraryHidePreview();
     clearTimeout(_librarySearchDebounce);
 
     const modal = document.getElementById('doclib-modal');
