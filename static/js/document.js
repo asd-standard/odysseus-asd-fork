@@ -5418,7 +5418,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     const _eventInsideElement = (e, el) => {
       if (!e || !el || typeof e.clientX !== 'number' || typeof e.clientY !== 'number') return false;
+      if (el.offsetParent === null) return false;              // display:none (or hidden ancestor)
       const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;   // zero-size / not rendered
       return e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
     };
 
