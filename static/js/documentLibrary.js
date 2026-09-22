@@ -563,6 +563,29 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     return null;
   }
 
+  // "/"-joined path from the library root to the folder with `id`
+  // (e.g. "Root/Child"). Returns '' when the id can't be resolved.
+  function _folderPath(id) {
+    if (!id) return '';
+    const map = new Map();
+    (function walk(nodes) {
+      for (const n of (nodes || [])) {
+        map.set(n.id, { name: n.name, parent_id: n.parent_id });
+        walk(n.children);
+      }
+    })(_libraryFolders);
+    const parts = [];
+    const seen = new Set();
+    let cur = id;
+    while (cur && map.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      const node = map.get(cur);
+      parts.unshift(node.name);
+      cur = node.parent_id;
+    }
+    return parts.join('/');
+  }
+
   function _folderCurrentLabel() {
     if (_libraryFolderId === 'unfiled') return 'Unfiled';
     if (!_libraryFolderId) return 'All files';
@@ -855,6 +878,22 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           }
         },
       },
+      {
+        label: 'Copy path',
+        action: async () => {
+          const path = _folderPath(node.id) || node.name || '';
+          try {
+            if (uiModule && uiModule.copyToClipboard) {
+              await uiModule.copyToClipboard(path);
+            } else {
+              await navigator.clipboard.writeText(path);
+            }
+            if (uiModule) uiModule.showToast('Path copied');
+          } catch {
+            if (uiModule) uiModule.showError('Failed to copy path');
+          }
+        },
+      },
       { label: 'New subfolder', action: () => folderCreate(node.id) },
     ];
     const excluded = new Set([node.id, ...descendants]);
@@ -1073,6 +1112,26 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           if (uiModule) uiModule.showToast('Name copied');
         } catch {
           if (uiModule) uiModule.showError('Failed to copy name');
+        }
+      },
+    });
+
+    items.push({
+      label: 'Copy path',
+      icon: _DOC_ACTION_ICONS.copy,
+      title: 'Copy the library path to the clipboard',
+      run: async () => {
+        const folderPath = doc.folder_id ? _folderPath(doc.folder_id) : '';
+        const path = folderPath ? `${folderPath}/${doc.title || ''}` : (doc.title || '');
+        try {
+          if (uiModule && uiModule.copyToClipboard) {
+            await uiModule.copyToClipboard(path);
+          } else {
+            await navigator.clipboard.writeText(path);
+          }
+          if (uiModule) uiModule.showToast('Path copied');
+        } catch {
+          if (uiModule) uiModule.showError('Failed to copy path');
         }
       },
     });
