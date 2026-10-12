@@ -1183,7 +1183,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       label: 'Delete',
       icon: _DOC_ACTION_ICONS.delete,
       danger: true,
-      run: () => { libraryHidePreview(); libraryDeleteSingle(doc.id, card); },
+      run: () => { libraryHidePreview(); libraryDeleteSingle(doc.id, card, doc.title); },
     });
 
     return items;
@@ -1426,7 +1426,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'doclib-card-text-btn doclib-card-action-btn doclib-card-text-btn-danger';
     deleteBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete';
-    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); libraryDeleteSingle(doc.id, card); });
+    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); libraryDeleteSingle(doc.id, card, doc.title); });
 
     // Archive sits next to Delete on the LEFT — same lineup as the chat
     // and research footers. Label flips to Restore inside the Archive view.
@@ -1889,11 +1889,12 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     }
   }
 
-  async function libraryDeleteSingle(docId, card) {
+  async function libraryDeleteSingle(docId, card, title) {
+    const name = title || 'Untitled';
     if (uiModule && uiModule.styledConfirm) {
-      const ok = await uiModule.styledConfirm('Delete this document?', { confirmText: 'Delete', danger: true });
+      const ok = await uiModule.styledConfirm(`Delete "${name}"?`, { confirmText: 'Delete', danger: true });
       if (!ok) return;
-    } else if (!confirm('Delete this document?')) {
+    } else if (!confirm(`Delete "${name}"?`)) {
       return;
     }
     try {
@@ -3106,7 +3107,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           '<button class="doclib-chat-open-btn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>Open</button>';
         actions.querySelector('.doclib-chat-delete-btn').addEventListener('click', async (ev) => {
           ev.stopPropagation();
-          if (!await window.styledConfirm('Delete this document?', { confirmText: 'Delete', danger: true })) return;
+          if (!await window.styledConfirm(`Delete "${d.title || 'Untitled'}"?`, { confirmText: 'Delete', danger: true })) return;
           await fetch(`${API_BASE}/api/document/${d.id}`, { method: 'DELETE', credentials: 'same-origin' });
           _renderLibArchive();
         });
@@ -3241,7 +3242,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         });
         card.querySelector('._arc-doc-menu').addEventListener('click', (e) => { e.stopPropagation(); _showLibDropdown(e.currentTarget, [
           { label: 'Restore', action: async () => { await fetch(API_BASE + '/api/document/' + d.id + '/archive?archived=false', { method: 'POST', credentials: 'same-origin' }); _renderLibArchive(); } },
-          { label: 'Delete', danger: true, action: async () => { if (!await window.styledConfirm('Delete this document?', { confirmText: 'Delete', danger: true })) return; await fetch(API_BASE + '/api/document/' + d.id, { method: 'DELETE', credentials: 'same-origin' }); _renderLibArchive(); } },
+          { label: 'Delete', danger: true, action: async () => { if (!await window.styledConfirm(`Delete "${d.title || 'Untitled'}"?`, { confirmText: 'Delete', danger: true })) return; await fetch(API_BASE + '/api/document/' + d.id, { method: 'DELETE', credentials: 'same-origin' }); _renderLibArchive(); } },
         ], { onSelect: () => {
           _arcSelectMode = true;
           _arcSelected.add('documents:' + d.id);

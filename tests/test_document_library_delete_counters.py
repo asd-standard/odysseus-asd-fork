@@ -37,7 +37,7 @@ def test_single_delete_updates_language_counters_and_chips():
 
     delete_body = _between(
         text,
-        "async function libraryDeleteSingle(docId, card)",
+        "async function libraryDeleteSingle(docId, card, title)",
         "async function libraryBulkDelete()",
     )
     assert "libraryRemoveDocumentFromState(docId);" in delete_body
