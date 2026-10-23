@@ -366,14 +366,15 @@ def _resolve_tool_path(raw_path: str) -> str:
     Returns the realpath on success. Raises ValueError on rejection.
     Symlinks are resolved before comparison.
 
-    When a workspace is active for this turn, paths are confined to it instead
-    of the default allowlist (see _resolve_tool_path_in_workspace).
+    When no confinement root is active (always true in production — the
+    workspace feature was removed), paths are confined to the default allowlist.
+    Tests may set `_test_only_workspace` to exercise a hostile root.
     """
-    ws = get_active_workspace()
-    if ws:
-        return _resolve_tool_path_in_workspace(ws, raw_path)
     if raw_path is None or not str(raw_path).strip():
         raise ValueError("path is required")
+    _ws = get_active_workspace()
+    if _ws:
+        return _resolve_tool_path_in_workspace(_ws, raw_path)
     expanded = os.path.expanduser(str(raw_path).strip())
     resolved = os.path.realpath(expanded)
 
@@ -445,22 +446,25 @@ def _resolve_tool_path_in_workspace(workspace: str, raw_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Active workspace (per-turn, context-local)
+# Confinement root — TEST-ONLY override
 # ---------------------------------------------------------------------------
-# Set ONCE in execute_tool_block from the request's `workspace`. The path
-# resolvers (_resolve_tool_path / _resolve_search_root) and the subprocess cwd
-# helper (agent_cwd) read it from here, so confinement is enforced in a single
-# place: any tool that resolves paths through these helpers is confined
-# automatically and cannot accidentally bypass the workspace. contextvars are
-# task-local, so concurrent turns don't leak into each other.
-_active_workspace: contextvars.ContextVar = contextvars.ContextVar(
-    "agent_active_workspace", default=None
+# Production never binds a folder: file tools use the fixed allowlist below.
+# Tests that need to prove "state files stay hidden even when the allowed root
+# contains them" (e.g. a root that is a parent of DATA_DIR) set this contextvar
+# directly. Nothing in src/ or routes/ ever sets it — verified by
+# tests/test_workspace_confine.py::test_workspace_hook_is_test_only.
+_test_only_workspace: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_test_only_workspace", default=None
 )
 
 
 def get_active_workspace() -> Optional[str]:
-    """The folder the agent is confined to this turn, or None."""
-    return _active_workspace.get()
+    """Return the active confinement root, or None.
+
+    Always None in production (nothing sets `_test_only_workspace`); tests may
+    set it to exercise confinement against a hostile root.
+    """
+    return _test_only_workspace.get()
 
 
 def vet_workspace(raw: str) -> Optional[str]:
@@ -492,8 +496,13 @@ def vet_workspace(raw: str) -> Optional[str]:
 
 
 def agent_cwd() -> str:
-    """Working directory for agent subprocesses (bash/python/background jobs):
-    the active workspace when set, else the persistent data dir."""
+    """Working directory for agent subprocesses (bash/python/background jobs).
+
+    Always the persistent agent data dir in production: per-request workspace
+    binding was removed, so subprocesses no longer start inside a user-chosen
+    folder. The test-only root still applies, so confinement tests can assert
+    subprocess cwd behaviour against a hostile root.
+    """
     workspace = get_active_workspace()
     if workspace:
         return workspace
@@ -519,12 +528,9 @@ def _resolve_search_root(raw_path: str) -> str:
     is confined by the global allowlist + sensitive-file policy.
     """
     raw = (raw_path or "").strip()
-    ws = get_active_workspace()
-    if ws:
-        # Resolve the empty case as the workspace path rather than returning
-        # it directly: returned unchecked it skipped both deny lists, so a
-        # bare ls listed whatever the workspace was bound to.
-        return _resolve_tool_path_in_workspace(ws, raw or ws)
+    _ws = get_active_workspace()
+    if _ws:
+        return _resolve_tool_path_in_workspace(_ws, raw or _ws)
     if not raw:
         roots = _tool_path_roots()
         default_root = os.path.realpath(AGENT_WORKSPACE_DIR)
@@ -788,6 +794,9 @@ async def _document_tool_dispatch(
     document_id: Optional[str] = None,
     document_version: Optional[int] = None,
     document_digest: Optional[str] = None,
+    editor_open: bool = False,
+    editor_stale: bool = False,
+    library_preview_doc_id: Optional[str] = None,
 ) -> Optional[Dict]:
     """Route a document tool through TOOL_HANDLERS with the right ctx shape."""
     from src.agent_tools import TOOL_HANDLERS
@@ -797,6 +806,11 @@ async def _document_tool_dispatch(
         "doc_id": document_id,
         "expected_document_version": document_version,
         "expected_document_digest": document_digest,
+        # Lets a tool report accurately ("editor is open but nothing is
+        # registered as active") instead of guessing why it has no target.
+        "editor_open": editor_open,
+        "editor_stale": editor_stale,
+        "library_preview_doc_id": library_preview_doc_id,
     }
     if tool in TOOL_HANDLERS:
         return await TOOL_HANDLERS[tool](content, ctx)
@@ -821,6 +835,9 @@ async def execute_tool_block(
         | _MissingToolSecurityContext
     ) = _MISSING_TOOL_SECURITY_CONTEXT,
     exact_approval: Optional[ExactToolApproval] = None,
+    editor_open: bool = False,
+    editor_stale: bool = False,
+    library_preview_doc_id: Optional[str] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -926,8 +943,9 @@ async def execute_tool_block(
                 decision.reason or "Tool blocked by external-context policy.",
             )
 
-    token = _active_workspace.set(workspace or None)
-    try:
+    # NOTE: `workspace` is accepted for call-site compatibility but no longer
+    # binds anything — see get_active_workspace().
+    if True:
         output = await _execute_tool_block_impl(
             block,
             session_id=session_id,
@@ -950,6 +968,9 @@ async def execute_tool_block(
                 if approval_claimed
                 else None
             ),
+            editor_open=editor_open,
+            editor_stale=editor_stale,
+            library_preview_doc_id=library_preview_doc_id,
         )
         if isinstance(security_context, ToolRunSecurityContext):
             security_context.observe_tool_result(
@@ -958,8 +979,6 @@ async def execute_tool_block(
                 getattr(block, "content", None),
             )
         return output
-    finally:
-        _active_workspace.reset(token)
 
 
 async def _execute_tool_block_impl(
@@ -972,6 +991,9 @@ async def _execute_tool_block_impl(
     approved_document_id: Optional[str] = None,
     approved_document_version: Optional[int] = None,
     approved_document_digest: Optional[str] = None,
+    editor_open: bool = False,
+    editor_stale: bool = False,
+    library_preview_doc_id: Optional[str] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -1114,7 +1136,7 @@ async def _execute_tool_block_impl(
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)
-    elif tool in ("grep", "glob", "ls", "get_workspace", "list_library_files", "read_library_file", "make_library_file"):
+    elif tool in ("grep", "glob", "ls", "list_library_files", "read_library_file", "make_library_file"):
         # Code-navigation and library tools — no MCP server; run the direct implementation.
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
@@ -1141,6 +1163,9 @@ async def _execute_tool_block_impl(
             document_id=approved_document_id,
             document_version=approved_document_version,
             document_digest=approved_document_digest,
+            editor_open=editor_open,
+            editor_stale=editor_stale,
+            library_preview_doc_id=library_preview_doc_id,
         ) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
         if tool in ("edit_document", "suggest_document") and "title" in (result or {}):

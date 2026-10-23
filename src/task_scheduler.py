@@ -34,7 +34,7 @@ def _utcnow() -> datetime:
 # admins and single-user (AUTH_ENABLED=false) deployments.
 TASK_DEFAULT_SHELL_TOOLS = frozenset({
     "bash", "python", "read_file", "write_file", "edit_file",
-    "grep", "glob", "ls", "get_workspace",
+    "grep", "glob", "ls",
 })
 
 

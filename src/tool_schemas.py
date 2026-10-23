@@ -156,14 +156,6 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "get_workspace",
-            "description": "Return the absolute path of the active workspace folder the user is working in. File tools are confined to it; the shell starts there but is not sandboxed. Call this first when the user refers to 'the project'/'the code'/'this folder' without a path, instead of asking them. Takes no arguments.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "list_library_files",
             "description": "List files in the document library. With no `folder`, shows the root view: top-level folders and unfiled documents. Pass `folder` (a folder id or name) to list that folder's child folders and documents.",
             "parameters": {
@@ -303,10 +295,11 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "edit_document",
-            "description": "Edit a document OPEN IN THE EDITOR PANEL (created via create_document) — NOT a file on disk. For files on disk (home folder, project files, anything with a path like ~/x.txt or /path/to/file) use edit_file instead. Targeted find-and-replace with multiple FIND/REPLACE pairs per call; use for any edit smaller than a full rewrite. Do NOT send the whole file back via update_document for small edits.",
+            "description": "Edit a document OPEN IN THE EDITOR PANEL (created via create_document) — NOT a file on disk. For files on disk (home folder, project files, anything with a path like ~/x.txt or /path/to/file) use edit_file instead. Targeted find-and-replace with multiple FIND/REPLACE pairs per call; use for any edit smaller than a full rewrite. Do NOT send the whole file back via update_document for small edits. When no document is open in the editor, pass document_id from manage_documents list; never invent an id.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "document_id": {"type": "string", "description": "Target document UUID from a manage_documents list anchor. Optional: omit to edit the document currently open in the editor."},
                     "edits": {
                         "type": "array",
                         "description": "List of find/replace edits (first match only per edit)",
@@ -332,6 +325,7 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "document_id": {"type": "string", "description": "Target document UUID from a manage_documents list anchor. Optional: omit to use the document currently open in the editor."},
                     "suggestions": {
                         "type": "array",
                         "description": "List of suggested changes with reasons",
@@ -358,6 +352,7 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "document_id": {"type": "string", "description": "Target document UUID from a manage_documents list anchor. Optional: omit to rewrite the document currently open in the editor."},
                     "content": {"type": "string", "description": "Complete new document content"}
                 },
                 "required": ["content"]
@@ -853,15 +848,17 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_documents",
-            "description": "Manage documents: list all documents (with optional search/language filter), delete documents, or run tidy cleanup.",
+            "description": "Manage the user's documents. action=read returns a document's text. Target it either by `title` (the document's name, e.g. '26-10-07-Riassunto-Incontro.md' or a path) or by `document_id`; with neither, it reads the document currently open in the editor panel. There is no 'most recent document' fallback — always target the active document or one the user named. action=list lists documents with clickable [Title](#document-<id>) anchors. Also supports delete and tidy.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "delete", "tidy"]},
-                    "document_id": {"type": "string", "description": "Document ID (for delete)"},
+                    "action": {"type": "string", "enum": ["list", "read", "delete", "tidy"]},
+                    "title": {"type": "string", "description": "For read: the document's title or path, exactly as the user said it. A filename with or without extension works. Ignored when document_id is given."},
+                    "document_id": {"type": "string", "description": "Document UUID copied from a manage_documents list anchor. Omit for read to read the active editor document; required for delete. Never invent an id."},
+                    "offset": {"type": "integer", "description": "For read: character offset to start from (default 0)"},
+                    "limit": {"type": "integer", "description": "For read: max characters to return (defaults to the read cap). For list: max results (default 50)"},
                     "search": {"type": "string", "description": "Search query (for list)"},
-                    "language": {"type": "string", "description": "Filter by language (for list)"},
-                    "limit": {"type": "integer", "description": "Max results (for list, default 50)"}
+                    "language": {"type": "string", "description": "Filter by language (for list)"}
                 },
                 "required": ["action"]
             }
@@ -1502,8 +1499,6 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = args.get("path", "")
     elif tool_type in ("grep", "glob", "ls"):
         content = json.dumps(args) if args else "{}"
-    elif tool_type == "get_workspace":
-        content = ""
     elif tool_type == "list_library_files":
         content = json.dumps({"filter": args.get("filter", ""), "folder": args.get("folder", "")})
     elif tool_type == "read_library_file":
@@ -1541,6 +1536,11 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
                 f'<<<FIND>>>\n{edit.get("find", "")}\n<<<REPLACE>>>\n{edit.get("replace", "")}\n<<<END>>>'
             )
         content = "\n".join(blocks)
+        # Carry an explicit target through to the tool. The document_id is a
+        # UUID, so it can never collide with FIND/REPLACE block syntax.
+        _doc_target = str(args.get("document_id") or "").strip()
+        if _doc_target:
+            content = f"<<<DOCUMENT_ID>>>\n{_doc_target}\n{content}"
     elif tool_type == "suggest_document":
         blocks = []
         suggestions = args.get("suggestions", [])
@@ -1553,8 +1553,14 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
                 f'<<<FIND>>>\n{s.get("find", "")}\n<<<SUGGEST>>>\n{s.get("replace", "")}\n<<<REASON>>>\n{s.get("reason", "")}\n<<<END>>>'
             )
         content = "\n".join(blocks)
+        _doc_target = str(args.get("document_id") or "").strip()
+        if _doc_target:
+            content = f"<<<DOCUMENT_ID>>>\n{_doc_target}\n{content}"
     elif tool_type == "update_document":
         content = args.get("content", "")
+        _doc_target = str(args.get("document_id") or "").strip()
+        if _doc_target:
+            content = f"<<<DOCUMENT_ID>>>\n{_doc_target}\n{content}"
     elif tool_type == "search_chats":
         content = args.get("query", "")
     elif tool_type == "chat_with_model":

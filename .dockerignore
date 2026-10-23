@@ -10,6 +10,16 @@ dist/
 build/
 .env
 .env.bak.*
+# Deployment secrets and migration bundles must never enter the image.
+deploy/.env
+deploy/.env.*
+!deploy/.env.production.example
+odysseus-data-*.tar.gz*
+odysseus-deploy-bundle-*.tar.gz*
+odysseus-mcp-v2-hotfix-*.tar.gz*
+odysseus-mcp-v1-shim-*.tar.gz*
+deploy/*.tar.gz*
+deploy/*.manifest.json
 # Secrets: keep plaintext and every transient secrets.env variant out of
 # the build context. If an encrypted secrets.env is used, it is mounted
 # at runtime — never baked into the image. Mirrored in .gitignore.
@@ -22,6 +32,7 @@ secrets.env~
 !secrets.env.example
 /data/
 /logs/
+/backups/
 .git/
 .claude/
 .playwright-mcp/

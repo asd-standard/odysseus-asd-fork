@@ -736,7 +736,7 @@ def _raw_openai_tool_call_to_block(value) -> Optional[ToolBlock]:
                        "manage_documents", "manage_settings", "manage_notes",
                        "manage_research", "manage_bg_jobs"):
         content = json.dumps(args)
-    elif tool_type in ("get_workspace", "list_models"):
+    elif tool_type in ("list_models",):
         content = args.get("filter", "") if tool_type == "list_models" else ""
     elif tool_type == "list_library_files":
         content = json.dumps({"filter": args.get("filter", ""), "folder": args.get("folder", "")})

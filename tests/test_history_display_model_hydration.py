@@ -489,11 +489,6 @@ async def test_model_send_routes_hydrate_before_context_build(monkeypatch, path)
     )
     monkeypatch.setattr(
         chat_routes,
-        "_resolve_workspace_from_message_path",
-        lambda *_args: (None, None),
-    )
-    monkeypatch.setattr(
-        chat_routes,
         "_reconcile_selected_route_from_request",
         lambda *_args, **_kwargs: False,
     )

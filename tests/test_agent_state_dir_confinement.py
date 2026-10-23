@@ -39,7 +39,7 @@ from src.constants import (
     UPLOAD_DIR,
 )
 from src.tool_execution import (
-    _active_workspace,
+    _test_only_workspace,
     _resolve_search_root,
     _resolve_tool_path,
     agent_cwd,
@@ -62,12 +62,16 @@ def workspace_at(path):
 
     Set and reset in the same context; a ContextVar token cannot be reset from
     fixture teardown, which runs in a different one.
+
+    This is the TEST-ONLY confinement hook: production never binds a folder
+    (the workspace feature was removed), but these tests need a root that can
+    contain DATA_DIR to prove state files stay hidden.
     """
-    token = _active_workspace.set(os.path.realpath(path))
+    token = _test_only_workspace.set(os.path.realpath(path))
     try:
         yield
     finally:
-        _active_workspace.reset(token)
+        _test_only_workspace.reset(token)
 
 
 # ── The default roots ────────────────────────────────────────────────
@@ -350,11 +354,11 @@ def _configure_test_data_tree(monkeypatch, data_dir):
 @contextmanager
 def current_workspace_at(path):
     current_execution = importlib.import_module("src.tool_execution")
-    token = current_execution._active_workspace.set(os.path.realpath(path))
+    token = current_execution._test_only_workspace.set(os.path.realpath(path))
     try:
         yield
     finally:
-        current_execution._active_workspace.reset(token)
+        current_execution._test_only_workspace.reset(token)
 
 
 @pytest.mark.parametrize("relative_data", ["data", "./data"])
@@ -377,7 +381,7 @@ def test_relative_data_dir_preserves_only_canonical_roles(
     protected = data_dir / "settings.json"
     protected.write_text("protected", encoding="utf-8")
     monkeypatch.setattr(current_execution, "_AGENT_WORKDIR", str(workspace))
-    token = current_execution._active_workspace.set(None)
+    token = current_execution._test_only_workspace.set(None)
     try:
         assert set(current_execution._agent_readable_data_subdirs()) == {
             os.path.realpath(path) for path in readable.values()
@@ -397,7 +401,7 @@ def test_relative_data_dir_preserves_only_canonical_roles(
         monkeypatch.setattr(current_constants, "MAIL_ATTACHMENTS_DIR", "data/mcp_oauth")
         assert os.path.realpath("data/mcp_oauth") not in current_execution._agent_readable_data_subdirs()
     finally:
-        current_execution._active_workspace.reset(token)
+        current_execution._test_only_workspace.reset(token)
 
 
 @pytest.mark.parametrize(

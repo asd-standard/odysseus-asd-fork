@@ -29,10 +29,25 @@ data/
 !services/hwfit/data/
 !services/hwfit/data/hf_models.json
 logs/
+backups/
 *.log
 *.db
 *.sqlite
 *.sqlite3
+
+# Docker migration bundles (contain user data and secrets)
+odysseus-data-*.tar.gz
+odysseus-data-*.tar.gz.sha256
+odysseus-data-*.tar.gz.manifest.json
+odysseus-deploy-bundle-*.tar.gz
+odysseus-deploy-bundle-*.tar.gz.sha256
+odysseus-mcp-v2-hotfix-*.tar.gz
+odysseus-mcp-v2-hotfix-*.tar.gz.sha256
+odysseus-mcp-v1-shim-*.tar.gz
+odysseus-mcp-v1-shim-*.tar.gz.sha256
+deploy/.env
+deploy/.env.*
+!deploy/.env.production.example
 
 # Node
 node_modules/

@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261023noworkspace1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -125,6 +125,57 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   const docs = new Map();           // docId -> { id, title, language, content, version, sessionId }
   let _emailSendInFlight = false;
 
+  // ── Cross-instance document state ──────────────────────────────────────────
+  //
+  // Defence in depth for a bug that is otherwise invisible at runtime.
+  //
+  // A browser caches ES modules by full URL, so the same file referenced with
+  // two different ?v= strings — or loaded both by an `import` and by a bare
+  // <script type="module"> tag — becomes TWO module instances. Each keeps its
+  // own `activeDocId` and `docs` map. Then the instance rendering the editor is
+  // not the instance the chat asks for the active document, and the chat sends
+  // null while the user is staring at their document.
+  //
+  // That is exactly what happened here (index.html listed document.js,
+  // chatStream.js and chat.js twice, with mismatched query strings). The real
+  // fix is de-duplication, enforced by tests/test_frontend_module_identity.py.
+  // This mirror is the safety net: the live active document is published to
+  // window so a stray duplicate still reports the truth, and `instances` records
+  // every copy that loaded, which chat.js forwards to the server so a recurrence
+  // shows up as a log warning instead of a mystery.
+  const _MODULE_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
+  const _sharedDocState = (() => {
+    const existing = typeof window !== 'undefined' ? window.__odysseusDocState : null;
+    if (existing && typeof existing === 'object') return existing;
+    const fresh = {
+      // Last known id of the document open in the editor (authoritative).
+      activeDocId: null,
+      // Id shown in the Library's read-only preview.
+      previewDocId: null,
+      // Ids of every module instance that touched the state, newest last.
+      instances: [],
+    };
+    if (typeof window !== 'undefined') window.__odysseusDocState = fresh;
+    return fresh;
+  })();
+  if (!_sharedDocState.instances.includes(_MODULE_INSTANCE_ID)) {
+    _sharedDocState.instances.push(_MODULE_INSTANCE_ID);
+    if (_sharedDocState.instances.length > 1) {
+      console.warn(
+        '[document.js] duplicate module instance detected — document.js was ' +
+        'loaded more than once. Active document state is shared via ' +
+        'window.__odysseusDocState, but this usually indicates a mismatched ' +
+        '?v= query string in index.html.',
+        _sharedDocState.instances,
+      );
+    }
+  }
+
+  /** Publish the live active document so any other instance agrees with us. */
+  function _publishActiveDoc(docId) {
+    _sharedDocState.activeDocId = docId || null;
+  }
+
   const _docOpenKey = (sessionId) => 'odysseus-doc-open-' + sessionId;
   const _docMinimizedKey = (sessionId) => 'odysseus-doc-minimized-' + sessionId;
 
@@ -165,6 +216,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       openPanel,
       addDocToTabs,
       syncDocIndicator: _syncDocIndicator,
+      setLibraryPreviewDocId,
     });
     const sidebarNewDocBtn = document.getElementById('library-new-doc-btn');
     if (sidebarNewDocBtn && !sidebarNewDocBtn.dataset.docNewWired) {
@@ -552,6 +604,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   /** Show empty state when no documents exist yet */
   function showEmptyState() {
     activeDocId = null;
+    _publishActiveDoc(activeDocId);
     const textarea = document.getElementById('doc-editor-textarea');
     const langSelect = document.getElementById('doc-language-select');
     const badge = document.getElementById('doc-version-badge');
@@ -3980,6 +4033,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
           docs.delete(sendDocId);
           if (wasActiveSentDoc) {
             activeDocId = null;
+            _publishActiveDoc(activeDocId);
             const nextId = _visibleDocIdsForCurrentSession().find(id => docs.has(id));
             if (nextId) switchToDoc(nextId);
             else closePanel();
@@ -4071,6 +4125,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   function _closeWithoutDeleting(deleteDoc = false) {
     if (!activeDocId) return;
+    // Restore the real text before saving/closing so a pending diff preview is
+    // never written to disk.
+    _exitSuggestionPreview();
     if (deleteDoc) {
       fetch(`${API_BASE}/api/document/${activeDocId}`, { method: 'DELETE' }).catch(() => {});
     }
@@ -4463,9 +4520,21 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   function switchToDoc(docId) {
-    if (!docs.has(docId)) return;
+    if (!docId) return;
+    if (!docs.has(docId)) {
+      // Never no-op silently: the caller believes this document is open, and a
+      // bare `return` left the pane on the previous content with no active id —
+      // exactly the "editor shows something, nothing is registered" state.
+      // Fetch it into the tab map, then switch.
+      console.warn('switchToDoc: document not loaded, loading:', docId);
+      loadDocument(docId).catch((e) => console.error('switchToDoc load failed:', e));
+      return;
+    }
     _hideLoadingOverlay();
     if (_diffModeActive) exitDiffMode(true);
+    // A pending suggestion preview must not leak into the document we are
+    // switching away from (or to): restore the real text first.
+    _exitSuggestionPreview();
 
     // Save current doc state before switching
     saveCurrentToMap();
@@ -4482,6 +4551,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     }
 
     activeDocId = docId;
+    _publishActiveDoc(activeDocId);
     clearSelection();
     const doc = docs.get(docId);
 
@@ -4636,6 +4706,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     }
     if (!nextId) {
       activeDocId = null;
+      _publishActiveDoc(activeDocId);
       closePanel();
       return;
     }
@@ -4676,6 +4747,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const d = docs.get(doc.id);
       if (d) d.content = content;
       activeDocId = doc.id;
+      _publishActiveDoc(activeDocId);
       // Update textarea (keep existing content the user typed)
       const textarea = document.getElementById('doc-editor-textarea');
       if (textarea) {
@@ -6952,6 +7024,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (pane) pane.remove();
       if (divider) divider.remove();
       activeDocId = null;
+      _publishActiveDoc(activeDocId);
       const btn = document.getElementById('overflow-doc-btn');
       if (btn) btn.classList.remove('active');
       const docInd = document.getElementById('doc-indicator-btn');
@@ -7319,18 +7392,112 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     return sessionId;
   }
 
-  /** Load all documents for a session into tabs */
+  /**
+   * Re-attach the document the editor is already displaying, without changing
+   * which document that is.
+   *
+   * Called from `loadSessionDocs` when the incoming session has no documents of
+   * its own but the user still has one open (typically `session_id = NULL`:
+   * opened from the Library, or detached). Dropping the pointer there made chat
+   * send no `active_doc_id` on the next turn, so the agent reported "no document
+   * is open in the editor" while the pane showed the text.
+   *
+   * Why re-fetch instead of trusting the map: the tab map is per-session and was
+   * just pruned, so a detached/cross-session document is usually absent even
+   * though it is on screen. Re-fetching by id restores the tab entry, the title,
+   * the language, and the version badge — all from the canonical row.
+   *
+   * The editor is only repopulated when it is actually empty; otherwise
+   * `switchToDoc` would re-save the document needlessly on every session load.
+   */
+  async function _restoreDisplayedDoc(docId, sessionId) {
+    if (!docId) return;
+    if (!docs.has(docId)) {
+      try {
+        const res = await fetch(`${API_BASE}/api/document/${docId}`);
+        if (res.ok) {
+          const full = await res.json();
+          // Keep the document's own session association; a detached doc stays
+          // detached (session_id null → addDocToTabs falls back to undefined).
+          addDocToTabs(full, full.session_id);
+        }
+      } catch (e) {
+        console.warn('restoreDisplayedDoc: could not reload document', docId, e);
+      }
+    }
+    activeDocId = docId;
+    _publishActiveDoc(docId);
+    _markDocVisibleState(sessionId, 'open');
+    if (!isOpen) openPanel();
+    _syncDocIndicator();
+    renderTabs();
+    // Repopulate the editor only if the pane is empty (it normally still shows
+    // this document already; re-running switchToDoc would re-save needlessly).
+    const ta = document.getElementById('doc-editor-textarea');
+    const titleEl = document.getElementById('doc-title-input');
+    const displayed = (ta && ta.value) || (titleEl && titleEl.value);
+    if (!displayed && docs.has(docId)) {
+      try { switchToDoc(docId); } catch (e) { console.error('restoreDisplayedDoc switch failed:', e); }
+    }
+  }
+
+  /**
+   * Load all documents for a session into tabs.
+   *
+   * ── The "active document" invariant (read this before changing it) ────────
+   *
+   * `activeDocId` is what `chat.js` sends as `active_doc_id`; it is the only
+   * way the backend learns which document the user has open (documents can be
+   * detached, i.e. `session_id IS NULL`, so the server cannot infer it). This
+   * function runs 300 ms after every session switch/send, so a bug here is
+   * indistinguishable to the user from "the AI can't see my document".
+   *
+   * It took three attempts to get right, each fixing the previous one's
+   * assumption:
+   *
+   *   1. `activeDocId = null` unconditionally. Broke every detached or
+   *      cross-session document: the pane kept showing it, but the pointer was
+   *      gone by the time the next message was sent.
+   *   2. Guard with `docs.has(activeDocId)`. Still wrong: this endpoint returns
+   *      only this session's documents, and the prune loop above deletes
+   *      other-session entries from `docs` — so a document the user is plainly
+   *      looking at fails the guard and gets dropped anyway.
+   *   3. (current) Ask whether the EDITOR is still showing it — `_paneShowing`,
+   *      captured before pruning. A mounted pane plus a set id means the user
+   *      has that document open, whatever session it belongs to. It is then
+   *      re-attached by `_restoreDisplayedDoc()` rather than discarded.
+   *
+   * Do not reintroduce `docs.has()` as the gate, and do not clear the pointer
+   * just because the incoming session has no documents of its own.
+   */
   export async function loadSessionDocs(sessionId, opts = {}) {
     _lastSessionId = sessionId;
     const restoreMode = !!opts.restoreMode;
     const shouldRestoreOpen = localStorage.getItem(_docOpenKey(sessionId)) === '1';
     const shouldRestoreMinimized = localStorage.getItem(_docMinimizedKey(sessionId)) === '1';
+    // Capture the displayed document BEFORE pruning: a doc belonging to another
+    // session is removed from `docs` by the loop below even though the editor
+    // pane still shows it.
+    const _prevActiveDocId = activeDocId;
+    const _paneShowing = !!(
+      _prevActiveDocId
+      && (docs.has(_prevActiveDocId) || isOpen || document.getElementById('doc-editor-pane'))
+    );
     // Clear docs from other sessions so tabs are per-session,
     // but keep session-less docs (e.g. email compose) — they're independent
     for (const [id, doc] of [...docs]) {
       if (doc.sessionId && doc.sessionId !== sessionId) docs.delete(id);
     }
-    activeDocId = null;
+    // A document the user is looking at must survive a session reload. See the
+    // three-attempt history in this function's docstring: the gate is
+    // "_paneShowing", NOT `docs.has()`.
+    //
+    // `_prevActiveDocId` / `_paneShowing` are captured before the prune loop so
+    // a document belonging to another session (which that loop removes from
+    // `docs`) is still recognised as displayed.
+    const _keepPreviousActive = !!_prevActiveDocId && _paneShowing;
+    activeDocId = _keepPreviousActive ? _prevActiveDocId : null;
+    _publishActiveDoc(activeDocId);
 
     // Show loading state while fetching
     if (isOpen) _showLoadingOverlay();
@@ -7342,6 +7509,17 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       // Only load active docs
       const activeDocs = allDocs.filter(d => d.is_active);
       if (activeDocs.length === 0) {
+        // No docs in this session. If the user is still looking at a document
+        // that has no session (opened from the Library / detached), keep it —
+        // it is still the active document for the agent. Restore it into the
+        // tab map so tabs render, but never null the pointer just because the
+        // session has no documents of its own.
+        if (_keepPreviousActive) {
+          await _restoreDisplayedDoc(_prevActiveDocId, sessionId);
+          return;
+        }
+        activeDocId = null;
+        _publishActiveDoc(activeDocId);
         // No docs yet — show empty editor, doc will be created when user types
         if (!restoreMode || shouldRestoreOpen) {
           if (!isOpen) openPanel();
@@ -7362,7 +7540,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         // Coming back to a chat with documents should advertise the doc without
         // stealing half the screen. Default to a docked chip; only reopen the
         // full editor when this session explicitly persisted an open state.
+        // Never minimize a document the user is actively looking at for
+        // another session: that would clear their real active pointer.
+        if (_keepPreviousActive) {
+          await _restoreDisplayedDoc(_prevActiveDocId, sessionId);
+          return;
+        }
         activeDocId = target.id;
+        _publishActiveDoc(activeDocId);
         _minimizedDocId = target.id;
         _markDocVisibleState(sessionId, 'minimized');
         _ensureDocChipRegistered();
@@ -7372,6 +7557,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         } else {
           Modals.minimize('doc-panel');
         }
+        return;
+      }
+      // Keep the document the user already has open (possibly from another
+      // session or the Library) instead of yanking them to this session's doc.
+      if (_keepPreviousActive) {
+        await _restoreDisplayedDoc(_prevActiveDocId, sessionId);
         return;
       }
       _markDocVisibleState(sessionId, 'open');
@@ -8303,13 +8494,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const pane = document.querySelector('.doc-editor-pane');
     if (!wrap || !pane) return;
 
-    // Remove previous card and inline diff
+    // Remove previous card
     const old = document.getElementById('doc-suggestion-active');
     if (old) { if (old._cleanup) old._cleanup(); old.remove(); }
     _clearSuggestionHighlight();
-    _clearInlineDiff();
 
     if (_activeSuggestions.length === 0) {
+      // Queue drained: leave the read-only diff preview and restore the document.
+      _exitSuggestionPreview();
       return;
     }
 
@@ -8317,8 +8509,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const remaining = _activeSuggestions.length;
     const num = _suggestionTotal - remaining + 1;
 
-    // Show inline diff in the document
-    _showInlineDiff(sugg.find, sugg.replace);
+    // Show the suggestion as a real line diff in a read-only preview.
+    _renderSuggestionPreview(sugg);
 
     const textarea = document.getElementById('doc-editor-textarea');
 
@@ -8441,62 +8633,192 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   /** Show inline diff by modifying the code highlight element directly */
-  function _showInlineDiff(findText, replaceText) {
-    const codeEl = document.getElementById('doc-editor-code');
-    const textarea = document.getElementById('doc-editor-textarea');
-    if (!codeEl || !textarea) return;
+  // ── Suggestion preview: line diff rendered as REAL editor content ─────────
+  //
+  // Why not a colour overlay (the previous approach): the syntax-highlight
+  // layer sits behind a `color: transparent` textarea, so a deleted span showed
+  // an empty red smear and an inserted span showed characters that were not in
+  // the document at all. Long, multi-line suggestions collapsed into one
+  // unreadable line. It was technically rendered and practically invisible.
+  //
+  // Instead, while suggestions are pending, a read-only <pre> overlay replaces
+  // the textarea and shows the changed lines as real text:
+  //
+  //     context
+  //   −old line            (red row)
+  //   +new line            (green row)
+  //     context
+  //
+  // The textarea itself is NEVER written to, so nothing (autosave,
+  // saveCurrentToMap, find, language detection) can persist the preview as if
+  // it were the document.
 
-    const text = textarea.value;
-    const idx = text.indexOf(findText);
-    if (idx === -1) return;
+  let _suggestionPreviewActive = false;
+  // The document whose real text must be restored when the queue drains.
+  let _suggestionPreviewDocId = null;
+  // Authoritative pristine text, captured ON ENTRY from the doc model — never
+  // read back out of the textarea on exit, which is what makes the restore
+  // robust against anything that might touch the editor meanwhile.
+  let _suggestionPreviewOriginal = null;
 
-    const before = text.substring(0, idx);
-    const after = text.substring(idx + findText.length);
+  /** True while the editor is showing a suggestion diff instead of the document. */
+  function isSuggestionPreviewActive() { return _suggestionPreviewActive; }
 
-    // Character-level diff
-    let cPre = 0;
-    while (cPre < findText.length && cPre < replaceText.length && findText[cPre] === replaceText[cPre]) cPre++;
-    let cSuf = 0;
-    while (cSuf < (findText.length - cPre) && cSuf < (replaceText.length - cPre) &&
-           findText[findText.length - 1 - cSuf] === replaceText[replaceText.length - 1 - cSuf]) cSuf++;
-
-    const commonBefore = findText.substring(0, cPre);
-    const commonAfter = findText.substring(findText.length - cSuf);
-    const delPart = findText.substring(cPre, findText.length - cSuf);
-    const addPart = replaceText.substring(cPre, replaceText.length - cSuf);
-
-    // Replace codeEl content with diff-marked version
-    codeEl.innerHTML = '';
-    codeEl.appendChild(document.createTextNode(before));
-    if (commonBefore) codeEl.appendChild(document.createTextNode(commonBefore));
-
-    if (delPart) {
-      const del = document.createElement('span');
-      del.className = 'sugg-inline-del';
-      del.textContent = delPart;
-      codeEl.appendChild(del);
-    }
-    if (addPart) {
-      const add = document.createElement('span');
-      add.className = 'sugg-inline-add';
-      add.textContent = addPart;
-      codeEl.appendChild(add);
-    }
-
-    if (commonAfter) codeEl.appendChild(document.createTextNode(commonAfter));
-    codeEl.appendChild(document.createTextNode(after + '\n'));
-
-    // Mark that we have an active diff so syncHighlighting doesn't overwrite it
-    codeEl.dataset.hasDiff = '1';
+  function _suggestionPreviewEl() {
+    return document.getElementById('doc-suggestion-preview');
   }
 
-  /** Clear inline diff — restore normal highlighting */
-  function _clearInlineDiff() {
-    const codeEl = document.getElementById('doc-editor-code');
-    if (codeEl && codeEl.dataset.hasDiff) {
-      delete codeEl.dataset.hasDiff;
-      syncHighlighting();
+  /**
+   * Render a suggestion as a line diff in the read-only preview layer.
+   *
+   * Finds `sugg.find` in the PRISTINE text (not the editor), diffs that region
+   * against `sugg.replace`, and shows the changed lines with unchanged context
+   * around them. Re-callable: showing the next suggestion re-renders in place
+   * without dropping out of preview mode.
+   */
+  function _renderSuggestionPreview(sugg) {
+    const textarea = document.getElementById('doc-editor-textarea');
+    const wrap = document.getElementById('doc-editor-wrap');
+    if (!textarea || !wrap) return;
+
+    // Enter preview mode on first call; afterwards reuse the captured original
+    // so a sequence of accepts composes on top of the previous result.
+    if (!_suggestionPreviewActive) {
+      const docId = activeDocId;
+      const fromModel = docId && docs.has(docId) ? (docs.get(docId).content ?? null) : null;
+      _suggestionPreviewOriginal = fromModel !== null ? fromModel : textarea.value;
+      _suggestionPreviewDocId = docId;
+      _suggestionPreviewActive = true;
+      // Read-only from the moment a suggestion is shown until the queue drains.
+      textarea.readOnly = true;
+      wrap.classList.add('doc-suggestion-previewing');
     }
+
+    const original = _suggestionPreviewOriginal ?? textarea.value;
+    const idx = sugg && sugg.find ? original.indexOf(sugg.find) : -1;
+
+    let pre = _suggestionPreviewEl();
+    if (!pre) {
+      pre = document.createElement('pre');
+      pre.id = 'doc-suggestion-preview';
+      pre.className = 'doc-suggestion-preview';
+      wrap.appendChild(pre);
+    }
+    pre.innerHTML = '';
+
+    if (idx === -1) {
+      // The anchor moved (document edited elsewhere / stale suggestion). Say so
+      // instead of rendering a misleading empty diff.
+      const note = document.createElement('div');
+      note.className = 'sugg-preview-note';
+      note.textContent = 'This suggestion no longer matches the document text.';
+      pre.appendChild(note);
+      return;
+    }
+
+    const lineStart = original.lastIndexOf('\n', idx - 1) + 1;
+    let lineEnd = original.indexOf('\n', idx + sugg.find.length);
+    if (lineEnd === -1) lineEnd = original.length;
+
+    const regionOld = original.substring(lineStart, lineEnd);
+
+    // The replacement replaces the whole span of `find`, which may start/end
+    // mid-line; keep the untouched head/tail of the first/last line as context.
+    const headPrefix = original.substring(lineStart, idx);
+    const tailSuffix = original.substring(idx + sugg.find.length, lineEnd);
+    const newRegion = headPrefix + (sugg.replace || '') + tailSuffix;
+
+    const entries = _computeLineDiff(regionOld, newRegion);
+
+    // Collapse long unchanged runs: keep 1 line of context on each side of a
+    // change, and summarise the rest, so a 200-line document does not bury the
+    // one changed line.
+    const CTX = 1;
+    const keep = new Array(entries.length).fill(false);
+    entries.forEach((e, i) => {
+      if (e.type === 'equal') return;
+      for (let k = Math.max(0, i - CTX); k <= Math.min(entries.length - 1, i + CTX); k++) keep[k] = true;
+    });
+
+    const frag = document.createDocumentFragment();
+    let omitRun = 0;
+    const flushOmit = () => {
+      if (omitRun > 0) {
+        const skip = document.createElement('div');
+        skip.className = 'sugg-preview-skip';
+        skip.textContent = `… ${omitRun} unchanged line${omitRun === 1 ? '' : 's'} …`;
+        frag.appendChild(skip);
+        omitRun = 0;
+      }
+    };
+    entries.forEach((e, i) => {
+      if (!keep[i]) { omitRun++; return; }
+      flushOmit();
+      const row = document.createElement('div');
+      if (e.type === 'equal') {
+        row.className = 'sugg-line sugg-line-ctx';
+        row.textContent = ' ' + e.line;
+      } else if (e.type === 'delete') {
+        row.className = 'sugg-line sugg-line-del';
+        row.textContent = '−' + e.line;
+      } else {
+        row.className = 'sugg-line sugg-line-add';
+        row.textContent = '+' + e.line;
+      }
+      frag.appendChild(row);
+    });
+    flushOmit();
+    pre.appendChild(frag);
+
+    // Scroll so the first change is visible.
+    const firstChange = pre.querySelector('.sugg-line-del, .sugg-line-add');
+    if (firstChange && typeof firstChange.offsetTop === 'number') {
+      pre.scrollTop = Math.max(0, firstChange.offsetTop - 40);
+    }
+
+    // The gutter must count the diff rows the user is actually looking at, not
+    // the hidden document underneath.
+    const rowCount = pre.querySelectorAll('.sugg-line').length;
+    const gutter = document.getElementById('doc-line-numbers');
+    if (gutter) {
+      const inner = _lineNumberContentEl(gutter);
+      const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 20;
+      _renderLineNumberRows(inner, new Array(rowCount).fill(lineHeight));
+    }
+  }
+
+  /**
+   * Leave preview mode and restore the real document text.
+   *
+   * Idempotent and safe to call from any exit path (queue drained, all closed,
+   * document switched, panel closed). The textarea is restored from the
+   * pristine copy captured on entry, never from whatever is on screen.
+   */
+  function _exitSuggestionPreview() {
+    if (!_suggestionPreviewActive) return;
+    const textarea = document.getElementById('doc-editor-textarea');
+    const wrap = document.getElementById('doc-editor-wrap');
+    const documentId = _suggestionPreviewDocId;
+    const original = _suggestionPreviewOriginal;
+
+    _suggestionPreviewActive = false;
+    _suggestionPreviewDocId = null;
+    _suggestionPreviewOriginal = null;
+
+    const pre = _suggestionPreviewEl();
+    if (pre) pre.remove();
+    if (wrap) wrap.classList.remove('doc-suggestion-previewing');
+
+    if (textarea) {
+      textarea.readOnly = false;
+      if (original !== null && textarea.value !== original) textarea.value = original;
+    }
+    // Keep the model in sync with what is actually on screen.
+    if (documentId && docs.has(documentId) && original !== null) {
+      docs.get(documentId).content = original;
+    }
+    syncHighlighting();
+    if (textarea) updateLineNumbers(textarea.value);
   }
 
   // ---- Diff mode (line-level review) ----
@@ -8933,21 +9255,35 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   let _suggestionTotal = 0;
   let _suggestionIndex = 0;
 
-  // Override handleDocSuggestions to track total
-  const _origHandleDocSuggestions = handleDocSuggestions;
-  // (total is set inside handleDocSuggestions before _showCurrentSuggestion)
-
-  /** Apply a single suggestion edit without removing from queue */
+  /**
+   * Apply a single suggestion edit without removing it from the queue.
+   *
+   * Edits the PRISTINE text captured by the preview (not `textarea.value`,
+   * which stays untouched while previewing), so a sequence of accepts composes
+   * correctly and the diff keeps rendering against the right baseline.
+   */
   function _applySuggestion(sugg) {
     const textarea = document.getElementById('doc-editor-textarea');
-    if (textarea && sugg.find && textarea.value.includes(sugg.find)) {
-      textarea.value = textarea.value.replace(sugg.find, sugg.replace);
+    const base = _suggestionPreviewActive && _suggestionPreviewOriginal !== null
+      ? _suggestionPreviewOriginal
+      : (textarea ? textarea.value : null);
+    if (base === null || !sugg || !sugg.find) return;
+    if (!base.includes(sugg.find)) return;
+
+    const updated = base.replace(sugg.find, sugg.replace);
+    if (_suggestionPreviewActive) {
+      _suggestionPreviewOriginal = updated;
+      // Keep the model in sync so exit/switch restores the accepted text.
+      if (_suggestionPreviewDocId && docs.has(_suggestionPreviewDocId)) {
+        docs.get(_suggestionPreviewDocId).content = updated;
+      }
+    } else if (textarea) {
+      textarea.value = updated;
       syncHighlighting();
-      saveDocument({ silent: true });
     }
   }
 
-  /** Animate transition to next suggestion */
+  /** Animate transition to next suggestion, and save once the queue drains. */
   function _animateNext() {
     _saveSuggestionsToStorage();
     const old = document.getElementById('doc-suggestion-active');
@@ -8959,9 +9295,17 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       setTimeout(() => {
         old.remove();
         _showCurrentSuggestion();
+        // Exactly one save per drained queue, not one per accepted suggestion
+        // (which would create a version for every card).
+        if (_activeSuggestions.length === 0 && !_suggestionPreviewActive) {
+          saveDocument({ silent: true });
+        }
       }, 150);
     } else {
       _showCurrentSuggestion();
+      if (_activeSuggestions.length === 0 && !_suggestionPreviewActive) {
+        saveDocument({ silent: true });
+      }
     }
   }
 
@@ -8969,63 +9313,25 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  /** Accept a suggestion — apply the edit */
-  function acceptSuggestion(id) {
-    const sugg = _activeSuggestions.find(s => s.id === id);
-    if (!sugg) return;
-
-    const textarea = document.getElementById('doc-editor-textarea');
-    if (textarea && sugg.find && textarea.value.includes(sugg.find)) {
-      textarea.value = textarea.value.replace(sugg.find, sugg.replace);
-      syncHighlighting();
-      saveDocument({ silent: true });
-    }
-
-    // Animate card out
-    sugg.cardEl.style.transition = 'opacity 0.2s, transform 0.2s';
-    sugg.cardEl.style.opacity = '0';
-    sugg.cardEl.style.transform = 'translateX(10px)';
-    setTimeout(() => sugg.cardEl.remove(), 200);
-
-    _activeSuggestions = _activeSuggestions.filter(s => s.id !== id);
-    _clearSuggestionHighlight();
-
-    // Remove container if empty
-    if (_activeSuggestions.length === 0) {
-      const container = document.getElementById('doc-suggestions-container');
-      if (container) container.style.display = 'none';
-    }
-  }
-
-  /** Dismiss a suggestion — just remove the card */
-  function dismissSuggestion(id) {
-    const sugg = _activeSuggestions.find(s => s.id === id);
-    if (!sugg) return;
-
-    sugg.cardEl.style.transition = 'opacity 0.15s';
-    sugg.cardEl.style.opacity = '0';
-    setTimeout(() => sugg.cardEl.remove(), 150);
-
-    _activeSuggestions = _activeSuggestions.filter(s => s.id !== id);
-    _clearSuggestionHighlight();
-
-    if (_activeSuggestions.length === 0) {
-      const container = document.getElementById('doc-suggestions-container');
-      if (container) container.style.display = 'none';
-    }
-  }
-
-  /** Clear all suggestion cards */
+  /**
+   * Clear all suggestion cards.
+   *
+   * Note: there is only ONE way a suggestion gets applied — the card's
+   * Accept/Skip buttons wired in `_showCurrentSuggestion`, which operate on the
+   * read-only preview (see `_renderSuggestionPreview`). Older helpers named
+   * `acceptSuggestion(id)` / `dismissSuggestion(id)` and a
+   * `#doc-suggestions-container` element were removed: nothing called them and
+   * they still wrote straight into the textarea. Do not reintroduce that path.
+   */
   function clearAllSuggestions() {
     _activeSuggestions = [];
     _suggestionTotal = 0;
     _saveSuggestionsToStorage();
     _clearSuggestionHighlight();
-    _clearInlineDiff();
     const old = document.getElementById('doc-suggestion-active');
     if (old) { if (old._cleanup) old._cleanup(); old.remove(); }
-    const container = document.getElementById('doc-suggestions-container');
-    if (container) { container.innerHTML = ''; container.style.display = 'none'; }
+    // Leave the read-only preview and restore the document.
+    _exitSuggestionPreview();
     // Restore line numbers
     const ta = document.getElementById('doc-editor-textarea');
     if (ta) updateLineNumbers(ta.value);
@@ -9432,6 +9738,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         if (docs.has(savingDocId)) docs.delete(savingDocId);
         if (activeDocId === savingDocId) {
           activeDocId = null;
+          _publishActiveDoc(activeDocId);
           renderTabs();
         }
         _syncDocIndicator();
@@ -9826,6 +10133,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         switchToDoc(remaining[0]);
       } else {
         activeDocId = null;
+        _publishActiveDoc(activeDocId);
         closePanel();
       }
       if (uiModule) uiModule.showToast('Document deleted');
@@ -10359,6 +10667,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     }
     _streamDocId = docId;
     activeDocId = docId;
+    _publishActiveDoc(activeDocId);
     _syncDocIndicator();
 
     if (!isOpen) openPanel();
@@ -10605,7 +10914,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       tempDoc.content = newContent;
       docs.set(docId, tempDoc);
       // Fix activeDocId reference
-      if (activeDocId === streamingId) activeDocId = docId;
+      if (activeDocId === streamingId) {
+        activeDocId = docId;
+        _publishActiveDoc(activeDocId);
+      }
     }
 
     // Deduplicate: if a new doc has same title as existing doc in this session, update it instead
@@ -10731,6 +11043,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     // Switch to this doc's tab
     activeDocId = docId;
+    _publishActiveDoc(activeDocId);
 
     const badge = document.getElementById('doc-version-badge');
     const titleInput = document.getElementById('doc-title-input');
@@ -11124,8 +11437,18 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   export function clearAll() {
     docs.clear();
     activeDocId = null;
+    _publishActiveDoc(activeDocId);
     _lastSessionId = '';
     if (isOpen) closePanel();
+    // `docs.clear()` alone left the mounted textarea showing the previous
+    // document's text with no tab and no active id — a pane that looks like a
+    // document but is registered nowhere. Blank it so "pane on screen" always
+    // implies "a document is registered".
+    const ta = document.getElementById('doc-editor-textarea');
+    if (ta) ta.value = '';
+    const titleEl = document.getElementById('doc-title-input');
+    if (titleEl) titleEl.value = '';
+    renderTabs();
     _syncDocIndicator();
   }
 
@@ -11134,7 +11457,68 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   export function getCurrentDocId() {
-    return activeDocId;
+    return activeDocId || _sharedDocState.activeDocId || null;
+  }
+
+  /**
+   * The document the editor is actually showing right now.
+   *
+   * `getCurrentDocId()` is what the chat sends as `active_doc_id`. This is the
+   * honest "what is on screen" answer for the case where the panel displays a
+   * document that the tab/active pointer does not track (e.g. a card in the
+   * Library preview, or a stale pointer). It is only ever a real document the
+   * user is looking at — never a database guess like "the most recent one".
+   */
+  export function getDisplayedDocId() {
+    // A minimized (docked) document is still the one the user has open, so the
+    // panel being closed/minimized must not hide it from the agent.
+    // NOTE: a set `activeDocId` is authoritative on its own — requiring
+    // `docs.has()` here made the id vanish when the tab map was cleared while
+    // the pane stayed mounted, which surfaced as "editor open but nothing
+    // registered". The map is only consulted for the Library-preview fallback.
+    // The shared state is the final fallback so a duplicated module instance
+    // still reports the document the live editor is showing.
+    if (activeDocId) return activeDocId;
+    if (_sharedDocState.activeDocId) return _sharedDocState.activeDocId;
+    return getLibraryPreviewDocId();
+  }
+
+  /** The document shown in the Library's floating preview, if any. */
+  export function getLibraryPreviewDocId() {
+    const previewPanel = document.querySelector('.doclib-preview-panel');
+    return previewPanel?.dataset?.docId || _sharedDocState.previewDocId || null;
+  }
+
+  /** Publish/clear the Library preview id for other module instances + chat. */
+  export function setLibraryPreviewDocId(docId) {
+    _sharedDocState.previewDocId = docId || null;
+  }
+
+  /**
+   * True only when the editor is showing a document we can name.
+   *
+   * A mounted `#doc-editor-pane` alone does NOT count: `clearAll()` and
+   * `showEmptyState()` can leave a pane on screen with no document behind it,
+   * and reporting that as "a document is open" made the agent claim an
+   * active document existed. Callers that need the diagnostic should use
+   * `hasStaleEditorPane()`.
+   */
+  /** Ids of the loaded document.js module instances (diagnostic only). */
+  function getModuleInstanceIds() {
+    return (_sharedDocState.instances || []).slice();
+  }
+
+  export function isShowingDocument() {
+    return !!getDisplayedDocId() || !!_minimizedDocId;
+  }
+
+  /**
+   * True when the editor pane is visibly on screen but no document is
+   * registered. Used only to phrase messages accurately and to self-heal.
+   */
+  export function hasStaleEditorPane() {
+    return !getDisplayedDocId()
+      && !!(isOpen || document.getElementById('doc-editor-pane'));
   }
 
   export function getActiveEmailComposerContext() {
@@ -11195,6 +11579,12 @@ const documentModule = {
   exitDiffMode,
   isDiffModeActive,
   getCurrentDocId,
+  getDisplayedDocId,
+  getLibraryPreviewDocId,
+  setLibraryPreviewDocId,
+  getModuleInstanceIds,
+  isShowingDocument,
+  hasStaleEditorPane,
   getActiveEmailComposerContext,
   findEmailDocId,
   getSelectionContext,

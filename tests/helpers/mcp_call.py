@@ -1,10 +1,9 @@
 """In-process invocation helpers for MCP servers' tool handlers.
 
-The MCP server modules (mcp_servers/*_server.py) migrated to the raw
-``mcp.server.Server`` v2 API: tools are dispatched through
-``handle_call_tool(ctx, request)`` registered via ``add_request_handler``,
-with no module-level ``call_tool`` anymore. Tests that exercise the server
-logic in-process call these helpers instead of the removed ``call_tool``.
+The MCP server modules (mcp_servers/*_server.py) keep full-request handlers
+(``handle_call_tool(ctx, request)``) and register them through the MCP SDK v1
+decorator shim in ``mcp_servers/_v1_compat.py``. Tests that exercise the server
+logic in-process call these helpers instead of going through the decorators.
 
 The returned value is the handler's ``CallToolResult.content`` — a list of
 ``mcp.types.TextContent`` — matching the old ``call_tool(...) -> list[TextContent]``

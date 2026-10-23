@@ -11,9 +11,10 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent, ListToolsRequest, CallToolRequest, ListToolsResult, CallToolResult
+from mcp.types import Tool, TextContent, ListToolsResult, CallToolResult
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from mcp_servers._v1_compat import register_v1_handlers
 
 server = Server("rag")
 
@@ -62,9 +63,6 @@ async def handle_list_tools(ctx, request) -> ListToolsResult:
             },
         )
     ])
-
-
-server.add_request_handler("tools/list", ListToolsRequest, handle_list_tools)
 
 
 async def handle_call_tool(ctx, request) -> CallToolResult:
@@ -146,7 +144,7 @@ async def handle_call_tool(ctx, request) -> CallToolResult:
         return CallToolResult(content=[TextContent(type="text", text=f"Error: Unknown action '{action}'. Use: list, add_directory, remove_directory")])
 
 
-server.add_request_handler("tools/call", CallToolRequest, handle_call_tool)
+register_v1_handlers(server, handle_list_tools, handle_call_tool)
 
 
 async def run():

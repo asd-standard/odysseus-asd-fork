@@ -9,14 +9,14 @@ import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js?v=20260819approvalcontrol1';
-import chatStream from './chatStream.js?v=20260819approvalcontrol1';
+import chatStream from './chatStream.js?v=20261023noworkspace1';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
-import documentModule from './document.js?v=20260815approvalsave1';
+import documentModule from './document.js?v=20261023noworkspace1';
 import * as emailInbox from './emailInbox.js?v=20260815approvalsave1';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js?v=20260815approvalsave1';
@@ -1857,6 +1857,64 @@ import { loadPanel } from './panels.js';
         }
         fd.append('active_doc_id', activeDocIdForSend);
       }
+      // A highlighted selection is the one case where the document body is
+      // quoted in the prompt; flag it explicitly instead of making the server
+      // re-parse the "[Doc edit: L25]" prefix out of the message text.
+      if (docSel) {
+        fd.append('document_selection', 'true');
+      }
+      // ── Editor state signals (`active_doc_id` is sent above) ──────────────
+      //
+      // The backend can only know what is open because the browser tells it:
+      // documents may be detached (`session_id IS NULL`), so it cannot infer
+      // the editor's contents from the database. These extras exist so the
+      // backend can report the REAL reason when a tool cannot resolve a
+      // target, instead of guessing "no document is open":
+      //
+      //   displayed_doc_id       editor is showing a doc other than the chat's
+      //                          active target (e.g. restored after a reload)
+      //   editor_open            a document is registered as open
+      //   editor_stale           pane is on screen but nothing is attached
+      //   library_preview_doc_id a doc is in the read-only Library preview
+      //                          (deliberately NOT promoted to active)
+      //   doc_module_instances   duplicate document.js instances (see
+      //                          document.js's cross-instance state note) —
+      //                          >1 means a cache/entry-point bug is back
+      //
+      // Emitting these is best-effort: a failure here must never block a send.
+      try {
+        const displayedDocId = documentModule && typeof documentModule.getDisplayedDocId === 'function'
+          ? documentModule.getDisplayedDocId()
+          : null;
+        if (displayedDocId && displayedDocId !== activeDocIdForSend) {
+          fd.append('displayed_doc_id', displayedDocId);
+        }
+        if (documentModule && typeof documentModule.isShowingDocument === 'function'
+            && documentModule.isShowingDocument()) {
+          fd.append('editor_open', 'true');
+        }
+        // The Library preview is NOT the editor and deliberately does not
+        // become the active document; report it separately so the agent can
+        // say "open it in the editor" instead of guessing.
+        const previewDocId = documentModule && typeof documentModule.getLibraryPreviewDocId === 'function'
+          ? documentModule.getLibraryPreviewDocId()
+          : null;
+        if (previewDocId) {
+          fd.append('library_preview_doc_id', previewDocId);
+        }
+        if (documentModule && typeof documentModule.hasStaleEditorPane === 'function'
+            && documentModule.hasStaleEditorPane()) {
+          fd.append('editor_stale', 'true');
+        }
+        if (documentModule && typeof documentModule.getModuleInstanceIds === 'function') {
+          const ids = documentModule.getModuleInstanceIds();
+          // >1 means document.js was instantiated twice (mismatched ?v= or a
+          // duplicate <script> entry point). State is shared via
+          // window.__odysseusDocState so the agent still works, but this is a
+          // bug worth seeing in the server log.
+          fd.append('doc_module_instances', ids.join(','));
+        }
+      } catch (_e) { /* best-effort */ }
       // Active email context — when an email reader is open, pass its
       // uid/folder/account so "reply", "summarize", "what does this say"
       // resolve to the email the user is actually looking at instead of
@@ -1881,18 +1939,22 @@ import { loadPanel } from './panels.js';
 	      const isPlanMode = !!toggleState.plan_mode && !(el('research-toggle') && el('research-toggle').checked);
 	      let isAgentMode = (toggleState.mode || 'chat') === 'agent';
       const isIncognito = isIncognitoForSend;
-	      const workspaceAgentIntent = !isIncognito && /\b(fix|debug|implement|change|update|refactor|patch|review|test|run|execute|start|launch|build|lint|typecheck|benchmark|eval|terminal[- ]bench|tbench|repo|repository|codebase|project|app|server|api|frontend|backend|bug|issue|pr|file|folder|directory|source|logs?|trace|stacktrace|traceback|docker|container|tmux|terminal|shell|git|branch|commit|diff|pytest|process|port|endpoint|computer|machine|laptop|device|system)\b/i.test(String(msg || ''));
+	      // File/shell ("workspace") intents used to force agent mode AND unlock
+	      // bash for the turn. The workspace concept is gone: whether to act on
+	      // the filesystem is the model's decision, and bash stays admin-gated
+	      // server-side. Keep the name so the downstream send-mode logic is
+	      // unchanged, but it no longer depends on message wording.
+	      const workspaceAgentIntent = false;
 	      if (isPlanMode || _pendingApprovedPlan) {
 	        isAgentMode = true;
 	      }
 	      if (!isAgentMode && workspaceAgentIntent) {
 	        isAgentMode = true;
 	      }
-	      // Auto-escalate to agent mode when a document is open — the user expects
-	      // the AI to see the document and have tools to edit it
-	      if (!isIncognito && !isAgentMode && documentModule && activeDocIdForSend) {
-	        isAgentMode = true;
-	      }
+	      // NOTE: a document being open in the editor does NOT force agent mode.
+	      // Whether to act on the visible document is the model's decision, made
+	      // from the user's request — not a default imposed by UI state.
+
 	      fd.append('mode', isAgentMode ? 'agent' : 'chat');
 	      fd.append('plan_mode', isPlanMode ? 'true' : 'false');
 	      if (!isPlanMode && _pendingApprovedPlan) {
@@ -1914,7 +1976,6 @@ import { loadPanel } from './panels.js';
 	        fd.set('plan_mode', 'false');
 	      }
       fd.append('allow_bash', el('bash-toggle').checked ? 'true' : 'false');
-      if (workspaceAgentIntent) fd.set('allow_bash', 'true');
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');
@@ -1922,10 +1983,11 @@ import { loadPanel } from './panels.js';
       if (isIncognito) {
         fd.append('incognito', 'true');
       }
-      const _ws = (Storage.KEYS && Storage.get(Storage.KEYS.WORKSPACE, '')) || '';
-      if (_ws) {
-        fd.append('workspace', _ws);
-      }
+      // Workspace selection removed: no `workspace` field is sent. Odysseus is
+      // document/SQL based for multi-user hosting, and per-turn folder binding
+      // was a foot-gun. Clear any value persisted by an older build so nothing
+      // stale is left behind in this browser.
+      try { Storage.remove(Storage.KEYS.WORKSPACE); } catch (_e) { /* best-effort */ }
       if (presetsModule.getSelectedPreset()) {
         fd.append('preset_id', presetsModule.getSelectedPreset());
       }
@@ -3227,19 +3289,9 @@ import { loadPanel } from './panels.js';
                   _sourcesHtml = _buildSourcesBox(json.data, 'web');
                 }
               } else if (json.type === 'workspace_rejected') {
-                // Server refused to bind the posted workspace (deleted folder,
-                // file path, sensitive dir, filesystem root). Clear the stored
-                // value so the pill stops claiming a confinement that is not in
-                // effect, and tell the user.
-                const _wsPath = (json.data && json.data.path) || '';
-                import('./workspace.js').then((m) => {
-                  const ws = m.default || m;
-                  if (ws && ws.setWorkspace) ws.setWorkspace('');
-                });
-                uiModule.showToast(
-                  `Workspace ${_wsPath || '(unknown)'} is no longer usable; running without confinement`,
-                  6000
-                );
+                // No longer emitted: the workspace concept was removed. Kept as
+                // a harmless no-op so an in-flight stream from an older server
+                // build cannot break the handler.
                 continue;
               } else if (json.type === 'model_info') {
                 // Update role label with model name as soon as we know it

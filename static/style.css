@@ -14115,21 +14115,64 @@ mark.doc-find-mark.current {
   font-weight: 600;
   letter-spacing: 0.5px;
 }
-/* Inline diff markers — injected into the code highlight element */
-.sugg-inline-del {
-  background: color-mix(in srgb, var(--red) 20%, transparent);
-  color: color-mix(in srgb, var(--red) 70%, var(--fg));
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in srgb, var(--red) 40%, transparent);
-  border-radius: 2px;
-  padding: 0 2px;
+/* ── Suggestion diff preview (real editor content) ──────────────────────────
+   While suggestions are pending the editor renders this read-only layer over
+   the textarea: actual −/+ text rows, not a translucent colour overlay. It must
+   use the SAME typography metrics as .doc-editor-highlight (font, size,
+   line-height, gutter padding) so it lines up with the line-number gutter and
+   the text underneath. */
+.doc-editor-wrap.doc-suggestion-previewing .doc-editor-textarea,
+.doc-editor-wrap.doc-suggestion-previewing .doc-editor-highlight {
+  /* Hidden but still laid out: keeps the wrap's size stable so the gutter and
+     the card anchor math stay valid. */
+  visibility: hidden;
 }
-.sugg-inline-add {
-  background: color-mix(in srgb, var(--green) 25%, transparent);
-  color: var(--green);
+.doc-suggestion-preview {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 10px 12px 10px 48px;
+  box-sizing: border-box;
+  overflow: auto;
+  font-family: inherit;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+  tab-size: 4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg);
+  color: var(--fg);
+  z-index: 1;
+  cursor: default;
+  user-select: text;
+}
+.doc-suggestion-preview .sugg-line {
+  display: block;
+  /* Padding keeps the tint from bleeding into the gutter; the marker glyph is
+     part of the text so it is selectable and copyable like a real diff. */
+  padding: 0 4px;
   border-radius: 2px;
-  padding: 0 2px;
+  white-space: pre-wrap;
+}
+.doc-suggestion-preview .sugg-line-ctx {
+  opacity: 0.65;
+}
+.doc-suggestion-preview .sugg-line-del {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--red) 70%, transparent);
+}
+.doc-suggestion-preview .sugg-line-add {
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green) 70%, transparent);
+}
+.doc-suggestion-preview .sugg-preview-skip,
+.doc-suggestion-preview .sugg-preview-note {
+  display: block;
+  opacity: 0.45;
+  font-style: italic;
+  padding: 2px 4px;
 }
 /* ---- Diff mode ---- */
 .diff-toolbar {
@@ -17239,6 +17282,23 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 .doclib-preview-menu:hover,
 .doclib-preview-close:hover { opacity: 1; }
 .doclib-preview-close { margin-left: auto; }
+/* Explicit promotion from the read-only preview into the editor — the only way
+   a previewed document becomes the agent's "active document". */
+.doclib-preview-open {
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 7px;
+  flex-shrink: 0;
+  line-height: 1.4;
+  font-size: 10px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.doclib-preview-open:hover { opacity: 1; }
+.doclib-preview-open:disabled { opacity: 0.4; cursor: default; }
 .doclib-preview-body {
   flex: 1 1 auto;
   min-height: 0;

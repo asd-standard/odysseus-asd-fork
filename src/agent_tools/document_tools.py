@@ -73,12 +73,181 @@ def _get_owned_document(db, Document, doc_id: str, owner: Optional[str], active_
     return q.first()
 
 
-def _most_recent_owned_document(db, Document, owner: Optional[str], active_only: bool = False):
-    q = db.query(Document)
-    if active_only:
-        q = q.filter(Document.is_active == True)
-    q = _owned_document_query(q, Document, owner)
-    return q.order_by(Document.updated_at.desc()).first()
+# ---------------------------------------------------------------------------
+# Target resolution for editor-document tools
+# ---------------------------------------------------------------------------
+#
+# A document tool may only act on a target the user actually pointed at. There
+# are exactly two ways to name one:
+#
+#   1. the document open in the editor — the in-memory pointer set by
+#      `stream_agent_loop` from the frontend's `active_doc_id` /
+#      `displayed_doc_id`, and
+#   2. an explicit title or document_id the user said ("read X.md").
+#
+# Anything else is an error the model can fix in one step. There is deliberately
+# NO "most recently updated document" fallback.
+#
+# Why this matters (hard-won — see also the pointer comment in
+# `stream_agent_loop` and the `active_document` branch of `_build_system_prompt`):
+#
+#   * The old fallback, `_most_recent_owned_document()`, silently retargeted an
+#     edit to whatever document had been touched last. `edit_document` returned
+#     success, the model answered "Done", and the user's actual document never
+#     changed — while a different one quietly gained a new version.
+#   * Keeping that fallback "just in case" also taught models to depend on it.
+#     After removal, a model that had used it once tried
+#     `manage_documents read` with no id as "give me the newest one", got a
+#     correct "name a document" error, and told the user the editor was closed.
+#     A silent guess is worse than a loud error: the error is recoverable.
+#
+# So: no fallback, and a pointer owned by the *request* — not by whichever
+# prompt-rebuilding pass happened to run last.
+
+
+def _number_document_lines(content: str) -> str:
+    """Prefix each line with its 1-based number and a TAB.
+
+    Same format the active-document prompt block uses, so FIND text derived
+    from a numbered read matches the document text exactly.
+    """
+    return "\n".join(
+        f"{idx}\t{line}" for idx, line in enumerate((content or "").split("\n"), 1)
+    )
+
+
+def _missing_target_error(
+    db,
+    Document,
+    owner: Optional[str],
+    *,
+    action: str,
+    requested_id: Optional[str] = None,
+    editor_open: bool = False,
+    editor_stale: bool = False,
+    library_preview_doc_id: Optional[str] = None,
+) -> Dict:
+    """Build the retry message for a tool call with no resolvable document.
+
+    There is no "most recent document" fallback: a document is reached either by
+    naming it (title or id) or by having it open in the editor. Being explicit
+    about which of the two is missing stops the model from inventing a third
+    option ("I'll read the latest one"), and reporting the *real* state stops it
+    from telling the user "the editor says nothing is open" when the editor is
+    in fact showing something only a click away from being active.
+    """
+    if requested_id:
+        return {
+            "error": (
+                f"Document '{requested_id}' not found (it may have been deleted, "
+                "or it belongs to another user). Use `manage_documents` "
+                "action=list to pick a valid id, or pass the document's title."
+            ),
+            "exit_code": 1,
+        }
+    if library_preview_doc_id:
+        state = (
+            "A document is open in the Library PREVIEW panel, but the preview is "
+            "read-only and is not the editor's active document. The user can "
+            "click 'Open in editor' on the preview, or you can target it directly "
+            "with `manage_documents` action=read and its title or document_id."
+        )
+    elif editor_stale:
+        state = (
+            "The document editor pane is on screen but no document is attached to "
+            "it (stale pane, typically after switching chats). The user should "
+            "reopen the document from the Library, or you can target it by title."
+        )
+    elif editor_open:
+        state = (
+            "The document editor is open but no document is registered as active "
+            "for this turn, and no document was named."
+        )
+    else:
+        state = (
+            "No document is open in the editor, and no document was named."
+        )
+    msg = (
+        f"No document to {action}. {state} There are exactly two ways to target "
+        "a document: (1) pass its title or `document_id` here, or (2) ask the "
+        "user to open it in the editor. Do NOT fall back to the most recently "
+        "updated document — that is not what the user is looking at."
+    )
+    try:
+        total = _owned_document_query(db.query(Document), Document, owner).count()
+    except Exception:
+        total = None
+    if total == 0:
+        msg += " This user has no documents yet."
+    return {"error": msg, "exit_code": 1, "no_active_document": True}
+
+
+def _find_documents_by_title(db, Document, owner: Optional[str], raw: str) -> list:
+    """Resolve a document by the title the user typed.
+
+    Accepts the title verbatim (``26-10-07-Riassunto-Incontro.md``), a quoted or
+    path-shaped form (``documenti/26-10-07-Riassunto-Incontro.md``), and the
+    title without its extension. Exact match first, then case-insensitive, then
+    a substring pass — every stage only accepts a *unique* hit, so an ambiguous
+    name comes back as several candidates rather than a silent guess.
+    """
+    name = str(raw or "").strip().strip("'\"`")
+    if not name:
+        return []
+    # Path-ish input: keep the basename ("docs/notes.md" → "notes.md").
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1].strip()
+    if not name:
+        return []
+    variants = [name]
+    stem, dot, ext = name.rpartition(".")
+    if dot and stem and len(ext) <= 5:
+        variants.append(stem)
+
+    q = _owned_document_query(db.query(Document), Document, owner)
+    for want in variants:
+        hits = q.filter(Document.title == want).all()
+        if hits:
+            return hits
+    for want in variants:
+        hits = q.filter(Document.title.ilike(want)).all()
+        if hits:
+            return hits
+    for want in variants:
+        # Escape LIKE wildcards so a title containing % or _ can't widen the match.
+        pat = want.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        hits = q.filter(Document.title.ilike(f"%{pat}%", escape="\\")).all()
+        if hits:
+            return hits
+    return []
+
+
+def _resolve_document_target(
+    db,
+    Document,
+    *,
+    owner: Optional[str],
+    target_id: Optional[str],
+    ctx: Optional[dict] = None,
+    active_only: bool = False,
+) -> tuple[Any, Optional[str], Optional[str]]:
+    """Resolve the document an editor tool should act on.
+
+    Order: the sealed approval target from ``ctx`` (the user already confirmed
+    that exact document), then the frontend's active-document pointer. Returns
+    ``(doc, doc_id, requested_id)``. ``doc is None`` means the target could not
+    be resolved; ``requested_id`` is what was asked for, so callers can tell
+    "no document was named" apart from "that document is gone / not mine".
+    """
+    requested = None
+    for candidate in ((ctx or {}).get("doc_id"), target_id, _active_document_id):
+        if not candidate:
+            continue
+        requested = candidate
+        doc = _get_owned_document(db, Document, candidate, owner, active_only=active_only)
+        if doc is not None:
+            return doc, candidate, candidate
+    return None, None, requested
 
 
 def _approved_document_version_error(doc: Any, ctx: dict) -> Optional[Dict]:
@@ -252,6 +421,56 @@ def _coerce_email_document_content(existing: str, incoming: str) -> str:
     if old_history and not incoming_history:
         body = (body.strip() + "\n\n" + old_history).strip()
     return header.rstrip() + "\n---\n" + body
+
+_DOCUMENT_ID_HEADER_RE = re.compile(r"\A<<<DOCUMENT_ID>>>\n([^\n]+)\n?", re.UNICODE)
+
+
+def split_document_id_header(content: str) -> tuple[str, Optional[str]]:
+    """Split an optional leading ``<<<DOCUMENT_ID>>>`` target from tool content.
+
+    The model can name an explicit target document for edit/update/suggest;
+    `to_tool_block` prepends this header when the ``document_id`` argument is
+    set. Returns ``(content_without_header, document_id_or_None)``.
+    """
+    text = content or ""
+    m = _DOCUMENT_ID_HEADER_RE.match(text)
+    if not m:
+        return text, None
+    doc_id = m.group(1).strip() or None
+    return text[m.end():], doc_id
+
+
+def strip_line_number_gutter(find_text: str) -> str:
+    """Remove a copied ``N<TAB>`` line-number gutter from FIND text.
+
+    `manage_documents action=read` renders the ACTIVE document with each line
+    prefixed by its 1-based number and a TAB, so the model can refer to line
+    numbers and quote exact text for edits. Weaker models sometimes copy that
+    gutter into their FIND block ("2<TAB>Some text"), which never matches the
+    stored content.
+
+    This is a FALLBACK only: callers first try the literal text, so a document
+    that genuinely starts a line with "42<TAB>" is matched literally and never
+    rewritten.
+    """
+    return "\n".join(re.sub(r"^\d+\t", "", line) for line in (find_text or "").split("\n"))
+
+
+def resolve_find_text(find_text: str, haystack: str) -> Optional[str]:
+    """Return the text to match against ``haystack``, or None if nothing matches.
+
+    Tries the literal FIND first; only if that fails, retries with the
+    line-number gutter stripped. Returns the string that actually matched.
+    """
+    if not find_text:
+        return None
+    if find_text in haystack:
+        return find_text
+    stripped = strip_line_number_gutter(find_text)
+    if stripped != find_text and stripped in haystack:
+        return stripped
+    return None
+
 
 def parse_edit_blocks(content: str) -> list:
     """Parse <<<FIND>>>...<<<REPLACE>>>...<<<END>>> blocks."""
@@ -483,26 +702,25 @@ class UpdateDocumentTool:
 
         target_id = ctx.get("doc_id", None) or _active_document_id
         owner = ctx.get("owner")
+        content, header_doc_id = split_document_id_header(content)
+        if header_doc_id:
+            target_id = header_doc_id
 
         db = SessionLocal()
         try:
-            doc = None
-            if target_id:
-                doc = _get_owned_document(db, Document, target_id, owner)
+            doc, target_id, _requested = _resolve_document_target(
+                db, Document, owner=owner, target_id=target_id, ctx=ctx
+            )
             if (
                 not doc
-                and target_id
                 and ctx.get("expected_document_version") is not None
             ):
                 return _approved_document_version_error(None, ctx)
             if not doc:
-                doc = _most_recent_owned_document(db, Document, owner)
-                if doc:
-                    target_id = doc.id
-                    set_active_document(target_id)
-                    logger.info(f"update_document: fell back to most recent doc id={target_id}")
-            if not doc:
-                return {"error": "No documents exist to update"}
+                logger.info("update_document: no active document to target")
+                return _missing_target_error(
+                    db, Document, owner, action="update", requested_id=_requested
+                )
 
             version_error = _approved_document_version_error(doc, ctx)
             if version_error:
@@ -565,6 +783,9 @@ class EditDocumentTool:
 
         target_id = ctx.get("doc_id", None) or _active_document_id
         owner = ctx.get("owner")
+        content, header_doc_id = split_document_id_header(content)
+        if header_doc_id:
+            target_id = header_doc_id
 
         edits = parse_edit_blocks(content)
         if not edits:
@@ -572,25 +793,19 @@ class EditDocumentTool:
 
         db = SessionLocal()
         try:
-            doc = None
-            if target_id:
-                doc = _get_owned_document(db, Document, target_id, owner)
+            doc, target_id, _requested = _resolve_document_target(
+                db, Document, owner=owner, target_id=target_id, ctx=ctx
+            )
             if (
                 not doc
-                and target_id
                 and ctx.get("expected_document_version") is not None
             ):
                 return _approved_document_version_error(None, ctx)
             if not doc:
-                # Fallback: most recently updated document. Avoids "no active doc" errors
-                # after server restart or when the agent loses track of which doc to edit.
-                doc = _most_recent_owned_document(db, Document, owner)
-                if doc:
-                    target_id = doc.id
-                    set_active_document(target_id)
-                    logger.info(f"edit_document: fell back to most recent doc id={target_id} title={doc.title!r}")
-            if not doc:
-                return {"error": "No documents exist to edit"}
+                logger.info("edit_document: no active document to target")
+                return _missing_target_error(
+                    db, Document, owner, action="edit", requested_id=_requested
+                )
 
             version_error = _approved_document_version_error(doc, ctx)
             if version_error:
@@ -643,24 +858,18 @@ class EditDocumentTool:
             skipped = 0
             for edit in edits:
                 _find = edit["find"]
-                if _find in updated_content:
-                    updated_content = updated_content.replace(_find, edit["replace"], 1)
+                # Literal match first; the gutter-stripped form is a fallback
+                # for models that copy the "N\t" reference prefix from a
+                # `manage_documents read` of the active document.
+                _matched = resolve_find_text(_find, updated_content)
+                if _matched is not None:
+                    updated_content = updated_content.replace(_matched, edit["replace"], 1)
                     applied += 1
-                else:
-                    # Defensive: the active-doc context shows a "N\t" line-number
-                    # gutter for reference. Weaker models sometimes copy that prefix
-                    # into FIND. If the exact match failed, retry with a leading
-                    # "<digits><tab>" stripped from each FIND line — but only use it
-                    # when that stripped form actually matches, so we never corrupt a
-                    # legitimately tab-prefixed document.
-                    _stripped = "\n".join(re.sub(r"^\d+\t", "", _l) for _l in _find.split("\n"))
-                    if _stripped != _find and _stripped in updated_content:
-                        updated_content = updated_content.replace(_stripped, edit["replace"], 1)
-                        applied += 1
+                    if _matched != _find:
                         logger.info("edit_document: matched after stripping line-number gutter from FIND")
-                    else:
-                        logger.warning(f"edit_document: FIND text not found, skipping: {_find[:80]!r}")
-                        skipped += 1
+                else:
+                    logger.warning(f"edit_document: FIND text not found, skipping: {_find[:80]!r}")
+                    skipped += 1
 
             if applied == 0:
                 return {"error": f"No edits applied — none of the FIND blocks matched the document content (skipped {skipped})"}
@@ -718,9 +927,9 @@ class SuggestDocumentTool:
 
         target_id = ctx.get("doc_id", None) or _active_document_id
         owner = ctx.get("owner")
-
-        if not target_id:
-            return {"error": "No active document to suggest on"}
+        content, header_doc_id = split_document_id_header(content)
+        if header_doc_id:
+            target_id = header_doc_id
 
         suggestions = parse_suggest_blocks(content)
         if not suggestions:
@@ -728,31 +937,77 @@ class SuggestDocumentTool:
 
         db = SessionLocal()
         try:
-            doc = _get_owned_document(db, Document, target_id, owner)
+            doc, target_id, _requested = _resolve_document_target(
+                db, Document, owner=owner, target_id=target_id, ctx=ctx
+            )
             if not doc:
-                return {"error": f"Document {target_id} not found"}
+                logger.info("suggest_document: no active document to target")
+                return _missing_target_error(
+                    db, Document, owner, action="suggest on", requested_id=_requested
+                )
 
             version_error = _approved_document_version_error(doc, ctx)
             if version_error:
                 return version_error
 
-            # Validate that FIND text exists in document
+            # Validate that FIND text exists in document. Match literally first;
+            # fall back to the gutter-stripped form for models that copied the
+            # "N\t" reference prefix from a `manage_documents read`.
+            #
+            # Partial matches are NOT fatal here: a suggestion is
+            # non-destructive (it only renders accept/reject bubbles), so
+            # dropping the unmatched ones and telling the model which ones
+            # failed is better than burning a round. `skipped` is reported so
+            # the model stops claiming it produced N suggestions when only N-1
+            # landed.
+            body = doc.current_content or ""
             valid = []
+            skipped = []
             for s in suggestions:
-                if s["find"] in doc.current_content:
-                    valid.append(s)
-                else:
-                    logger.warning(f"suggest_document: FIND text not found, skipping: {s['find'][:80]!r}")
+                matched = resolve_find_text(s["find"], body)
+                if matched is None:
+                    logger.warning(
+                        "suggest_document: FIND text not found, skipping: %r", s["find"][:80]
+                    )
+                    skipped.append(s["find"])
+                    continue
+                if matched != s["find"]:
+                    logger.info(
+                        "suggest_document: matched after stripping line-number gutter from FIND"
+                    )
+                    s = {**s, "find": matched}
+                valid.append(s)
 
             if not valid:
-                return {"error": "No suggestions matched the document content"}
+                return {
+                    "error": (
+                        "No suggestions matched the document content. Read the "
+                        "document first with `manage_documents` action=read so the "
+                        "FIND text matches the current version exactly, and do not "
+                        "include the leading line number or tab."
+                    )
+                }
 
-            return {
+            result = {
                 "action": "suggest",
                 "doc_id": target_id,
                 "suggestions": valid,
                 "count": len(valid),
             }
+            if skipped:
+                # Tell the model exactly what did not land, so it can retry those
+                # instead of over-reporting success.
+                result["skipped"] = {
+                    "count": len(skipped),
+                    "snippets": [s[:120] for s in skipped[:5]],
+                }
+                result["note"] = (
+                    f"{len(skipped)} suggestion(s) were skipped because their FIND "
+                    "text is not in the document verbatim. Tell the user only about "
+                    "the suggestions that were applied, or retry the skipped ones "
+                    "with exact text from the document."
+                )
+            return result
         finally:
             db.close()
 
@@ -827,11 +1082,54 @@ class ManageDocumentTool:
 
             elif action in ("read", "view", "open", "get"):
                 doc_id = args.get("document_id") or args.get("id") or args.get("uid")
-                if not doc_id:
-                    return {"error": "Need document_id (use action=list to find one)", "exit_code": 1}
-                doc = _get_owned_document(db, Document, doc_id, owner, active_only=True)
+                title_arg = args.get("title") or args.get("name") or args.get("path")
+                # Targeting order, and the ONLY ways to reach a document:
+                #   1. an explicit title/path the user said ("read X.md"),
+                #   2. the document open in the editor (the active pointer),
+                #   3. an explicit id from a earlier `list`.
+                # There is deliberately no "most recent document" fallback.
+                doc = None
+                _requested = None
+                if title_arg and not doc_id:
+                    _target_name = str(title_arg).strip()
+                    candidates = _find_documents_by_title(db, Document, owner, _target_name)
+                    active_candidates = [d for d in candidates if d.is_active]
+                    if active_candidates:
+                        candidates = active_candidates
+                    if len(candidates) == 1:
+                        doc = candidates[0]
+                        doc_id = doc.id
+                    elif len(candidates) > 1:
+                        listing = "\n".join(
+                            f"- [{d.title}](#document-{d.id})" for d in candidates[:10]
+                        )
+                        return {
+                            "error": (
+                                f"More than one document matches '{_target_name}'. "
+                                "Ask the user which one, or pass one of these ids:\n"
+                                + listing
+                            ),
+                            "exit_code": 1,
+                            "ambiguous_title": True,
+                        }
+                    else:
+                        _requested = _target_name
+                else:
+                    doc, doc_id, _requested = _resolve_document_target(
+                        db, Document, owner=owner, target_id=doc_id, active_only=True
+                    )
                 if not doc:
-                    return {"error": f"Document '{doc_id}' not found", "exit_code": 1}
+                    logger.info(
+                        "manage_documents read: unresolvable target requested=%r title=%r",
+                        _requested, title_arg,
+                    )
+                    return _missing_target_error(
+                        db, Document, owner, action="read",
+                        requested_id=_requested or (title_arg if title_arg else None),
+                        editor_open=bool(ctx.get("editor_open")),
+                        editor_stale=bool(ctx.get("editor_stale")),
+                        library_preview_doc_id=ctx.get("library_preview_doc_id"),
+                    )
                 body = doc.current_content or ""
                 try:
                     preview_limit = max(1, min(int(args.get("limit", MAX_READ_CHARS)), MAX_READ_CHARS))
@@ -845,11 +1143,26 @@ class ManageDocumentTool:
                 end = min(offset + preview_limit, len(body))
                 truncated = end < len(body)
                 preview = body[offset:end]
+                is_active_editor_doc = bool(_active_document_id) and doc.id == _active_document_id
+                # Number lines for the editor document so the model can point at
+                # "line N" and quote exact FIND text for edit_document.
+                if is_active_editor_doc and not offset:
+                    preview = _number_document_lines(preview)
                 if truncated:
                     preview += f"\n... (truncated, {len(body)} chars total; next_offset={end})"
                 anchor = f"[{doc.title}](#document-{doc.id})"
+                header = (
+                    f"{anchor} — this is the document currently OPEN in the editor.\n"
+                    if is_active_editor_doc
+                    else f"{anchor} — click to open in editor.\n"
+                )
+                if is_active_editor_doc and not offset:
+                    header += (
+                        "Lines are prefixed with their number and a TAB for reference; "
+                        "the number and tab are NOT part of the document.\n"
+                    )
                 return {
-                    "response": f"{anchor} — click to open in editor.\n\n```{doc.language or ''}\n{preview}\n```",
+                    "response": f"{header}\n```{doc.language or ''}\n{preview}\n```",
                     "document": {
                         "id": doc.id,
                         "title": doc.title,
@@ -859,20 +1172,33 @@ class ManageDocumentTool:
                         "truncated": truncated,
                         "offset": offset,
                         "next_offset": end if truncated else None,
+                        "active": is_active_editor_doc,
                     },
                     "exit_code": 0,
                 }
 
             elif action == "delete":
-                doc_id = args.get("document_id") or args.get("id") or args.get("uid") or _active_document_id
+                doc_id = args.get("document_id") or args.get("id") or args.get("uid")
                 doc = None
                 if doc_id:
                     doc = _get_owned_document(db, Document, doc_id, owner)
+                    if not doc:
+                        return {
+                            "error": f"Document '{doc_id}' not found",
+                            "exit_code": 1,
+                        }
                 if not doc:
-                    # Fallback: most recently updated doc (likely what the user means)
-                    doc = _most_recent_owned_document(db, Document, owner, active_only=True)
+                    # No id and no editor pointer: deleting is NOT resolvable
+                    # like an edit is. An edit can be retried from the returned
+                    # id, but a delete of the wrong document cannot be undone
+                    # by the model. Require the id the user confirmed.
+                    doc, _, _requested = _resolve_document_target(
+                        db, Document, owner=owner, target_id=None, active_only=True
+                    )
                 if not doc:
-                    return {"error": "No document to delete", "exit_code": 1}
+                    return _missing_target_error(
+                        db, Document, owner, action="delete", requested_id=_requested
+                    )
                 title = doc.title
                 doc.is_active = False
                 db.commit()

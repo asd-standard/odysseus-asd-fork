@@ -1394,8 +1394,19 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
         "20260722emailfastindex1" not in source
         for source in approval_module_sources
     )
+    # Every approval-relevant module must be on a CURRENT version. Modules split
+    # across two version groups since the active-document work: the chat/doc
+    # graph (20261023noworkspace1) and the settings/email graph
+    # (20260815approvalsave1). What matters is that no source is on a
+    # superseded version, which would let the browser pair a cached copy.
+    _stale = ("20260722emailfastindex1", "20260815toolapproval4-startup")
     assert all(
-        "20260815approvalsave1" in source
+        not any(old in source for old in _stale)
+        for source in approval_module_sources
+    )
+    assert all(
+        ("20261023noworkspace1" in source) or ("20260815approvalsave1" in source)
+        or ("20260819approvalcontrol1" in source)
         for source in approval_module_sources
     )
 

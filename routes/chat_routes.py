@@ -346,70 +346,27 @@ def _is_contextual_browser_followup(message: str, sess) -> bool:
 
 
 def _resolve_request_workspace(request, raw_value) -> tuple:
-    """Resolve the posted workspace for this request: (workspace, rejected).
+    """Retired: Odysseus no longer binds host folders per request.
 
-    Privilege is checked BEFORE the path ever touches the filesystem. Only
-    admin/single-user callers can use the workspace-backed file/shell tools,
-    so only they get vet_workspace() and the workspace_rejected signal. For
-    any other caller the submitted value is dropped uniformly, with no vetting
-    and no event: otherwise the presence/absence of workspace_rejected would
-    let a non-admin chat caller probe which host paths exist.
+    The workspace feature let a request confine the agent's file/shell tools to
+    an arbitrary folder. Hosted for several users, that was a foot-gun rather
+    than a feature: a pasted path could silently change what the file tools
+    could reach, and the confinement is applied by *replacing* the safe
+    allowlist with the chosen folder. File tools now always use the fixed
+    allowlisted roots (`data/agent_workspace`, uploads, personal docs), and
+    shell access stays admin-only.
 
-    vet_workspace rejects non-directories, sensitive roots (.ssh, .gnupg,
-    ...), and filesystem roots; on rejection there is no confinement and the
-    default tool-path allowlist applies. The rejected value is surfaced so the
-    stream can tell an admin client (which believes a workspace is active)
-    that it was dropped.
+    Kept as a signature-compatible stub so existing callers and tests do not
+    break; it always reports "no workspace".
     """
-    requested = (raw_value or "").strip()
-    if not requested:
-        return "", ""
-    from src.tool_security import owner_is_admin_or_single_user
-    if not owner_is_admin_or_single_user(get_current_user(request)):
-        return "", ""
-    from src.tool_execution import vet_workspace
-    workspace = vet_workspace(requested) or ""
-    return workspace, (requested if not workspace else "")
-
-
-_ABS_PATH_RE = re.compile(r"(?<!\S)(~?/[^\"'\s`<>]+)")
-_LOCAL_FILE_TASK_RE = re.compile(
-    r"\b(?:file|folder|directory|path|workspace|repo|project|movie|video|"
-    r"subtitle|subtitles|srt|vtt|ass|download|save|rename|move|copy|extract|"
-    r"convert|ffmpeg|run|execute|open|read|inspect|fix|debug|test|build)\b",
-    re.IGNORECASE,
-)
-
-
-def _resolve_workspace_from_message_path(request, message: str) -> tuple[str, str]:
-    """Auto-bind a workspace only when the user names an explicit safe path.
-
-    This is intentionally deterministic rather than LLM/RAG-driven: RAG can
-    choose the tool family, but filesystem binding must not let a prompt infer
-    or probe arbitrary host paths. For a file path, bind its parent directory.
-    For a directory path, bind that directory.
-    """
-    text = str(message or "")
-    if not text or not _LOCAL_FILE_TASK_RE.search(text):
-        return "", ""
-
-    from src.tool_security import owner_is_admin_or_single_user
-    if not owner_is_admin_or_single_user(get_current_user(request)):
-        return "", ""
-
-    from src.tool_execution import vet_workspace
-
-    for match in _ABS_PATH_RE.finditer(text):
-        raw = match.group(1).rstrip(".,;:)]}")
-        expanded = os.path.realpath(os.path.expanduser(raw))
-        candidates = [expanded]
-        if os.path.isfile(expanded):
-            candidates.insert(0, os.path.dirname(expanded))
-        for candidate in candidates:
-            workspace = vet_workspace(candidate) or ""
-            if workspace:
-                return workspace, ""
     return "", ""
+
+
+# The absolute-path auto-bind helpers (_ABS_PATH_RE / _LOCAL_FILE_TASK_RE /
+# _resolve_workspace_from_message_path) were removed with the workspace feature.
+# They scanned the user's message for a filesystem path and bound it as the
+# agent's confinement root. With Odysseus hosted for several users that was a
+# foot-gun: a pasted path silently changed which files the tools could reach.
 
 
 def _session_url_matches_endpoint(session_url: str, endpoint_base: str) -> bool:
@@ -1013,10 +970,10 @@ def setup_chat_routes(
         retired_tool_approval_taint = False
         external_untrusted_context_seen = False
         tool_approval_continuation = False
-        # Workspace: confine the agent's file/shell tools to this folder.
-        workspace, workspace_rejected = _resolve_request_workspace(
-            request, form_data.get("workspace")
-        )
+        # Workspace binding was removed (see _resolve_request_workspace). File
+        # tools always use the fixed admin-only allowlist; the variable stays so
+        # the rest of this handler and the tool plumbing are unchanged.
+        workspace, workspace_rejected = _resolve_request_workspace(request, None)
         # Plan mode is a modifier on agent mode — it only makes sense with tools.
         if plan_mode:
             chat_mode = "agent"
@@ -1082,7 +1039,34 @@ def setup_chat_routes(
             auto_escalated = True
             logger.info("chat→agent auto-escalation: explicit web intent")
         active_doc_id = form_data.get("active_doc_id", "").strip()
-        logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
+        # The editor's own view of what it is showing. `active_doc_id` is the
+        # chat's target document; when the panel displays a document that is
+        # not registered as the chat's active doc (Library preview, detached
+        # doc), the browser still knows it. This is an explicit signal from the
+        # editor — never a "most recent document" guess.
+        displayed_doc_id = form_data.get("displayed_doc_id", "").strip()
+        editor_open = str(form_data.get("editor_open", "")).lower() in {"true", "1", "yes"}
+        editor_stale = str(form_data.get("editor_stale", "")).lower() in {"true", "1", "yes"}
+        # The Library preview is a read-only glance, not the editor. Report it
+        # separately so the error can tell the user to open it in the editor.
+        library_preview_doc_id = form_data.get("library_preview_doc_id", "").strip()
+        doc_module_instances = form_data.get("doc_module_instances", "").strip()
+        # The frontend flags turns that came from highlighted text in the editor
+        # ("[Doc edit: L25] ..."). Those are the only turns that still carry the
+        # document body in the prompt; every other turn reads it on demand.
+        document_selection = str(form_data.get("document_selection", "")).lower() in {"true", "1", "yes"}
+        logger.info(
+            f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}, "
+            f"displayed_doc_id={displayed_doc_id!r}, editor_open={editor_open}, "
+            f"editor_stale={editor_stale}, library_preview_doc_id={library_preview_doc_id!r}"
+        )
+        if doc_module_instances and "," in doc_module_instances:
+            logger.warning(
+                "[doc-inject] DUPLICATE document.js module instances loaded: %s — "
+                "state is shared via window.__odysseusDocState, but index.html "
+                "should reference the module with a single ?v= string",
+                doc_module_instances,
+            )
 
         # Active email reader — when the user has an email open in the UI, the
         # frontend passes its uid/folder/account so "reply", "summarize this",
@@ -1285,15 +1269,10 @@ def setup_chat_routes(
                     auto_escalated = True
                     _workspace_agent_intent = False
                     logger.info("chat→agent auto-escalation: contextual browser/form follow-up")
-            if not workspace and isinstance(message, str):
-                _auto_workspace, _ = _resolve_workspace_from_message_path(request, message)
-                if _auto_workspace:
-                    workspace = _auto_workspace
-                    chat_mode = "agent"
-                    auto_escalated = True
-                    _workspace_agent_intent = True
-                    allow_bash = "true"
-                    logger.info("chat→agent auto-escalation: explicit path workspace=%s", workspace)
+            # NOTE: a pasted absolute path no longer auto-binds a workspace (and
+            # no longer escalates to agent mode / unlocks bash). That behaviour
+            # silently changed what the file tools could reach based on message
+            # text; file access now uses the fixed admin-only allowlist.
         except SessionNotFoundError as e:
             raise HTTPException(404, str(e))
         except (ValueError, ValidationError):
@@ -1432,6 +1411,25 @@ def setup_chat_routes(
                         logger.info(f"[doc-inject] found by ID: title={active_doc.title!r}, lang={active_doc.language!r}, is_active={active_doc.is_active}, content_len={len(active_doc.current_content or '')}")
                 else:
                     logger.warning(f"[doc-inject] NOT FOUND by ID {active_doc_id}")
+            if not active_doc and displayed_doc_id:
+                # The editor says it is showing this document even though the
+                # chat carried no active-doc pointer for it. Trust the editor:
+                # it is an explicit client signal about what the user sees, not
+                # an inference from updated_at. A Library *preview* id is not
+                # promoted to active here — the preview is read-only and the
+                # user must open it in the editor (or name it) to target it.
+                if library_preview_doc_id and displayed_doc_id == library_preview_doc_id:
+                    logger.info(
+                        "[doc-inject] displayed_doc_id %s is the Library preview, not the editor",
+                        displayed_doc_id,
+                    )
+                else:
+                    _disp_q = _doc_db.query(DBDocument).filter(DBDocument.id == displayed_doc_id)
+                    active_doc = _owner_session_filter(_disp_q, ctx.user).first()
+                    if active_doc:
+                        logger.info(
+                            f"[doc-inject] using displayed_doc_id: title={active_doc.title!r}"
+                        )
             if not active_doc:
                 _email_doc_q = _doc_db.query(DBDocument).filter(
                     DBDocument.session_id == session,
@@ -1635,12 +1633,8 @@ def setup_chat_routes(
             # Register active stream for partial-save safety net
             _active_streams[session] = {"status": "streaming", "partial": "", "query": message, "is_research": effective_do_research, "mode": _effective_mode}
 
-            # The client sent a workspace the server refused to bind (deleted
-            # folder, file path, sensitive dir, filesystem root). Tell it up
-            # front so the UI can clear the pill instead of displaying a
-            # confinement that is not actually in effect.
-            if workspace_rejected:
-                yield f"data: {json.dumps({'type': 'workspace_rejected', 'data': {'path': workspace_rejected}})}\n\n"
+            # No workspace_rejected event is emitted any more: the workspace
+            # feature was removed, so nothing can be refused.
 
             if ctx.preprocessed.attachment_meta:
                 yield f"data: {json.dumps({'type': 'attachments', 'data': ctx.preprocessed.attachment_meta})}\n\n"
@@ -2346,6 +2340,10 @@ def setup_chat_routes(
                         context_length=_selected_context_length,
                         active_document=active_doc,
                         active_email=active_email_ctx,
+                        document_selection=document_selection,
+                        editor_has_document=editor_open,
+                        editor_stale=editor_stale,
+                        library_preview_doc_id=library_preview_doc_id,
                         session_id=session,
                         history_session=sess,
                         disabled_tools=disabled_tools if disabled_tools else None,

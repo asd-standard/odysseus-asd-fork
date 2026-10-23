@@ -129,7 +129,11 @@ def test_update_document_active_id_filters_to_calling_owner(monkeypatch):
     finally:
         set_active_document(None)
 
-    assert result["error"] == "No documents exist to update"
+    assert result["error"] == (
+        "Document 'doc-bob' not found (it may have been deleted, or it belongs "
+        "to another user). Use `manage_documents` action=list to pick a valid id, "
+        "or pass the document's title."
+    )
     assert ("id", "eq", "doc-bob") in query.filters
     assert ("owner", "eq", "alice") in query.filters
 
@@ -148,7 +152,11 @@ def test_suggest_document_active_id_filters_to_calling_owner(monkeypatch):
     finally:
         set_active_document(None)
 
-    assert result["error"] == "Document doc-bob not found"
+    assert result["error"] == (
+        "Document 'doc-bob' not found (it may have been deleted, or it belongs "
+        "to another user). Use `manage_documents` action=list to pick a valid id, "
+        "or pass the document's title."
+    )
     assert ("id", "eq", "doc-bob") in query.filters
     assert ("owner", "eq", "alice") in query.filters
 

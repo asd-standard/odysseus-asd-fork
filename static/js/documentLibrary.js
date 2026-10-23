@@ -25,6 +25,7 @@ let _switchToDoc;
 let _openPanel;
 let _addDocToTabs;
 let _syncDocIndicator;
+let _setLibraryPreviewDocId;
 
 export function initLibrary(config) {
   API_BASE        = config.apiBase;
@@ -38,6 +39,7 @@ export function initLibrary(config) {
   _openPanel      = config.openPanel;
   _addDocToTabs   = config.addDocToTabs;
   _syncDocIndicator = config.syncDocIndicator;
+  _setLibraryPreviewDocId = config.setLibraryPreviewDocId;
 }
 
 // ── Library state ──
@@ -1599,6 +1601,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     if (_libraryPreviewUnreg) { _libraryPreviewUnreg(); _libraryPreviewUnreg = null; }
     document.querySelectorAll('.doclib-preview-panel').forEach(p => p.remove());
     _libraryPreviewId = null;
+    if (typeof _setLibraryPreviewDocId === 'function') _setLibraryPreviewDocId(null);
   }
 
   async function _renderDocContent(body, doc) {
@@ -1647,6 +1650,14 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
 
     libraryHidePreview();
     _libraryPreviewId = doc.id;
+    if (typeof _setLibraryPreviewDocId === 'function') _setLibraryPreviewDocId(doc.id);
+    // Register the previewed document in the editor's tab map. It is not the
+    // active document (the preview is read-only), but without this it is
+    // addressable by nothing: both the active pointer and the preview fallback
+    // resolve ids through `docs`.
+    if (typeof _addDocToTabs === 'function' && !_getDocs()?.has(doc.id)) {
+      _addDocToTabs(doc, doc.session_id);
+    }
 
     const panel = document.createElement('div');
     panel.className = 'doclib-preview-panel';
@@ -1664,6 +1675,32 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     lang.className = 'doclib-preview-lang';
     lang.textContent = (doc.language && doc.language !== 'text') ? doc.language : '';
     header.appendChild(lang);
+
+    // Explicit way to make the previewed document THE active document. The
+    // preview is a read-only glance and is intentionally NOT reported to the
+    // agent as "the active document" — the agent only targets what is in the
+    // editor. This button is how the user promotes it.
+    const openBtn = document.createElement('button');
+    openBtn.className = 'doclib-preview-open';
+    openBtn.title = 'Open in editor';
+    openBtn.textContent = 'Open in editor';
+    openBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      openBtn.disabled = true;
+      try {
+        if (typeof _loadDocument === 'function') {
+          await _loadDocument(doc.id);
+        } else if (typeof _switchToDoc === 'function') {
+          _switchToDoc(doc.id);
+        }
+      } catch (err) {
+        console.error('Open in editor failed:', err);
+      } finally {
+        openBtn.disabled = false;
+      }
+      libraryHidePreview();
+    });
+    header.appendChild(openBtn);
 
     const menuBtn = document.createElement('button');
     menuBtn.className = 'doclib-preview-menu';

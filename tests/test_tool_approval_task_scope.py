@@ -347,9 +347,10 @@ def test_route_context_agent_frontend_and_cache_bust_wire_the_contract():
     assert "CHAT_SESSION_APPROVAL_CONTEXT_MARKER" in capabilities
     assert "CHAT_SESSION_APPROVAL_CONTEXT_MARKER" in models
 
-    version = "20260819approvalcontrol1"
+    version = "20261023noworkspace1"
     assert f"chat.js?v={version}" in app
     assert f"chat.js?v={version}" in index
-    assert f"chatRenderer.js?v={version}" in frontend
-    assert f"chatRenderer.js?v={version}" in app
-    assert f"chatRenderer.js?v={version}" in index
+    approval_version = "20260819approvalcontrol1"
+    assert f"chatRenderer.js?v={approval_version}" in frontend
+    assert f"chatRenderer.js?v={approval_version}" in app
+    assert f"chatRenderer.js?v={approval_version}" in index

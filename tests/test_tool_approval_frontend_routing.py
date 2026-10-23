@@ -88,16 +88,23 @@ def test_every_changed_approval_module_is_cache_busted_together():
     """
 
     root = Path(__file__).resolve().parents[1]
-    version = "20260819approvalcontrol1"
-    index = (root / "static/index.html").read_text(encoding="utf-8")
+    version = "20261023noworkspace1"
     app = (root / "static/app.js").read_text(encoding="utf-8")
     chat = (root / "static/js/chat.js").read_text(encoding="utf-8")
     compare_index = (root / "static/js/compare/index.js").read_text(encoding="utf-8")
     compare_stream = (root / "static/js/compare/stream.js").read_text(encoding="utf-8")
 
-    assert f"chatStream.js?v={version}" in index
+    # chatStream.js changed together with chat.js/document.js (active-document
+    # plumbing), so it shares that version — chat.js must not pair with a
+    # cached copy of either.
     assert f"chatStream.js?v={version}" in chat
-    assert f"compare/index.js?v={version}" in app
-    assert f"stream.js?v={version}" in compare_index
+    assert f"document.js?v={version}" in chat
+    assert f"document.js?v={version}" in app
+    # The compare/ask_user modules still share the approval-capture version and
+    # must stay in lockstep with chatRenderer.
+    approval_version = "20260819approvalcontrol1"
+    assert f"compare/index.js?v={approval_version}" in app
+    assert f"stream.js?v={approval_version}" in compare_index
     # One chatRenderer instance, so the ask_user keydown listener binds once.
-    assert f"chatRenderer.js?v={version}" in compare_stream
+    assert f"chatRenderer.js?v={approval_version}" in compare_stream
+    assert f"chatRenderer.js?v={approval_version}" in app

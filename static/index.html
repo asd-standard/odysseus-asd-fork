@@ -247,7 +247,26 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-SemiBold.woff2">
   <link rel="stylesheet" href="/static/style.css?v=20260808startupshell1">
   <link rel="modulepreload" href="/static/app.js?v=20260815toolapproval4">
-  <link rel="modulepreload" href="/static/js/chat.js?v=20260815toolapproval4">
+  <!-- ── Module identity rules (learned the hard way) ──────────────────────
+       1. A module must be referenced with ONE ?v= value everywhere. The
+          browser caches by full URL, so `chat.js?v=A` and `chat.js?v=B` are
+          two separate module instances with two copies of their state. That
+          is how the "document is open but the AI says it isn't" bug survived
+          several backend fixes: the chat was reading a second instance of
+          document.js.
+       2. A modulepreload must use the *same* URL as the real import/script
+          tag. A mismatched preload does not warm the module — it parses the
+          graph twice.
+       3. A module that is imported somewhere must NOT also be loaded by a
+          bare <script type="module"> tag: that executes it a second time
+          (duplicate state, duplicate event listeners).
+       Bump the version when you EDIT one of these modules — a code change
+       alone is invisible to a browser holding the old URL. Bump every
+       reference to the module together.
+       Enforced by tests/test_frontend_module_identity.py.
+       `20261023noworkspace1` = suggestion line-diff preview (document.js), bumped
+       together with the active-document modules it depends on. ──────────── -->
+  <link rel="modulepreload" href="/static/js/chat.js?v=20261023noworkspace1">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
@@ -1116,13 +1135,11 @@
                 <span>RAG</span>
                 <span class="overflow-active-dot"></span>
               </button>
-              <button type="button" class="overflow-menu-item" id="overflow-workspace-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                </svg>
-                <span>Workspace</span>
-                <span class="overflow-active-dot"></span>
-              </button>
+              <!-- Workspace selector intentionally removed: Odysseus is
+                   SQL/document based for multi-user hosting, and binding an
+                   arbitrary host folder per turn was a foot-gun (a pasted path
+                   silently confined the file tools). File/shell tools now use
+                   the fixed, admin-only allowed roots. -->
               <!-- Inline "deep research mode" toggle removed (superseded by the
                    Deep Research sidebar / trigger_research). The hidden
                    #research-toggle checkbox is kept inert so existing JS refs
@@ -1153,12 +1170,6 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
-          </button>
-          <!-- Workspace indicator (hidden until a folder is set) -->
-          <button type="button" class="input-icon-btn tool-indicator" title="Workspace - click to clear" id="workspace-indicator-btn" aria-label="Clear workspace" style="display:none;">
-            <svg class="workspace-indicator-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-            <span style="font-size:11px;margin-left:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="workspace-indicator-name"></span>
-            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
           <!-- RAG toolbar indicator (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="RAG active — click to deactivate" id="rag-indicator-btn" style="display:none;">
@@ -2582,12 +2593,18 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
-<script type="module" src="/static/js/document.js?v=20260815approvalsave1"></script>
+<!-- document.js is NOT loaded here. app.js imports it (and initialises it via
+     documentModule.init) — executing it a second time as a bare script tag
+     created a SECOND module instance with its own `activeDocId`/`docs` map,
+     which is why the chat saw "no document open" while the editor displayed
+     one. Same for chat.js: it is imported by app.js and loaded below; it must
+     not also be pulled in as an independent entry point elsewhere. -->
 <script type="module" src="/static/js/gallery.js?v=20260708match1"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260819approvalcontrol1"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
-<script type="module" src="/static/js/chatStream.js?v=20260819approvalcontrol1"></script>
-  <script type="module" src="/static/js/chat.js?v=20260819approvalcontrol1"></script>
+<!-- chatStream.js is likewise imported by chat.js; loading it here as well
+     registered its document-level listeners a second time. -->
+  <script type="module" src="/static/js/chat.js?v=20261023noworkspace1"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>

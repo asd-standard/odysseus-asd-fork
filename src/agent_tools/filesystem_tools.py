@@ -1024,21 +1024,3 @@ class GrepTool:
         if len(lines) >= max_hits:
             out += f"\n... [capped at {max_hits} matches]"
         return {"output": _truncate(out), "exit_code": 0}
-
-class GetWorkspaceTool:
-    """Report the active workspace folder (no args). File tools are confined to
-    it; the shell starts there (cwd) but is NOT sandboxed."""
-    async def execute(self, content: str, ctx: dict) -> dict:
-        from src.tool_execution import get_active_workspace
-        ws = get_active_workspace()
-        if ws:
-            return {
-                "output": f"{ws}\n(File tools are confined to this folder; the shell starts "
-                          f"here but is not sandboxed and can reach outside it.)",
-                "exit_code": 0,
-            }
-        return {
-            "output": "No workspace is set. File tools use the default allowed roots; "
-                      "resolve paths from the user or use absolute paths.",
-            "exit_code": 0,
-        }

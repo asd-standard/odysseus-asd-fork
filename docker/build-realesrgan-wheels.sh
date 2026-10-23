@@ -14,6 +14,12 @@
 # no fixed release, so we patch get_version() to exec into an explicit namespace
 # dict (works on every Python) and build wheels from the patched source.
 #
+# basicsr additionally declares setup_requires=['cython', 'numpy', 'torch'],
+# which makes pip's build isolation download a multi-GB torch wheel just to
+# build a pure-Python wheel (BASICSR_EXT is unset, so there are no C
+# extensions). We drop torch from the build-time deps. The wheel's runtime
+# metadata is unchanged, so realesrgan still pulls torch when it is installed.
+#
 # Usage: build-realesrgan-wheels.sh [OUTPUT_DIR]   (default: /wheels)
 set -euo pipefail
 
@@ -48,21 +54,35 @@ PY
   tar xzf "${name}.tar.gz"
 done
 
-echo ">> patching get_version()"
+echo ">> patching get_version() and build-time setup_requires"
 python - <<'PY'
 import pathlib
+
 old_exec = "exec(compile(f.read(), version_file, 'exec'))"
 new_exec = "_ver_ns = {}\n        exec(compile(f.read(), version_file, 'exec'), _ver_ns)"
 old_ret = "return locals()['__version__']"
 new_ret = "return _ver_ns['__version__']"
-patched = 0
+old_setup_requires = "setup_requires=['cython', 'numpy', 'torch'],"
+new_setup_requires = "setup_requires=['cython', 'numpy'],"
+
+patched_version = 0
+patched_setup_requires = 0
 for setup in pathlib.Path(".").glob("*/setup.py"):
     s = setup.read_text()
     if old_exec in s and old_ret in s:
-        setup.write_text(s.replace(old_exec, new_exec).replace(old_ret, new_ret))
-        print("   patched", setup)
-        patched += 1
-assert patched == 3, f"expected to patch 3 setup.py files, patched {patched}"
+        s = s.replace(old_exec, new_exec).replace(old_ret, new_ret)
+        patched_version += 1
+        print("   patched get_version():", setup)
+    if old_setup_requires in s:
+        s = s.replace(old_setup_requires, new_setup_requires)
+        patched_setup_requires += 1
+        print("   patched setup_requires:", setup)
+    setup.write_text(s)
+
+assert patched_version == 3, f"expected to patch 3 setup.py files, patched {patched_version}"
+assert patched_setup_requires == 1, (
+    f"expected basicsr setup_requires patch, patched {patched_setup_requires}"
+)
 PY
 
 echo ">> building wheels into ${OUT}"

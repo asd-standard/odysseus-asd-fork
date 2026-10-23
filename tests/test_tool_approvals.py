@@ -316,6 +316,12 @@ def test_approved_document_version_guard_rejects_changed_target():
 
 @pytest.mark.asyncio
 async def test_missing_sealed_document_does_not_fall_back_to_another(monkeypatch):
+    """A sealed edit whose target vanished must report the change, never retarget.
+
+    There is no "most recent document" fallback any more at all (the helper was
+    deleted), so this also guards the *error* path: an approved action whose
+    document no longer exists must fail closed rather than edit something else.
+    """
     import src.agent_tools.document_tools as document_tools
 
     class FakeDb:
@@ -325,6 +331,9 @@ async def test_missing_sealed_document_does_not_fall_back_to_another(monkeypatch
         def rollback(self):
             pass
 
+        def query(self, *args, **kwargs):
+            raise AssertionError("sealed target vanished: must not query another document")
+
     monkeypatch.setattr("src.database.SessionLocal", lambda: FakeDb())
     monkeypatch.setattr(
         document_tools,
@@ -332,14 +341,6 @@ async def test_missing_sealed_document_does_not_fall_back_to_another(monkeypatch
         lambda *args, **kwargs: None,
     )
 
-    def fail_fallback(*args, **kwargs):
-        raise AssertionError("sealed target fell back to a different document")
-
-    monkeypatch.setattr(
-        document_tools,
-        "_most_recent_owned_document",
-        fail_fallback,
-    )
     result = await document_tools.UpdateDocumentTool().execute(
         "replacement",
         {

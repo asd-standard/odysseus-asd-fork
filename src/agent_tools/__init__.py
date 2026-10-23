@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 from .subprocess_tools import BashTool, PythonTool
 from .web_tools import WebSearchTool, WebFetchTool
-from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, ApplyPatchTool, LsTool, GlobTool, GrepTool, GetWorkspaceTool
+from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, ApplyPatchTool, LsTool, GlobTool, GrepTool
 from .library_tools import ListLibraryFilesTool, ReadLibraryFileTool, MakeLibraryFileTool
 from .coding_tools import TodoWriteTool
 from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
@@ -53,7 +53,6 @@ TOOL_HANDLERS = {
     "edit_document": EditDocumentTool().execute,
     "suggest_document": SuggestDocumentTool().execute,
     "manage_documents": ManageDocumentTool().execute,
-    "get_workspace": GetWorkspaceTool().execute,
     "list_library_files": ListLibraryFilesTool().execute,
     "read_library_file": ReadLibraryFileTool().execute,
     "make_library_file": MakeLibraryFileTool().execute,
@@ -82,7 +81,7 @@ PYTHON_TIMEOUT = 30
 # Tool types that trigger execution
 TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_file", "edit_file",
              "apply_patch", "todowrite",
-             "grep", "glob", "ls", "get_workspace", "manage_bg_jobs",
+             "grep", "glob", "ls", "manage_bg_jobs",
              "list_library_files", "read_library_file", "make_library_file",
              "create_document", "update_document", "edit_document",
              "search_chats",

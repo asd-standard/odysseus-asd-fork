@@ -16,8 +16,7 @@ import modelsModule from './models.js';
 import chatRenderer from './chatRenderer.js';
 import spinnerModule from './spinner.js';
 import themeModule from './theme.js';
-import documentModule from './document.js?v=20260815approvalsave1';
-import workspaceModule from './workspace.js';
+import documentModule from './document.js?v=20261023noworkspace1';
 import settingsModule from './settings.js';
 import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
@@ -1253,39 +1252,9 @@ async function _cmdToggleDoc(args, ctx) {
   return true;
 }
 
-// Workspace: confine the agent's file/shell tools to a folder. Not a boolean -
-// show / set <path> / clear / pick (open the directory browser).
-async function _cmdWorkspace(args, ctx) {
-  const sub = (args[0] || '').toLowerCase();
-  const rest = args.slice(1).join(' ').trim();
-  const cur = workspaceModule.getWorkspace();
-  if (!sub || sub === 'show' || sub === 'status' || sub === 'info') {
-    slashReply(cur ? `Workspace: <code>${uiModule.esc(cur)}</code>` : 'No workspace set. <code>/workspace pick</code> or <code>/workspace set /path</code>.');
-    return true;
-  }
-  if (sub === 'set' || sub === 'cd' || sub === 'use') {
-    if (!rest) { slashReply('Usage: <code>/workspace set /absolute/path</code>'); return true; }
-    // Validate server-side before persisting so the pill never claims a
-    // workspace the backend will refuse to bind (typo, file path, deleted
-    // folder, sensitive dir, filesystem root).
-    workspaceModule.vetAndSetWorkspace(rest).then(({ ok, path }) => {
-      if (ok) slashReply(`Workspace set: <code>${uiModule.esc(path)}</code>`);
-      else slashReply(`Not a usable workspace folder on the Odysseus backend: <code>${uiModule.esc(rest)}</code>. If Odysseus is running in Docker, use the container path, usually <code>/app</code>, or use <code>/workspace pick</code>.`);
-    });
-    return true;
-  }
-  if (sub === 'clear' || sub === 'off' || sub === 'none' || sub === 'unset') {
-    workspaceModule.clearWorkspace();
-    slashReply('Workspace cleared.');
-    return true;
-  }
-  if (sub === 'pick' || sub === 'browse' || sub === 'open') {
-    workspaceModule.openWorkspaceBrowser();
-    return true;
-  }
-  slashReply('Usage: <code>/workspace</code> · <code>set /path</code> · <code>clear</code> · <code>pick</code>');
-  return true;
-}
+// The /workspace command was removed with the workspace feature: Odysseus is
+// document/SQL based for multi-user hosting and no longer binds host folders.
+// File/shell tools use the fixed, admin-only allowed roots.
 
 async function _cmdToggleShow(args, ctx) {
   const name = (args[0] || '').toLowerCase();
@@ -5787,14 +5756,6 @@ const COMMANDS = {
       'sidebar':   { handler: _cmdToggleSidebar,   alias: ['sb'], help: 'Cycle sidebar (full/mini/off)', usage: '/toggle sidebar [1|2|3]' },
       '_show':     { handler: _cmdToggleShow,      alias: [],     help: 'Show all toggle states',  usage: '/toggle' }
     }
-  },
-  workspace: {
-    alias: ['ws'],
-    category: 'Agent',
-    help: 'Set the folder the agent works in',
-    handler: _cmdWorkspace,
-    noUserBubble: true,
-    usage: '/workspace [set <path> | clear | pick]',
   },
   memory: {
     alias: ['m'],
