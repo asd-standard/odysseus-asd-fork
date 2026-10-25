@@ -219,15 +219,50 @@ def _process_office_document(
     `manage_documents action=read offset=…` after the inline copy is capped.
     """
     from src.markitdown_runtime import (
+        COMMENT_AWARE_EXTS,
         is_markitdown_format,
         convert_to_markdown,
         load_markitdown,
     )
 
     if not is_markitdown_format(path):
+        if os.path.splitext(path)[1].lower() == ".doc":
+            # Legacy binary Word format: not a zip, so neither this extractor
+            # nor markitdown can read it. Say so plainly instead of silently
+            # producing an empty document.
+            return (
+                "\n\n[Legacy .doc (Word 97-2003) is not supported. "
+                "Open it in Word/LibreOffice and save it as .docx, then attach "
+                "the .docx — comments are preserved on import.]"
+            )
         return "\n\n[Attached document file]"
 
-    markdown = convert_to_markdown(path)
+    # .docx/.odt: one shared importer for every entry point (chat attachment,
+    # Library import, personal docs). It combines mammoth's rich body with the
+    # comment anchors from office_comments. markitdown is the fallback and stays
+    # the primary path for the other Office/EPUB formats.
+    markdown = None
+    comment_count = 0
+    ext = os.path.splitext(path)[1].lower()
+    if ext in COMMENT_AWARE_EXTS:
+        try:
+            from src.doc_import import import_office_document
+
+            result = import_office_document(path)
+            markdown = result.markdown
+            comment_count = result.comment_count
+            if comment_count:
+                logger.info(
+                    "imported %s with %d comment(s) preserved",
+                    os.path.basename(path), comment_count,
+                )
+        except Exception as e:
+            # A bad Office file must not break the chat turn: fall through to
+            # markitdown, which returns None for unreadable input.
+            logger.warning("office import failed for %s: %s", path, e)
+            markdown = None
+    if markdown is None:
+        markdown = convert_to_markdown(path)
     if markdown and markdown.strip():
         title = os.path.splitext(os.path.basename(path))[0]
         body, marker = _truncate_inline(markdown)
@@ -239,10 +274,13 @@ def _process_office_document(
             try:
                 from src.office_doc import create_office_document
                 doc_id = create_office_document(
-                    session_id=session_id,
+                    # `or None`: an empty form value must not become a foreign
+                    # key target (see create_office_document's docstring).
+                    session_id=session_id or None,
                     upload_id=os.path.basename(path),
                     title=title,
                     body_text=markdown,
+                    comment_count=comment_count,
                 )
                 if doc_id and auto_opened_docs is not None:
                     from src.database import SessionLocal, Document

@@ -330,6 +330,99 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    # ---- POST /api/documents/import-office ----
+    @router.post("/api/documents/import-office")
+    async def import_office(
+        request: Request,
+        file: UploadFile = File(...),
+        session_id: Optional[str] = Form(None),
+    ) -> Dict[str, Any]:
+        """Upload a .docx/.odt and create a Document with its comments kept.
+
+        The conversion runs SERVER-side (``src.doc_import``) because the browser
+        path used mammoth, which silently drops Word comments — they live in
+        ``word/comments.xml``, a part mammoth never reads. Comments are merged
+        into the Markdown body and summarised at the end.
+        """
+        import os
+
+        from src.auth_helpers import require_privilege
+        from src.doc_import import OfficeImportError, import_office_document
+        from src.office_doc import create_office_document
+
+        user = require_privilege(request, "can_use_documents")
+
+        if session_id:
+            db = SessionLocal()
+            try:
+                _get_session_or_404(db, session_id, user)
+            finally:
+                db.close()
+
+        if upload_handler is None:
+            raise HTTPException(500, "Upload handler not configured")
+
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext not in (".docx", ".odt"):
+            raise HTTPException(400, "Only .docx and .odt files can be imported here.")
+
+        client_ip = request.client.host if request.client else "unknown"
+        try:
+            meta = upload_handler.save_upload(file, client_ip, owner=user)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Office import save_upload failed: {e}")
+            raise HTTPException(500, f"Upload failed: {e}")
+
+        upload_id = meta["id"]
+        path = _locate_current_user_upload(request, upload_id, user)
+        if not path:
+            raise HTTPException(500, "Saved upload could not be located")
+
+        original = meta.get("original_name") or meta.get("name") or upload_id
+        title = os.path.splitext(original)[0] or "Untitled"
+
+        try:
+            result = import_office_document(path)
+        except OfficeImportError as e:
+            # 400, not 500: the user can fix this (save as .docx, pick another
+            # file). The message is written for them, not for a log.
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            logger.error(f"Office import failed for {path}: {e}")
+            raise HTTPException(500, f"Import failed: {e}")
+
+        # Library imports are session-less; create_office_document already
+        # handles a missing session (owner comes from the session when present).
+        doc_id = create_office_document(
+            session_id=session_id or None,
+            upload_id=os.path.basename(path),
+            title=title,
+            body_text=result.markdown,
+            comment_count=result.comment_count,
+        )
+        if not doc_id:
+            raise HTTPException(500, "Failed to create a document from the import")
+
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(500, "Created document not found")
+            # A session-less library import would otherwise leave owner NULL,
+            # which the Library's owner filter hides. Stamp the caller.
+            if not doc.owner and user:
+                doc.owner = user
+                db.commit()
+                db.refresh(doc)
+            payload = _doc_to_dict(doc)
+            payload["comment_count"] = result.comment_count
+            payload["warnings"] = result.warnings
+            return payload
+        finally:
+            db.close()
+
     # ---- GET /api/documents/library ----
     @router.get("/api/documents/library")
     async def documents_library(

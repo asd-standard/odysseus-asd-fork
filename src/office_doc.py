@@ -14,10 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 def create_office_document(
-    session_id: str,
+    session_id: Optional[str],
     upload_id: str,
     title: str,
     body_text: Optional[str] = None,
+    comment_count: int = 0,
 ) -> Optional[str]:
     """Create a markdown Document for an Office attachment and set it active.
 
@@ -25,6 +26,13 @@ def create_office_document(
     extracted body lives in `current_content`, so the agent can fetch
     arbitrary windows via `manage_documents action=read` even when the
     inline chat copy was truncated.
+
+    ``session_id`` may be None (Library imports are not tied to a chat). An
+    EMPTY STRING must never reach the insert: `documents.session_id` is a
+    foreign key to `sessions.id`, and "" is not NULL, so SQLite tries to match
+    a session literally named "" and raises "FOREIGN KEY constraint failed".
+    That is exactly how a session-less Office import failed. Normalised here so
+    no caller can reintroduce it.
     """
     from src.database import (
         SessionLocal,
@@ -33,6 +41,8 @@ def create_office_document(
         Session as DbSession,
     )
     from src.agent_tools.document_tools import set_active_document
+
+    session_id = session_id or None
 
     if not body_text or not body_text.strip():
         return None
@@ -57,7 +67,12 @@ def create_office_document(
             document_id=doc_id,
             version_number=1,
             content=body_text,
-            summary="Imported from Office attachment",
+            summary=(
+                f"Imported from Office attachment ({comment_count} comment"
+                f"{'s' if comment_count != 1 else ''} preserved)"
+                if comment_count
+                else "Imported from Office attachment"
+            ),
             source="upload",
         )
         db.add(doc)

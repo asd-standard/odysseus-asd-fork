@@ -2119,77 +2119,10 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     return _xlsxReady;
   }
 
-  let _mammothReady = null;
-  function ensureMammoth() {
-    if (_mammothReady) return _mammothReady;
-    if (window.mammoth) return (_mammothReady = Promise.resolve());
-    _mammothReady = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = '/static/lib/mammoth.browser.min.js';
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('Failed to load DOCX library'));
-      document.head.appendChild(s);
-    });
-    return _mammothReady;
-  }
-
-  /** Convert HTML from mammoth to clean markdown */
-  function htmlToMarkdown(html) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    let md = '';
-    function walk(node) {
-      if (node.nodeType === 3) { md += node.textContent; return; }
-      if (node.nodeType !== 1) return;
-      const tag = node.tagName.toLowerCase();
-      if (tag === 'h1') { md += '\n# '; walkChildren(node); md += '\n'; }
-      else if (tag === 'h2') { md += '\n## '; walkChildren(node); md += '\n'; }
-      else if (tag === 'h3') { md += '\n### '; walkChildren(node); md += '\n'; }
-      else if (tag === 'h4') { md += '\n#### '; walkChildren(node); md += '\n'; }
-      else if (tag === 'strong' || tag === 'b') { md += '**'; walkChildren(node); md += '**'; }
-      else if (tag === 'em' || tag === 'i') { md += '*'; walkChildren(node); md += '*'; }
-      else if (tag === 'a') { md += '['; walkChildren(node); md += `](${node.href || ''})`; }
-      else if (tag === 'br') { md += '\n'; }
-      else if (tag === 'p') { md += '\n'; walkChildren(node); md += '\n'; }
-      else if (tag === 'ul' || tag === 'ol') { md += '\n'; walkChildren(node); }
-      else if (tag === 'li') {
-        const parent = node.parentElement?.tagName?.toLowerCase();
-        if (parent === 'ol') {
-          const idx = Array.from(node.parentElement.children).indexOf(node) + 1;
-          md += `${idx}. `;
-        } else { md += '- '; }
-        walkChildren(node);
-        md += '\n';
-      }
-      else if (tag === 'table') { md += '\n'; convertTable(node); md += '\n'; }
-      else if (tag === 'img') {
-        // Skip embedded base64 images — they produce huge unreadable blobs
-        const src = node.src || '';
-        if (!src.startsWith('data:')) {
-          md += `![${node.alt || ''}](${src})`;
-        } else if (node.alt) {
-          md += `*[image: ${node.alt}]*`;
-        }
-      }
-      else { walkChildren(node); }
-    }
-    function walkChildren(node) { for (const child of node.childNodes) walk(child); }
-    function convertTable(table) {
-      const rows = table.querySelectorAll('tr');
-      rows.forEach((tr, i) => {
-        const cells = tr.querySelectorAll('th, td');
-        md += '| ' + Array.from(cells).map(c => c.textContent.trim()).join(' | ') + ' |\n';
-        if (i === 0) md += '| ' + Array.from(cells).map(() => '---').join(' | ') + ' |\n';
-      });
-    }
-    walkChildren(doc.body);
-    return md.replace(/\n{3,}/g, '\n\n').trim();
-  }
-
-  /** Read file contents — handles text, spreadsheet, and DOCX formats */
+  /** Read file contents — text and spreadsheets (Office goes to the server) */
   async function readFileContent(file) {
     const name = file.name.toLowerCase();
     const isSpreadsheet = name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.ods');
-    const isDocx = name.endsWith('.docx');
 
     if (isSpreadsheet) {
       await ensureXLSX();
@@ -2204,13 +2137,9 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       return parts.join('\n\n');
     }
 
-    if (isDocx) {
-      await ensureMammoth();
-      const buf = await file.arrayBuffer();
-      const result = await window.mammoth.convertToHtml({ arrayBuffer: buf });
-      return htmlToMarkdown(result.value);
-    }
-
+    // .docx/.odt are converted SERVER-side: mammoth (used here previously)
+    // cannot read word/comments.xml, so comments were silently dropped. See
+    // /api/documents/import-office. This function now only handles plain text.
     // Plain text
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -2235,7 +2164,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       '.scss': 'css', '.sass': 'css', '.less': 'css',
       '.csv': 'csv', '.tsv': 'csv',
       '.xlsx': 'csv', '.xls': 'csv', '.ods': 'csv',
-      '.docx': 'markdown', '.doc': 'markdown',
+      '.docx': 'markdown', '.odt': 'markdown', '.doc': 'markdown',
     };
 
     let imported = 0;
@@ -2254,6 +2183,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
 
         const isSpreadsheet = ['.xlsx', '.xls', '.ods'].includes(ext);
         const isPdf = ext === '.pdf';
+        const isOffice = ext === '.docx' || ext === '.odt';
 
         if (isPdf) {
           // Backend handles save + AcroForm detection in one shot — picks the
@@ -2272,6 +2202,33 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           }
           imported++;
           continue;
+        }
+
+        if (isOffice) {
+          // Server-side conversion. The browser used to run mammoth here, which
+          // cannot read word/comments.xml — every Word comment was discarded
+          // before the document ever reached the backend. The server now does
+          // both (rich body + comments) in one request.
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch(`${API_BASE}/api/documents/import-office`, {
+            method: 'POST',
+            body: fd,
+          });
+          if (!res.ok) {
+            let _e = `HTTP ${res.status}`;
+            try { const _j = await res.json(); _e = _j.detail || _j.error || _e; } catch {}
+            throw new Error(`${ext.slice(1).toUpperCase()} import failed: ${_e}`);
+          }
+          imported++;
+          continue;
+        }
+
+        if (ext === '.doc') {
+          throw new Error(
+            'Legacy .doc is not supported. Open it in Word/LibreOffice and ' +
+            'save as .docx (comments are preserved on import).'
+          );
         }
 
         if (isSpreadsheet) {

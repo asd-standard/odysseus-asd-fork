@@ -358,6 +358,23 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                         if ext == ".pdf":
                             from src.personal_docs import extract_pdf_text
                             text = extract_pdf_text(file_path)
+                        elif ext in (".docx", ".odt"):
+                            # These are zip containers, not text. Decoding them
+                            # as UTF-8 (the old else-branch) produced megabytes
+                            # of binary garbage that was then chunked and
+                            # embedded — and Word comments were lost entirely.
+                            from src.doc_import import OfficeImportError, import_office_document
+
+                            try:
+                                text = import_office_document(file_path).markdown
+                            except OfficeImportError as e:
+                                raise ValueError(str(e))
+                        elif ext in (".pptx", ".xlsx", ".xls", ".epub", ".doc"):
+                            # Other Office/EPUB: markitdown. `.doc` fails there
+                            # too, but it fails loudly instead of indexing junk.
+                            from src.markitdown_runtime import convert_to_markdown
+
+                            text = convert_to_markdown(file_path) or ""
                         else:
                             text = content_bytes.decode("utf-8", errors="replace")
 

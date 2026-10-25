@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from src.index_walk import prune_index_dirs, is_indexable_file
 
-from src.markitdown_runtime import MARKITDOWN_EXTS
+from src.markitdown_runtime import COMMENT_AWARE_EXTS, MARKITDOWN_EXTS
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class PersonalDocsConfig:
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
     DEFAULT_EXTENSIONS: Tuple[str, ...] = (
-        ".txt", ".md", ".json", ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".epub",
+        ".txt", ".md", ".json", ".pdf", ".docx", ".odt", ".pptx", ".xlsx", ".xls", ".epub",
     )
     DEFAULT_K: int = 5
     STOP_WORDS: Set[str] = None
@@ -121,6 +121,16 @@ def load_personal_index(
             ext = os.path.splitext(name)[1].lower()
             if ext == ".pdf":
                 text = extract_pdf_text(p)
+            elif ext in COMMENT_AWARE_EXTS:
+                # .docx/.odt: same importer as the Library and chat paths, so
+                # comments and rich formatting are handled identically
+                # everywhere. Falls back to markitdown if it cannot be parsed.
+                try:
+                    from src.doc_import import import_office_document
+
+                    text = import_office_document(p).markdown
+                except Exception:
+                    text = extract_office_text(p)
             elif ext in MARKITDOWN_EXTS:
                 text = extract_office_text(p)
             else:

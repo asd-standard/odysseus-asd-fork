@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""office_comments — read .docx/.odt as Markdown, keeping review comments.
+
+Callable from bash exactly like `transcribe`:
+
+    office_comments convert report.docx              # Markdown to stdout
+    office_comments convert report.docx -o out.md    # write to a file
+    office_comments convert report.docx --no-comments
+    office_comments comments report.docx             # comments + their anchors
+    office_comments info report.docx                 # format, size, counts
+    office_comments check report.docx                # exit 0 if supported
+    office_comments excerpt "some long paragraph..." # trim to a short quote
+
+Comments are rendered twice: inline right after the paragraph they annotate
+(the context that makes them readable), and in a dated `## Comments (n)`
+summary with a quoted excerpt.
+
+`.doc` (Word 97-2003, binary) is NOT supported: it is not a zip container, so
+neither this tool nor markitdown can read it. Save it as .docx first.
+
+As a library (the helpers the CLI is built on):
+
+    from src.office_comments import (
+        convert_office_with_comments,  # -> (markdown, comments) | None
+        to_markdown,                   # -> str | None
+        list_comments,                 # -> list[dict] | None
+        is_office_comment_format,      # -> bool
+        extract_excerpt,               # -> str | None
+    )
+
+Exit codes: 0 ok, 1 unreadable/unsupported, 2 usage error.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+sys.path.insert(
+    0,
+    # realpath: this script is installed as a symlink in ~/.local/bin, so
+    # __file__ would otherwise point outside the repo and `_lib` would not
+    # resolve.
+    os.path.join(os.path.dirname(os.path.realpath(__file__)), "_lib"),
+)
+from cli import common_parser, quiet_logs, run  # noqa: E402
+
+quiet_logs()
+
+
+def _load(path: str):
+    """Return (markdown, comments), or fail with a user-facing message."""
+    from src.office_comments import convert_office_with_comments, is_office_comment_format
+
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".doc":
+        _die(
+            "legacy .doc (Word 97-2003) is not supported.\n"
+            "       Convert it to .docx first (Word / LibreOffice), then rerun."
+        )
+    if not is_office_comment_format(path):
+        _die(f"unsupported format '{ext or '(none)'}'. Supported: .docx, .odt")
+    if not os.path.isfile(path):
+        _die(f"no such file: {path}")
+
+    converted = convert_office_with_comments(path)
+    if converted is None:
+        _die(f"could not parse {path} (corrupt, or not a real {ext} container)")
+    return converted
+
+
+def _die(msg: str, code: int = 1) -> None:
+    sys.stderr.write(f"error: {msg}\n")
+    raise SystemExit(code)
+
+
+def _comment_line(c: dict) -> str:
+    when = f" ({c['date']})" if c.get("date") else ""
+    scope = " [document-level]" if c.get("document_level") else ""
+    return f"{c['author']}{when}{scope}: {c['text']}"
+
+
+# ── subcommands ─────────────────────────────────────────────────────────────
+
+
+def cmd_convert(args) -> None:
+    markdown, comments = _load(args.file)
+    if args.no_comments and comments:
+        from src.office_comments import to_markdown
+
+        markdown = to_markdown(args.file, include_comments=False) or markdown
+
+    out = markdown if markdown.endswith("\n") else markdown + "\n"
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as fh:
+            fh.write(out)
+        sys.stderr.write(
+            f"wrote {args.output} ({len(out)} chars, {len(comments)} comment(s))\n"
+        )
+    else:
+        sys.stdout.write(out)
+
+
+def cmd_comments(args) -> None:
+    _, comments = _load(args.file)
+    if args.json:
+        json.dump(comments, sys.stdout, indent=2, ensure_ascii=False)
+        sys.stdout.write("\n")
+        return
+    if not comments:
+        sys.stderr.write("no comments\n")
+        return
+    for c in comments:
+        print(_comment_line(c))
+        if c.get("excerpt"):
+            print(f"    on: {c['excerpt']}")
+
+
+def cmd_info(args) -> None:
+    markdown, comments = _load(args.file)
+    info = {
+        "file": args.file,
+        "format": os.path.splitext(args.file)[1].lower().lstrip("."),
+        "size_bytes": os.path.getsize(args.file),
+        "blocks": len([b for b in markdown.split("\n\n") if b.strip()]),
+        "comments": len(comments),
+        "document_level_comments": sum(1 for c in comments if c.get("document_level")),
+    }
+    if args.json:
+        json.dump(info, sys.stdout, indent=2, ensure_ascii=False)
+        sys.stdout.write("\n")
+        return
+    width = max(len(k) for k in info) + 2
+    for key, value in info.items():
+        print(f"{(key + ':'):<{width}}{value}")
+
+
+def cmd_check(args) -> None:
+    """Exit 0 only if the file is a supported, readable container."""
+    _load(args.file)
+
+
+def cmd_excerpt(args) -> None:
+    from src.office_comments import extract_excerpt
+
+    print(extract_excerpt(args.text, limit=args.limit) or "")
+
+
+# ── parser ──────────────────────────────────────────────────────────────────
+
+
+def build_parser():
+    p = common_parser(
+        "office_comments",
+        "Read .docx/.odt as Markdown, preserving review comments.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    pc = sub.add_parser("convert", help="Markdown (with comments) to stdout")
+    pc.add_argument("file")
+    pc.add_argument("-o", "--output", help="write to this file instead of stdout")
+    pc.add_argument("--no-comments", action="store_true", help="strip comments")
+    pc.set_defaults(func=cmd_convert)
+
+    pm = sub.add_parser("comments", help="list comments and their anchors")
+    pm.add_argument("file")
+    pm.add_argument("--json", action="store_true", help="machine-readable output")
+    pm.set_defaults(func=cmd_comments)
+
+    pi = sub.add_parser("info", help="summarise the file")
+    pi.add_argument("file")
+    pi.add_argument("--json", action="store_true", help="machine-readable output")
+    pi.set_defaults(func=cmd_info)
+
+    pk = sub.add_parser("check", help="exit 0 if the file is supported and readable")
+    pk.add_argument("file")
+    pk.set_defaults(func=cmd_check)
+
+    pe = sub.add_parser("excerpt", help="trim text to a short quote (helper)")
+    pe.add_argument("text")
+    pe.add_argument("--limit", type=int, default=120)
+    pe.set_defaults(func=cmd_excerpt)
+
+    return p
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(run(build_parser()))
+    except BrokenPipeError:
+        sys.exit(0)  # `| head` closed the pipe
