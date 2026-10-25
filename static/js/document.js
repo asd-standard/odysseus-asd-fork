@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261023noworkspace1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261025officecomments1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -8538,20 +8538,39 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const textareaRect = textarea.getBoundingClientRect();
       const paddingTop = parseFloat(getComputedStyle(textarea).paddingTop) || 10;
       const rawTop = textareaRect.top + paddingTop + (linesBefore * lineH) - textarea.scrollTop;
-      const clampedTop = Math.max(60, Math.min(rawTop, window.innerHeight - 220));
+      // Clamp using the card's REAL height. The old constant (-220) assumed a
+      // short card, so a long explanation pushed the Accept/Skip buttons below
+      // the viewport. The card is height-bounded in CSS and its reason scrolls,
+      // so offsetHeight is now stable and small enough to clamp against.
+      const EDGE = 16;
+      const cardH = card.offsetHeight || 220;
+      const maxTop = Math.max(60, window.innerHeight - cardH - EDGE);
+      const clampedTop = Math.max(60, Math.min(rawTop, maxTop));
       card.style.position = 'fixed';
       card.style.top = clampedTop + 'px';
 
       const paneRect = pane.getBoundingClientRect();
       const isMobile = window.innerWidth <= 768;
       if (!isMobile) {
-        if (paneRect.right + 270 < window.innerWidth) {
+        // Use the card's real width (it is width-bounded by CSS) plus a gutter,
+        // instead of the old hard-coded 270 that assumed a 250px card.
+        const cardW = card.offsetWidth || 320;
+        if (paneRect.right + cardW + 16 < window.innerWidth) {
           card.style.left = (paneRect.right + 16) + 'px';
           card.style.right = '';
         } else {
           card.style.left = '';
           card.style.right = (window.innerWidth - paneRect.left + 16) + 'px';
         }
+        // Clear any mobile stretch so a resize back to desktop restores width.
+        card.style.width = '';
+      } else {
+        // Mobile: the card overlays the top of the editor (see the max-width
+        // media query). State its horizontal span explicitly so it matches the
+        // 8px gutter the stylesheet uses, instead of relying on content width.
+        card.style.left = '8px';
+        card.style.right = '8px';
+        card.style.width = 'auto';
       }
 
       // Also position the highlight overlay

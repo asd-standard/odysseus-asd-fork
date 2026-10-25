@@ -165,6 +165,64 @@ def test_accept_does_not_save_per_suggestion():
     assert "_activeSuggestions.length === 0" in animate
 
 
+def test_suggestion_card_height_is_bounded_and_reason_scrolls():
+    """A long model explanation must not push Accept/Skip off-screen.
+
+    The card is a flex column with a max-height; the header and the action row
+    are non-shrinking, and only the reason scrolls. Without this the card grew
+    past the viewport and the buttons became unreachable.
+    """
+    card = CSS[CSS.index(".doc-suggestion-card {"):]
+    card = card[: card.index("}")]
+    assert "max-height: min(70vh, 460px)" in card
+    assert "display: flex" in card
+    assert "flex-direction: column" in card
+    # overflow stays visible so the ::before arrow can stick out; the inner
+    # reason element is what scrolls.
+    assert "overflow: visible" in card
+
+    header = CSS[CSS.index(".doc-suggestion-header {"):]
+    header = header[: header.index("}")]
+    assert "flex: 0 0 auto" in header
+
+    reason = CSS[CSS.index(".doc-suggestion-reason {"):]
+    reason = reason[: reason.index("}")]
+    assert "overflow-y: auto" in reason
+    assert "flex: 1 1 auto" in reason
+    assert "min-height" in reason
+    assert "overflow-wrap: anywhere" in reason
+
+    actions = CSS[CSS.index(".doc-suggestion-actions {"):]
+    actions = actions[: actions.index("}")]
+    assert "flex: 0 0 auto" in actions
+
+
+def test_card_vertical_clamp_uses_real_height():
+    """_positionCard must clamp against offsetHeight, not a fixed guess.
+
+    The old `innerHeight - 220` assumed a short card; with a long explanation
+    the buttons ended up below the fold.
+    """
+    position = _function_from(DOC_JS, "function _positionCard(")
+    assert "card.offsetHeight" in position
+    assert "window.innerHeight - cardH" in position
+    assert "window.innerHeight - 220" not in position
+    # Horizontal side-gap must also follow the real width (card is 320px now).
+    assert "card.offsetWidth" in position
+    assert "paneRect.right + 270" not in position
+
+
+def test_card_width_and_mobile_gutter():
+    card = CSS[CSS.index(".doc-suggestion-card {"):]
+    card = card[: card.index("}")]
+    assert "width: 320px" in card
+    assert "max-width: calc(100vw - 24px)" in card
+
+    position = _function_from(DOC_JS, "function _positionCard(")
+    assert "card.style.left = '8px'" in position
+    assert "card.style.right = '8px'" in position
+
+
 # --------------------------------------------------------------------------
 # The abandoned second apply path must stay gone
 # --------------------------------------------------------------------------

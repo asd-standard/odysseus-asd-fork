@@ -14044,10 +14044,21 @@ mark.doc-find-mark.current {
   z-index: 1;
   transition: top 0.1s, opacity 0.15s;
 }
-/* Suggestion card — fixed next to editor, anchored to the change */
+/* Suggestion card — fixed next to editor, anchored to the change.
+   Height is BOUNDED and the explanation scrolls: the reason text comes straight
+   from the model and can be arbitrarily long, while the header (nav/close) and
+   the action buttons must always stay reachable. Without this the card grew
+   past the viewport and Accept/Skip ended up off-screen with no way to get to
+   them. `overflow: visible` stays on the card itself so the ::before arrow can
+   stick out past the border; the inner `.doc-suggestion-reason` is the part
+   that scrolls. */
 .doc-suggestion-card {
   position: fixed;
-  width: 250px;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  max-height: min(70vh, 460px);
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--accent);
   border-radius: 10px;
@@ -14077,6 +14088,8 @@ mark.doc-find-mark.current {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
+  /* Never scrolls away with the reason. */
+  flex: 0 0 auto;
 }
 .doc-suggestion-nav {
   display: flex;
@@ -14323,6 +14336,24 @@ mark.doc-find-mark.current {
   margin-bottom: 6px;
   font-size: 11px;
   line-height: 1.4;
+  /* The scrollable region: bounded by the card's max-height, with a few lines
+     of minimum height so a one-word reason doesn't collapse to a sliver. */
+  flex: 1 1 auto;
+  min-height: 3.2em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 25%, transparent) transparent;
+}
+.doc-suggestion-reason::-webkit-scrollbar { width: 6px; }
+.doc-suggestion-reason::-webkit-scrollbar-track { background: transparent; }
+.doc-suggestion-reason::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 3px;
+}
+.doc-suggestion-reason::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg) 38%, transparent);
 }
 .doc-suggestion-diff {
   background: var(--bg);
@@ -14346,6 +14377,8 @@ mark.doc-find-mark.current {
 .doc-suggestion-actions {
   display: flex;
   gap: 6px;
+  /* Buttons stay pinned to the bottom of the card. */
+  flex: 0 0 auto;
 }
 .doc-suggestion-accept,
 .doc-suggestion-dismiss {
@@ -14382,9 +14415,11 @@ mark.doc-find-mark.current {
 @media (max-width: 768px) {
   .doc-suggestion-card {
     right: 8px;
-    right: 8px;
     width: auto;
     top: 8px !important;
+    /* `top` is pinned at 8px here, so cap by the viewport minus that gutter
+       (the global 70vh limit still applies and is tighter on tall screens). */
+    max-height: calc(100vh - 16px);
   }
   .doc-suggestion-card::before { display: none; }
 }
