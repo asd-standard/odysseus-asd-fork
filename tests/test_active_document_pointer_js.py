@@ -122,9 +122,13 @@ def test_library_preview_offers_open_in_editor():
     lib = (ROOT / "static/js/documentLibrary.js").read_text()
     preview = _function_from(lib, "function libraryShowPreview(")
     assert "doclib-preview-open" in preview
-    assert "_loadDocument" in preview
-    # Registering it in the tab map makes the previewed id addressable at all.
-    assert "_addDocToTabs" in preview
+    # Reuses the canonical open path (same as the ⋮ "Open" entry) rather than a
+    # hand-rolled load that could diverge from it.
+    assert "libraryOpenDocument(doc)" in preview
+    # The preview must NOT seed the tab map: a library-list row has no
+    # `current_content`, so doing so opened an empty editor and let the close
+    # path soft-delete the real file. See test_library_preview_safety_js.py.
+    assert "_addDocToTabs" not in preview
 
 
 def test_chat_sends_editor_signals_when_present():

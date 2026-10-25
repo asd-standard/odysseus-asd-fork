@@ -1396,7 +1396,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
     )
     # Every approval-relevant module must be on a CURRENT version. Modules split
     # across two version groups since the active-document work: the chat/doc
-    # graph (20261025officecomments1) and the settings/email graph
+    # graph (20261025previewfix1) and the settings/email graph
     # (20260815approvalsave1). What matters is that no source is on a
     # superseded version, which would let the browser pair a cached copy.
     _stale = ("20260722emailfastindex1", "20260815toolapproval4-startup")
@@ -1405,7 +1405,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
         for source in approval_module_sources
     )
     assert all(
-        ("20261025officecomments1" in source) or ("20260815approvalsave1" in source)
+        ("20261025previewfix1" in source) or ("20260815approvalsave1" in source)
         or ("20260819approvalcontrol1" in source)
         for source in approval_module_sources
     )

@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261025officecomments1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261025previewfix1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -4539,11 +4539,19 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     // Save current doc state before switching
     saveCurrentToMap();
 
-    // Auto-delete the doc we're leaving if it's completely empty
+    // Auto-delete the doc we're leaving if it's completely empty AND was never
+    // saved. Server-backed documents are never discarded on "empty local
+    // content" — a partially-loaded entry reads empty too (see addDocToTabs'
+    // `hydrated`), and deleting on that signal soft-deleted real files.
     const prevId = activeDocId;
     if (prevId && prevId !== docId && docs.has(prevId)) {
       const prev = docs.get(prevId);
-      if (prev.language !== 'email' && !(prev.content || '').trim() && !(prev.title || '').trim()) {
+      if (
+        prev._unsaved === true
+        && prev.language !== 'email'
+        && !(prev.content || '').trim()
+        && !(prev.title || '').trim()
+      ) {
         fetch(`${API_BASE}/api/document/${prevId}`, { method: 'DELETE' }).catch(() => {});
         docs.delete(prevId);
         _syncDocIndicator();
@@ -4681,10 +4689,15 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   function _detachDocFromSession(docId, { toast = false } = {}) {
     const doc = docs.get(docId);
     const hasContent = doc && doc.content && doc.content.trim().length > 0;
+    // Only discard a document we KNOW has nothing to lose: one created in this
+    // session that was never saved. "Local content is empty" is NOT evidence —
+    // a partially-loaded entry (see addDocToTabs' `hydrated`) also reads empty,
+    // and deleting on that signal soft-deleted real library files.
+    const discardable = !!doc && doc._unsaved === true && !hasContent;
     if (hasContent) {
       saveDocument({ silent: true }).catch(() => {});
       if (toast && uiModule) uiModule.showToast('Document closed');
-    } else {
+    } else if (discardable) {
       fetch(`${API_BASE}/api/document/${docId}`, { method: 'DELETE' }).catch(() => {});
     }
     docs.delete(docId);
@@ -7120,6 +7133,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const doc = await res.json();
       if (!doc || !doc.id) throw new Error('Document create failed: missing id');
       addDocToTabs(doc, sessionId);
+      // Created empty and never saved: the only kind of document that is safe
+      // to discard when the user closes it without typing anything.
+      { const _created = docs.get(doc.id); if (_created) _created._unsaved = true; }
       if (!isOpen) openPanel();
       // Re-enable editor if it was in empty state
       let textarea = document.getElementById('doc-editor-textarea');
@@ -7310,8 +7326,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   export async function loadDocument(docId) {
     _closeNotesForDocumentOpen();
-    // If already in tabs, just switch
-    if (docs.has(docId)) {
+    // Fast path ONLY for a hydrated tab entry. A row that was registered with
+    // no text (e.g. a library-list row, which only carries `preview`) must be
+    // fetched, otherwise the editor opens empty and the empty-doc cleanup can
+    // soft-delete the real document.
+    const cached = docs.get(docId);
+    if (cached && cached.hydrated !== false) {
       _ensureDocPaneMounted();
       switchToDoc(docId);
       return;
@@ -7580,6 +7600,13 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   /** Add a document to the tabs map */
   function addDocToTabs(doc, sessionId) {
     const existing = docs.get(doc.id);
+    // `hydrated` means "this row carries the real document text". Library-list
+    // rows do NOT: they ship a 500-char `preview` field and no
+    // `current_content`. Treating such a row as a loaded document opened an
+    // empty editor and let a later close soft-delete the real file, so the flag
+    // is what `loadDocument()`'s fast path and the empty-doc cleanup key on.
+    const hydrated =
+      doc.current_content !== undefined || doc.content !== undefined;
     docs.set(doc.id, {
       id: doc.id,
       title: doc.title || '',
@@ -7587,6 +7614,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       content: doc.current_content || doc.content || '',
       version: doc.version_count || 1,
       sessionId: sessionId || doc.session_id,
+      hydrated,
+      // A brand-new, never-saved document: safe to discard when empty. Anything
+      // that came from the server is NOT, even if its text is empty.
+      _unsaved: existing ? existing._unsaved : !!doc._unsaved,
       userSetLanguage: !!doc.language,
       _composeAtts: existing?._composeAtts,
       _skipLocalDraftOnce: !!doc._skipLocalDraftOnce,
@@ -9770,8 +9801,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (badge) { const _v = doc.version_count || 1; badge.textContent = `v${_v}`; badge.style.display = _v > 1 ? '' : 'none'; }
       // Update map
       if (docs.has(savingDocId)) {
-        docs.get(savingDocId).version = doc.version_count || 1;
-        docs.get(savingDocId).content = contentToSave;
+        const _saved = docs.get(savingDocId);
+        _saved.version = doc.version_count || 1;
+        _saved.content = contentToSave;
+        // Once real text has reached the server this is no longer a throwaway
+        // document: closing it must never auto-delete it.
+        if ((contentToSave || '').trim()) _saved._unsaved = false;
       }
       _syncDocIndicator();
       if (!silent && uiModule) uiModule.showToast(forceVersion ? 'New version saved' : 'Document saved');

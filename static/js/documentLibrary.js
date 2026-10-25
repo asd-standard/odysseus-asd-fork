@@ -215,7 +215,19 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       const iconKey = item.icon || item.label.toLowerCase();
       const iconSvg = _LIB_DD_ICONS[iconKey] || '';
       row.innerHTML = (iconSvg ? '<span class="dropdown-icon">' + iconSvg + '</span>' : '') + '<span>' + item.label + '</span>';
-      row.addEventListener('click', (e) => { e.stopPropagation(); teardown(); item.action(); });
+      if (item.title) row.title = item.title;
+      // Menu models in this file come in two shapes: `{action}` (folder/chat
+      // menus) and `{run}` (the shared `_docActionItems` used by document cards
+      // and this preview). Calling only one of them silently threw
+      // "item.action is not a function" for the other — which is why every
+      // entry in the preview's ⋮ menu did nothing when clicked.
+      row.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const fn = item.run || item.action;
+        teardown();
+        if (typeof fn === 'function') fn();
+        else console.warn('_showLibDropdown: item has no handler', item);
+      });
       dd.appendChild(row);
     }
     if (typeof opts.onSelect === 'function') {
@@ -1651,13 +1663,16 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     libraryHidePreview();
     _libraryPreviewId = doc.id;
     if (typeof _setLibraryPreviewDocId === 'function') _setLibraryPreviewDocId(doc.id);
-    // Register the previewed document in the editor's tab map. It is not the
-    // active document (the preview is read-only), but without this it is
-    // addressable by nothing: both the active pointer and the preview fallback
-    // resolve ids through `docs`.
-    if (typeof _addDocToTabs === 'function' && !_getDocs()?.has(doc.id)) {
-      _addDocToTabs(doc, doc.session_id);
-    }
+    // DO NOT register the previewed doc in the editor's tab map.
+    //
+    // A library-list row carries only a 500-char `preview` field — no
+    // `current_content`. Registering it created a tab entry with content '',
+    // which then (a) made `loadDocument()` take its "already loaded" fast path
+    // and open an EMPTY editor, and (b) made `_detachDocFromSession()` treat the
+    // document as empty and soft-DELETE it — the file vanished from the Library.
+    //
+    // The preview needs no tab entry: `getDisplayedDocId()` and
+    // `getLibraryPreviewDocId()` read `panel.dataset.docId` directly.
 
     const panel = document.createElement('div');
     panel.className = 'doclib-preview-panel';
@@ -1680,25 +1695,28 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     // preview is a read-only glance and is intentionally NOT reported to the
     // agent as "the active document" — the agent only targets what is in the
     // editor. This button is how the user promotes it.
+    //
+    // It reuses `libraryOpenDocument` — the same path as the ⋮ "Open" entry —
+    // instead of hand-rolling a load. One implementation means the button can
+    // never diverge from the menu (it previously did, via a stale tab entry).
     const openBtn = document.createElement('button');
     openBtn.className = 'doclib-preview-open';
     openBtn.title = 'Open in editor';
     openBtn.textContent = 'Open in editor';
+    let _opening = false;
     openBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      openBtn.disabled = true;
+      if (_opening) return;
+      _opening = true;
+      libraryHidePreview();
       try {
-        if (typeof _loadDocument === 'function') {
-          await _loadDocument(doc.id);
-        } else if (typeof _switchToDoc === 'function') {
-          _switchToDoc(doc.id);
-        }
+        await libraryOpenDocument(doc);
       } catch (err) {
         console.error('Open in editor failed:', err);
+        if (uiModule && uiModule.showError) uiModule.showError('Could not open the document');
       } finally {
-        openBtn.disabled = false;
+        _opening = false;
       }
-      libraryHidePreview();
     });
     header.appendChild(openBtn);
 
