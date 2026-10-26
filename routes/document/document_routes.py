@@ -13,6 +13,13 @@ from core.database import Session as DbSession
 from src.auth_helpers import get_current_user, _auth_disabled
 from src.constants import MAIL_ATTACHMENTS_DIR
 from src.upload_handler import reserve_upload_references
+from src.trash_service import (
+    move_document_to_trash,
+    purge_expired_documents,
+    restore_document,
+    retention_days,
+    trash_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -556,6 +563,92 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    # ---- GET /api/documents/trash — Library Trash (documents) ----
+    @router.get("/api/documents/trash")
+    async def documents_trash(
+        request: Request,
+        search: Optional[str] = Query(None),
+        sort: str = Query("recent"),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(50, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            # Lazy purge keeps expiry correct even if the daily loop has not
+            # run yet. Only touch rows this caller can see.
+            if user or _auth_disabled():
+                purge_expired_documents(db, owner=user or None)
+
+            q = (
+                db.query(Document, Folder.name)
+                .outerjoin(Folder, Document.folder_id == Folder.id)
+                .filter(Document.is_active == False)  # noqa: E712
+                .filter(Document.deleted_at.isnot(None))
+            )
+            q = _owner_session_filter(q, user)
+
+            if search:
+                for tok in search.split():
+                    term = f"%{tok}%"
+                    q = q.filter(
+                        Document.title.ilike(term) | Document.current_content.ilike(term)
+                    )
+
+            total = q.count()
+            if sort == "oldest":
+                q = q.order_by(Document.deleted_at.asc())
+            else:
+                q = q.order_by(Document.deleted_at.desc())
+
+            rows = q.offset(offset).limit(limit).all()
+            documents = []
+            for doc, folder_name in rows:
+                documents.append({
+                    "id": doc.id,
+                    "title": doc.title or "Untitled",
+                    "language": _library_language_for_document(doc),
+                    "preview": (doc.current_content or "")[:500],
+                    "folder_id": doc.folder_id,
+                    "folder_name": folder_name,
+                    "archived": bool(doc.archived),
+                    **trash_metadata(doc.deleted_at),
+                })
+
+            return {
+                "documents": documents,
+                "total": total,
+                "retention_days": retention_days(),
+            }
+        except Exception as e:
+            logger.error(f"Failed to fetch document trash: {e}")
+            raise HTTPException(500, f"Failed to fetch document trash: {e}")
+        finally:
+            db.close()
+
+    # ---- POST /api/documents/trash/empty — permanently delete all trashed docs ----
+    @router.post("/api/documents/trash/empty")
+    async def empty_documents_trash(request: Request) -> Dict[str, int]:
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            q = db.query(Document).filter(
+                Document.is_active == False,  # noqa: E712
+                Document.deleted_at.isnot(None),
+            )
+            q = _owner_session_filter(q, user)
+            docs = q.all()
+            for doc in docs:
+                db.delete(doc)
+            db.commit()
+            return {"deleted": len(docs)}
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to empty document trash: {e}")
+            raise HTTPException(500, f"Failed to empty document trash: {e}")
+        finally:
+            db.close()
+
     # ---- GET /api/documents/{session_id} ----
     @router.get("/api/documents/{session_id}")
     async def list_documents(request: Request, session_id: str) -> List[Dict[str, Any]]:
@@ -858,7 +951,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
-    # ---- DELETE /api/document/{doc_id} — soft delete ----
+    # ---- DELETE /api/document/{doc_id} — move to Trash ----
     @router.delete("/api/document/{doc_id}")
     async def delete_document(request: Request, doc_id: str) -> Dict[str, str]:
         user = get_current_user(request)
@@ -868,7 +961,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             if not doc:
                 raise HTTPException(404, "Document not found")
             _verify_doc_owner(db, doc, user)
-            doc.is_active = False
+            move_document_to_trash(doc)
             # Closed/deleted — drop the in-memory active-doc pointer so it isn't
             # re-injected into a later, unrelated chat (#1160).
             try:
@@ -877,7 +970,63 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             except Exception:
                 pass
             db.commit()
+            return {"status": "trashed", "id": doc_id}
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(500, str(e))
+        finally:
+            db.close()
+
+    # ---- DELETE /api/document/{doc_id}/permanent — hard delete from Trash ----
+    @router.delete("/api/document/{doc_id}/permanent")
+    async def permanently_delete_document(request: Request, doc_id: str) -> Dict[str, str]:
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(404, "Document not found")
+            _verify_doc_owner(db, doc, user)
+            if doc.is_active or not doc.deleted_at:
+                raise HTTPException(409, "Document is not in Trash")
+            try:
+                from src.agent_tools.document_tools import clear_active_document
+                clear_active_document(doc_id)
+            except Exception:
+                pass
+            db.delete(doc)
+            db.commit()
             return {"status": "deleted", "id": doc_id}
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(500, str(e))
+        finally:
+            db.close()
+
+    # ---- POST /api/document/{doc_id}/restore — restore from Trash ----
+    @router.post("/api/document/{doc_id}/restore")
+    async def restore_document_from_trash(request: Request, doc_id: str) -> Dict[str, Any]:
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(404, "Document not found")
+            _verify_doc_owner(db, doc, user)
+            if doc.is_active or not doc.deleted_at:
+                raise HTTPException(409, "Document is not in Trash")
+            restore_document(doc)
+            db.commit()
+            return {
+                "ok": True,
+                "id": doc_id,
+                "archived": bool(doc.archived),
+                "folder_id": doc.folder_id,
+            }
         except HTTPException:
             raise
         except Exception as e:
@@ -1060,26 +1209,28 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                         fixed_titles += 1
 
             for doc in to_delete:
-                db.delete(doc)
+                move_document_to_trash(doc)
 
-            # Also clean up inactive empty docs from previous soft-deletes
+            # Legacy soft-deletes that predate Trash (is_active=False with no
+            # deleted_at) are invisible everywhere; keep the old tidy cleanup
+            # for empty ones. Trashed rows have deleted_at and belong to the
+            # retention purge, so they must not be touched here.
             inactive_q = (
                 db.query(Document)
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
-                .filter(Document.is_active == False)
+                .filter(Document.is_active == False)  # noqa: E712
+                .filter(Document.deleted_at.is_(None))
                 .filter((Document.current_content == None) | (Document.current_content == ""))
             )
             inactive_q = _owner_session_filter(inactive_q, user)
-            inactive_docs = inactive_q.all()
-            for doc in inactive_docs:
+            for doc in inactive_q.all():
                 db.delete(doc)
-            deleted += len(inactive_docs)
 
             db.commit()
             return {
                 "fixed_titles": fixed_titles,
                 "deleted": deleted,
-                "message": f"Fixed {fixed_titles} title{'s' if fixed_titles != 1 else ''}, removed {deleted} empty document{'s' if deleted != 1 else ''}",
+                "message": f"Fixed {fixed_titles} title{'s' if fixed_titles != 1 else ''}, moved {deleted} empty/junk document{'s' if deleted != 1 else ''} to Trash",
             }
         except Exception as e:
             db.rollback()
@@ -1163,7 +1314,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 verdict = str(verdicts[i] or "").lower().strip()
                 if verdict == "junk":
                     doc.tidy_verdict = "junk"
-                    db.delete(doc)
+                    move_document_to_trash(doc)
                     deleted += 1
                 else:
                     doc.tidy_verdict = "keep"
@@ -1174,7 +1325,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 "deleted": deleted,
                 "reviewed": reviewed,
                 "remaining": len(to_review) - len(batch),
-                "message": f"Reviewed {reviewed}, removed {deleted} junk document{'s' if deleted != 1 else ''}",
+                "message": f"Reviewed {reviewed}, moved {deleted} junk document{'s' if deleted != 1 else ''} to Trash",
             }
         except HTTPException:
             raise

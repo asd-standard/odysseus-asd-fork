@@ -64,13 +64,10 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
     if action == "delete":
         if not rid:
             return {"error": "Provide the research id to delete (from action='list')."}
-        p = data_dir / f"{rid}.json"
-        if p.exists():
-            try:
-                p.unlink()
-            except Exception as e:
-                return {"error": f"Failed to delete: {e}"}
-            return {"output": f"Deleted research '{rid}'.", "exit_code": 0}
+        from src.trash_service import move_research_to_trash
+        if move_research_to_trash(rid, owner):
+            return {"output": f"Moved research '{rid}' to Trash.", "exit_code": 0}
+        # Either it never existed, already went to Trash, or another owner has it.
         return {"error": f"Research '{rid}' not found."}
 
     # default: list — clickable [query](#research-<id>) rows, most-recent first

@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261025previewfix1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261025trash1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -4028,7 +4028,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         }
         // Delete the compose document after successful send.
         if (sendDocId) {
-          fetch(`${API_BASE}/api/document/${sendDocId}`, { method: 'DELETE' }).catch(() => {});
+          fetch(`${API_BASE}/api/document/${sendDocId}/permanent`, { method: 'DELETE' }).catch(() => {});
           const wasActiveSentDoc = activeDocId === sendDocId;
           docs.delete(sendDocId);
           if (wasActiveSentDoc) {
@@ -4129,7 +4129,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     // never written to disk.
     _exitSuggestionPreview();
     if (deleteDoc) {
-      fetch(`${API_BASE}/api/document/${activeDocId}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`${API_BASE}/api/document/${activeDocId}/permanent`, { method: 'DELETE' }).catch(() => {});
     }
     // Save the current state to the doc first so it persists in the library
     saveCurrentToMap();
@@ -4552,7 +4552,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         && !(prev.content || '').trim()
         && !(prev.title || '').trim()
       ) {
-        fetch(`${API_BASE}/api/document/${prevId}`, { method: 'DELETE' }).catch(() => {});
+        fetch(`${API_BASE}/api/document/${prevId}/permanent`, { method: 'DELETE' }).catch(() => {});
         docs.delete(prevId);
         _syncDocIndicator();
       }
@@ -4698,7 +4698,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       saveDocument({ silent: true }).catch(() => {});
       if (toast && uiModule) uiModule.showToast('Document closed');
     } else if (discardable) {
-      fetch(`${API_BASE}/api/document/${docId}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`${API_BASE}/api/document/${docId}/permanent`, { method: 'DELETE' }).catch(() => {});
     }
     docs.delete(docId);
     _syncDocIndicator();
@@ -10171,8 +10171,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const doc = docs.get(activeDocId);
     const name = doc ? doc.title : 'this document';
     const ok = uiModule && uiModule.styledConfirm
-      ? await uiModule.styledConfirm(`Delete "${name}"?`, { confirmText: 'Delete', danger: true })
-      : confirm(`Delete "${name}"?`);
+      ? await uiModule.styledConfirm(`Move "${name}" to Trash?`, { confirmText: 'Move to Trash', danger: true })
+      : confirm(`Move "${name}" to Trash?`);
     if (!ok) return;
     try {
       const res = await fetch(`${API_BASE}/api/document/${activeDocId}`, { method: 'DELETE' });
@@ -10190,10 +10190,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         _publishActiveDoc(activeDocId);
         closePanel();
       }
-      if (uiModule) uiModule.showToast('Document deleted');
+      if (uiModule) uiModule.showToast('Moved to Trash');
     } catch (e) {
       console.error('Failed to delete document:', e);
-      if (uiModule) uiModule.showError('Failed to delete document');
+      if (uiModule) uiModule.showError('Failed to move document to Trash');
     }
   }
 

@@ -230,11 +230,13 @@ async def test_delete_folder_recursively_deletes_docs_and_subfolders():
     # Every folder in the subtree is gone.
     for fid in (top, child, grandchild):
         assert _db_get(Folder, fid) is None
-    # Documents inside the subtree are soft-deleted (is_active=False).
+    # Documents inside the subtree are moved to Trash (inactive + deleted_at).
     for doc_id in (doc_in_top, doc_in_grand):
         d = _db_get(Document, doc_id)
         assert d is not None
         assert d.is_active is False
+        assert d.deleted_at is not None
+        assert d.folder_id is None
     # A document outside the folder is untouched.
     outside = _db_get(Document, outside_doc)
     assert outside is not None

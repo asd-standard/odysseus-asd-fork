@@ -1058,6 +1058,13 @@ async def _startup_event():
     app.state._startup_tasks = _startup_tasks
     if upload_cleanup_func:
         upload_cleanup_task = asyncio.create_task(upload_cleanup_func())
+    # Library Trash: enforce the retention window on boot so expired items do
+    # not linger just because nobody opened the Trash tab.
+    try:
+        from src.trash_service import purge_all_expired
+        await asyncio.to_thread(purge_all_expired)
+    except Exception as _trash_err:
+        logger.debug(f"Startup trash purge skipped: {_trash_err}")
     # Always-on monitor that auto-continues the agent when a background bash
     # job (#!bg) finishes — re-invokes the turn with the job output.
     try:
@@ -1230,6 +1237,20 @@ async def _startup_event():
                 await asyncio.sleep(3600)
 
     _startup_tasks.append(asyncio.create_task(_null_owner_sweep_loop()))
+
+    # Nightly Library Trash purge — documents + research. Expiry is also
+    # enforced lazily when the Trash tab is opened.
+    async def _trash_purge_loop():
+        while True:
+            try:
+                await asyncio.sleep(86400)
+                from src.trash_service import purge_all_expired
+                await asyncio.to_thread(purge_all_expired)
+            except Exception as e:
+                logger.debug(f"Trash purge skipped: {e}")
+                await asyncio.sleep(3600)
+
+    _startup_tasks.append(asyncio.create_task(_trash_purge_loop()))
 
     # Nightly skill audit — at ~02:00 local, test + judge a batch of the
     # least-recently-checked skills, auto-fixing/escalating weak ones (never

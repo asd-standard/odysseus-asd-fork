@@ -98,7 +98,9 @@ documented race protection assumes the current single-worker deployment.
 
 `routes/document/document_routes.py` owns the HTTP document API: create/read/update/archive/delete, library listing, import/export, version history, tidy/AI tidy, PDF rendering/export, PDF form helpers, and email-attachment reply preparation. The top-level document route/helper modules remain compatibility aliases.
 
-`static/js/documentLibrary.js` owns local library state after archive/delete actions, including total counts and language chips. Server route truth still owns durable document state.
+Deleting a document moves it to Trash (`is_active=False` plus `deleted_at`) instead of removing the row. `/api/documents/trash` lists owner-scoped trashed documents, `/api/document/{id}/restore` restores them while preserving archive/folder state, and `/api/document/{id}/permanent` hard-deletes only while trashed. `trash_retention_days` (default 15) is enforced by startup/daily purges and a lazy purge on trash listing; tidy/AI-tidy also route junk through Trash.
+
+`static/js/documentLibrary.js` owns local library state after archive/delete actions, including total counts, language chips, and the Documents/Research Trash tab (restore, delete forever, empty, admin retention control). Server route truth still owns durable document state.
 
 `static/js/document.js` owns the browser document editor and markdown preview. Preview rendering applies code highlighting when highlight.js is present, renders Mermaid diagrams when the Mermaid runtime is available, refreshes after AI edits, and discards pending AI diffs before switching the active document.
 

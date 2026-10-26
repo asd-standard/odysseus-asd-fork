@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from sqlalchemy import func
 
-from core.database import SessionLocal, Document, Folder
+from core.database import SessionLocal, Document, Folder, utcnow_naive
 from src.auth_helpers import get_current_user
 from routes.document.document_helpers import _folder_owner_filter, _verify_folder_owner
 
@@ -262,16 +262,22 @@ def setup_folder_routes() -> APIRouter:
             all_folders = _folder_owner_filter(db.query(Folder), user).all()
             folder_ids = {folder.id} | _descendant_ids(all_folders, folder.id)
 
-            # Soft-delete documents filed anywhere in the subtree. Matches the
-            # existing per-document delete (is_active=False), so they remain
-            # recoverable from the Archive tab rather than being destroyed.
+            # Move documents filed anywhere in the subtree to Trash. Restoring
+            # them later returns them to Unfiled (the folder tree is gone).
             doc_q = db.query(Document).filter(
                 Document.folder_id.in_(folder_ids),
                 Document.is_active == True,
             )
             if user:
                 doc_q = doc_q.filter(Document.owner == user)
-            doc_q.update({"is_active": False}, synchronize_session=False)
+            doc_q.update(
+                {
+                    "is_active": False,
+                    "deleted_at": utcnow_naive(),
+                    "folder_id": None,
+                },
+                synchronize_session=False,
+            )
 
             # Hard-delete the folders. Bulk delete bypasses ORM relationship
             # handling so the parent_id ON DELETE CASCADE is never relied upon

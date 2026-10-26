@@ -49,8 +49,15 @@ def test_tidy_survives_duplicate_with_null_timestamps(db_factory):
 
     db = db_factory()
     try:
-        remaining = db.query(Document).filter(Document.owner == "alice").count()
-        assert remaining == 1  # one duplicate kept, the other removed
+        remaining = db.query(Document).filter(
+            Document.owner == "alice", Document.is_active == True,
+        ).count()
+        assert remaining == 1  # one duplicate kept, the other moved to Trash
+        trashed = db.query(Document).filter(
+            Document.owner == "alice", Document.is_active == False,
+        ).all()
+        assert len(trashed) == 1
+        assert trashed[0].deleted_at is not None
     finally:
         db.close()
 

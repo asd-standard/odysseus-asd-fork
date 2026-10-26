@@ -69,9 +69,12 @@ async def run_document_tidy(owner: str) -> str:
             # Documents now carry their own owner column (robust to a deleted
             # session). Match on it directly; orphaned legacy rows are swept
             # to the admin at boot so they're attributed too.
-            docs = db.query(Document).filter(Document.owner == owner).all()
+            docs = db.query(Document).filter(
+                Document.owner == owner,
+                Document.is_active == True,
+            ).all()
         else:
-            docs = db.query(Document).all()
+            docs = db.query(Document).filter(Document.is_active == True).all()
 
         deleted_examples = []
         deleted = 0
@@ -140,7 +143,8 @@ async def run_document_tidy(owner: str) -> str:
                 if len(deleted_examples) < 5:
                     label = (doc.title or "(no title)")[:40]
                     deleted_examples.append(f"{label} ({reason})")
-                db.delete(doc)
+                from src.trash_service import move_document_to_trash
+                move_document_to_trash(doc)
                 deleted += 1
             else:
                 survivors.append(doc)
@@ -180,7 +184,8 @@ async def run_document_tidy(owner: str) -> str:
                 label = (keeper.title or "(no title)")[:40]
                 deleted_examples.append(f"{label} (+{len(dupes)} duplicate copies)")
             for d in dupes:
-                db.delete(d)
+                from src.trash_service import move_document_to_trash
+                move_document_to_trash(d)
                 deleted += 1
 
         if deleted:
@@ -192,6 +197,6 @@ async def run_document_tidy(owner: str) -> str:
             raise TaskNoop(f"scanned {len(docs)} document(s), no junk")
         preview = "; ".join(deleted_examples)
         extra = f" (+{deleted - len(deleted_examples)} more)" if deleted > len(deleted_examples) else ""
-        return f"Removed {deleted} of {len(docs)}: {preview}{extra} · {kept} kept"
+        return f"Moved {deleted} of {len(docs)} to Trash: {preview}{extra} · {kept} kept"
     finally:
         db.close()

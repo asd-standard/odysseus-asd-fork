@@ -294,6 +294,9 @@ class Document(TimestampMixin, Base):
     # Soft-archive: hidden from the Library's Documents list/search/Tidy until
     # restored. Distinct from is_active (which tracks "open in a session").
     archived        = Column(Boolean, default=False)
+    # Trash: set when the document is deleted from the Library. NULL = not in
+    # Trash. The row (and its versions) is kept until the retention purge.
+    deleted_at      = Column(DateTime, nullable=True)
     # Owner of this document. Documents used to derive ownership from their
     # linked chat session, but a session can be deleted (session_id → NULL via
     # SET NULL), orphaning the doc and making it vanish from the owner's
@@ -1013,6 +1016,40 @@ def _migrate_add_document_folder_column():
         logging.getLogger(__name__).info("Migrated: added 'folder_id' to documents")
     except Exception as e:
         logging.getLogger(__name__).warning(f"documents.folder_id migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_add_document_deleted_at_column():
+    """Add ``deleted_at`` to documents (Library trash). Guarded + idempotent.
+
+    Existing rows with ``is_active = 0`` predate the trash UI. Backfill them
+    with NOW rather than their old ``updated_at`` so they get a full retention
+    window instead of being purged on the first boot after the upgrade.
+    """
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(documents)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "deleted_at" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN deleted_at DATETIME")
+        conn.execute(
+            "UPDATE documents SET deleted_at = ? "
+            "WHERE (is_active = 0 OR is_active IS NULL) AND deleted_at IS NULL",
+            (utcnow_naive().isoformat(sep=" "),),
+        )
+        conn.commit()
+        logging.getLogger(__name__).info("Migrated: added 'deleted_at' to documents")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"documents.deleted_at migration failed: {e}")
     finally:
         try:
             conn.close()
@@ -2200,6 +2237,7 @@ def init_db():
     _migrate_add_document_archived_column()
     _migrate_add_folders_table()
     _migrate_add_document_folder_column()
+    _migrate_add_document_deleted_at_column()
     _migrate_add_last_message_at_column()
     _migrate_add_folder_column()
     _migrate_add_token_columns()

@@ -51,6 +51,7 @@ def _doc_to_dict(doc: Document) -> Dict[str, Any]:
         "version_count": doc.version_count,
         "is_active": doc.is_active,
         "archived": bool(getattr(doc, "archived", False)),
+        "deleted_at": (doc.deleted_at.isoformat() + "Z") if getattr(doc, "deleted_at", None) else None,
         "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
         "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
         # Source-email provenance (set when doc was created from an email

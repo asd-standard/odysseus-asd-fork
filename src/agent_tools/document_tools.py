@@ -1200,11 +1200,12 @@ class ManageDocumentTool:
                         db, Document, owner, action="delete", requested_id=_requested
                     )
                 title = doc.title
-                doc.is_active = False
+                from src.trash_service import move_document_to_trash
+                move_document_to_trash(doc)
                 db.commit()
                 if _active_document_id == doc.id:
                     set_active_document(None)
-                return {"response": f"Deleted document '{title}'", "exit_code": 0}
+                return {"response": f"Moved document '{title}' to Trash", "exit_code": 0}
 
             elif action == "tidy":
                 from src.document_actions import run_document_tidy

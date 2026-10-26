@@ -1947,9 +1947,9 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
   async function libraryDeleteSingle(docId, card, title) {
     const name = title || 'Untitled';
     if (uiModule && uiModule.styledConfirm) {
-      const ok = await uiModule.styledConfirm(`Delete "${name}"?`, { confirmText: 'Delete', danger: true });
+      const ok = await uiModule.styledConfirm(`Move "${name}" to Trash?`, { confirmText: 'Move to Trash', danger: true });
       if (!ok) return;
-    } else if (!confirm(`Delete "${name}"?`)) {
+    } else if (!confirm(`Move "${name}" to Trash?`)) {
       return;
     }
     try {
@@ -1965,9 +1965,9 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         setTimeout(() => { if (card.parentElement) card.remove(); }, 400);
       }
       libraryRemoveDocumentFromState(docId);
-      if (uiModule) uiModule.showToast('Document deleted');
+      if (uiModule) uiModule.showToast('Moved to Trash');
     } catch (e) {
-      if (uiModule) uiModule.showError(`Failed to delete document: ${e.message || e}`);
+      if (uiModule) uiModule.showError(`Failed to move document to Trash: ${e.message || e}`);
     }
   }
 
@@ -1976,11 +1976,11 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     const count = _librarySelectedIds.size;
     if (uiModule && uiModule.styledConfirm) {
       const ok = await uiModule.styledConfirm(
-        `Delete ${count} document${count !== 1 ? 's' : ''}?`,
-        { confirmText: 'Delete', danger: true }
+        `Move ${count} document${count !== 1 ? 's' : ''} to Trash?`,
+        { confirmText: 'Move to Trash', danger: true }
       );
       if (!ok) return;
-    } else if (!confirm(`Delete ${count} document${count !== 1 ? 's' : ''}?`)) {
+    } else if (!confirm(`Move ${count} document${count !== 1 ? 's' : ''} to Trash?`)) {
       return;
     }
 
@@ -2010,8 +2010,8 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     await libraryFetch(false);
     if (uiModule) {
       const msg = failed > 0
-        ? `Deleted ${deleted} · ${failed} failed`
-        : `Deleted ${deleted} document${deleted !== 1 ? 's' : ''}`;
+        ? `Moved ${deleted} to Trash · ${failed} failed`
+        : `Moved ${deleted} document${deleted !== 1 ? 's' : ''} to Trash`;
       (failed > 0 ? uiModule.showError : uiModule.showToast)(msg);
     }
   }
@@ -2328,11 +2328,12 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           <h4 id="doclib-header-title"><span id="doclib-header-icon" style="vertical-align:-2px;margin-right:4px;display:inline-flex;"></span><span id="doclib-header-text">Library</span></h4>
           <button class="close-btn" id="doclib-close">\u2716</button>
         </div>
-        <div class="lib-tabs" id="doclib-lib-tabs" style="padding:0 10px;">
+        <div class="lib-tabs" id="doclib-lib-tabs" style="padding:0 10px;overflow-x:auto;">
           <button class="lib-tab" data-doclib-tab="chats"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chats</button>
           <button class="lib-tab active" data-doclib-tab="documents"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>Documents</button>
           <button class="lib-tab" data-doclib-tab="research"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Research</button>
           <button class="lib-tab" data-doclib-tab="archive"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</button>
+          <button class="lib-tab" data-doclib-tab="trash"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>Trash</button>
         </div>
         <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;overflow:hidden;">
           <div id="doclib-panel-chats" data-doclib-panel="chats" class="admin-card" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
@@ -2389,6 +2390,39 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
               <button class="memory-toolbar-btn" id="doclib-arc-bulk-cancel" title="Cancel (Esc)" style="margin-left:4px;padding:3px 6px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div id="doclib-arc-grid" class="doclib-grid"></div>
+          </div>
+          <div id="doclib-panel-trash" data-doclib-panel="trash" class="admin-card" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;">
+              <h2 style="margin:0;padding:0;line-height:1;">Trash <span id="doclib-trash-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal"></span></h2>
+              <span id="doclib-trash-retention-wrap" style="display:none;margin-left:auto;font-size:10px;opacity:0.7;">
+                Auto-delete after
+                <input type="number" id="doclib-trash-retention-days" min="1" max="3650" style="width:46px;padding:1px 4px;font-size:10px;" />
+                days
+              </span>
+            </div>
+            <p class="memory-desc doclib-desc">Deleted documents and research. <span id="doclib-trash-retention-note">Kept for 15 days.</span> Restore them or delete permanently.</p>
+            <div class="memory-toolbar">
+              <div class="memory-category-filters">
+                <button class="memory-toolbar-btn active" data-trash-type="all">All</button>
+                <button class="memory-toolbar-btn" data-trash-type="documents">Documents</button>
+                <button class="memory-toolbar-btn" data-trash-type="research">Research</button>
+                <button class="memory-toolbar-btn" id="doclib-trash-select-btn">Select</button>
+              </div>
+              <input type="text" id="doclib-trash-search" placeholder="Search trash\u2026" class="memory-search-input" />
+              <select class="memory-sort-select" id="doclib-trash-sort">
+                <option value="recent">Recently deleted</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+              <button class="memory-toolbar-btn danger" id="doclib-trash-empty-btn" title="Permanently delete everything in Trash">Empty Trash</button>
+            </div>
+            <div id="doclib-trash-bulk" class="memory-bulk-bar hidden" style="margin-bottom:5px;">
+              <label class="memory-bulk-check-all" style="position:relative;top:0px;left:1px;"><input type="checkbox" id="doclib-trash-select-all"> All</label>
+              <span id="doclib-trash-selected-count">0 Selected</span>
+              <button class="memory-toolbar-btn" id="doclib-trash-bulk-restore"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>Restore</button>
+              <button class="memory-toolbar-btn danger" id="doclib-trash-bulk-delete"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>Delete forever</button>
+              <button class="memory-toolbar-btn" id="doclib-trash-bulk-cancel" title="Cancel (Esc)" style="margin-left:4px;padding:3px 6px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div id="doclib-trash-grid" class="doclib-grid"></div>
           </div>
           <div id="doclib-panel-research" data-doclib-panel="research" class="admin-card" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;margin-top:10px;">
@@ -2588,6 +2622,10 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         label: 'Archive',
         svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
       },
+      trash: {
+        label: 'Trash',
+        svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>',
+      },
     };
 
     function _switchLibTab(tab) {
@@ -2611,6 +2649,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       if (tab === 'chats') _renderLibChats();
       else if (tab === 'archive') _renderLibArchive();
       else if (tab === 'research') _renderLibResearch();
+      else if (tab === 'trash') _renderLibTrash();
     }
 
     _tabBtns.forEach(btn => {
@@ -3119,9 +3158,10 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           '<button class="doclib-chat-open-btn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>Open</button>';
         actions.querySelector('.doclib-chat-delete-btn').addEventListener('click', async (ev) => {
           ev.stopPropagation();
-          if (!await window.styledConfirm(`Delete "${d.title || 'Untitled'}"?`, { confirmText: 'Delete', danger: true })) return;
+          if (!await window.styledConfirm(`Move "${d.title || 'Untitled'}" to Trash?`, { confirmText: 'Move to Trash', danger: true })) return;
           await fetch(`${API_BASE}/api/document/${d.id}`, { method: 'DELETE', credentials: 'same-origin' });
           _renderLibArchive();
+          if (uiModule) uiModule.showToast('Moved to Trash');
         });
         actions.querySelector('.doclib-chat-restore-btn').addEventListener('click', async (ev) => {
           ev.stopPropagation();
@@ -3254,7 +3294,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         });
         card.querySelector('._arc-doc-menu').addEventListener('click', (e) => { e.stopPropagation(); _showLibDropdown(e.currentTarget, [
           { label: 'Restore', action: async () => { await fetch(API_BASE + '/api/document/' + d.id + '/archive?archived=false', { method: 'POST', credentials: 'same-origin' }); _renderLibArchive(); } },
-          { label: 'Delete', danger: true, action: async () => { if (!await window.styledConfirm(`Delete "${d.title || 'Untitled'}"?`, { confirmText: 'Delete', danger: true })) return; await fetch(API_BASE + '/api/document/' + d.id, { method: 'DELETE', credentials: 'same-origin' }); _renderLibArchive(); } },
+          { label: 'Delete', danger: true, action: async () => { if (!await window.styledConfirm(`Move "${d.title || 'Untitled'}" to Trash?`, { confirmText: 'Move to Trash', danger: true })) return; await fetch(API_BASE + '/api/document/' + d.id, { method: 'DELETE', credentials: 'same-origin' }); _renderLibArchive(); if (uiModule) uiModule.showToast('Moved to Trash'); } },
         ], { onSelect: () => {
           _arcSelectMode = true;
           _arcSelected.add('documents:' + d.id);
@@ -3292,7 +3332,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         card.querySelector('._arc-res-menu').addEventListener('click', (e) => { e.stopPropagation(); _showLibDropdown(e.currentTarget, [
           { label: 'Open', action: () => { const a = document.createElement('a'); a.href = '/api/research/report/' + r.id; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); } },
           { label: 'Restore', action: async () => { await fetch('/api/research/' + r.id + '/archive?archived=false', { method: 'POST', credentials: 'same-origin' }); _renderLibArchive(); } },
-          { label: 'Delete', danger: true, action: async () => { if (!await window.styledConfirm('Delete this research?', { confirmText: 'Delete', danger: true })) return; await fetch('/api/research/' + r.id, { method: 'DELETE', credentials: 'same-origin' }); _renderLibArchive(); } },
+          { label: 'Delete', danger: true, action: async () => { if (!await window.styledConfirm(`Move "${r.query || 'this research'}" to Trash?`, { confirmText: 'Move to Trash', danger: true })) return; await fetch('/api/research/' + r.id, { method: 'DELETE', credentials: 'same-origin' }); _renderLibArchive(); if (uiModule) uiModule.showToast('Moved to Trash'); } },
         ], { onSelect: () => {
           _arcSelectMode = true;
           _arcSelected.add('research:' + r.id);
@@ -3381,7 +3421,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     document.getElementById('doclib-arc-bulk-delete').addEventListener('click', async () => {
       const count = _arcSelected.size;
       if (!count) return;
-      if (!await window.styledConfirm(`Delete ${count} archived item${count > 1 ? 's' : ''} permanently?`, { confirmText: 'Delete', danger: true })) return;
+      if (!await window.styledConfirm(`Delete ${count} archived item${count > 1 ? 's' : ''}? Chats are deleted permanently; documents and research move to Trash.`, { confirmText: 'Delete', danger: true })) return;
       const grid = document.getElementById('doclib-arc-grid');
       if (grid) {
         grid.querySelectorAll('.memory-item[data-arckey]').forEach(card => {
@@ -3543,9 +3583,10 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       const delBtn = preview.querySelector('.doclib-chat-delete-btn');
       if (delBtn) delBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
+        const _rName = item.query || 'this research report';
         const ok = uiModule && uiModule.styledConfirm
-          ? await uiModule.styledConfirm('Delete this research report?', { confirmText: 'Delete', danger: true })
-          : window.confirm('Delete this research report?');
+          ? await uiModule.styledConfirm(`Move "${_rName}" to Trash?`, { confirmText: 'Move to Trash', danger: true })
+          : window.confirm(`Move "${_rName}" to Trash?`);
         if (!ok) return;
         try {
           const res = await fetch(`${API_BASE}/api/research/${item.id}`, { method: 'DELETE', credentials: 'same-origin' });
@@ -3556,8 +3597,9 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
             _researchItems = _researchItems.filter(r => r.id !== item.id);
             _renderResearchGrid();
           }
+          if (uiModule) uiModule.showToast('Moved to Trash');
         } catch (err) {
-          if (uiModule && uiModule.showError) uiModule.showError('Failed to delete: ' + err.message);
+          if (uiModule && uiModule.showError) uiModule.showError('Failed to move to Trash: ' + err.message);
         }
       });
       const arcBtn = preview.querySelector('.doclib-chat-archive-btn');
@@ -3698,7 +3740,9 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
                 if (uiModule) uiModule.showToast(toArchived ? 'Archived' : 'Restored');
               } },
             { label: 'Delete', danger: true, action: async () => {
-                if (!await window.styledConfirm('Delete this research?', { confirmText: 'Delete', danger: true })) return;
+                const _item = _researchItems.find(r => r.id === rid);
+                const _name = (_item && _item.query) || 'this research';
+                if (!await window.styledConfirm(`Move "${_name}" to Trash?`, { confirmText: 'Move to Trash', danger: true })) return;
                 const card = btn.closest('.doclib-research-card');
                 if (card) {
                   card.style.transition = 'opacity 0.25s, transform 0.25s';
@@ -3709,6 +3753,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
                 await fetch('/api/research/' + rid, { method: 'DELETE', credentials: 'same-origin' });
                 _researchItems = _researchItems.filter(r => r.id !== rid);
                 _renderResearchGrid();
+                if (uiModule) uiModule.showToast('Moved to Trash');
               } },
           ], { onSelect: () => {
             _researchSelectMode = true;
@@ -3792,7 +3837,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         const ids = new Set(candidates.map(r => r.id));
         _researchItems = _researchItems.filter(r => !ids.has(r.id));
         _renderResearchGrid();
-        if (uiModule) uiModule.showToast('Deleted ' + candidates.length);
+        if (uiModule) uiModule.showToast('Moved ' + candidates.length + ' to Trash');
       } finally {
         sp.stop();
         btn.disabled = false;
@@ -3827,7 +3872,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     document.getElementById('doclib-research-bulk-delete')?.addEventListener('click', async () => {
       const count = _researchSelected.size;
       if (!count) return;
-      if (!await window.styledConfirm(`Delete ${count} research report${count > 1 ? 's' : ''} permanently?`, { confirmText: 'Delete', danger: true })) return;
+      if (!await window.styledConfirm(`Move ${count} research report${count > 1 ? 's' : ''} to Trash?`, { confirmText: 'Move to Trash', danger: true })) return;
       const grid = document.getElementById('doclib-research-grid');
       if (grid) {
         grid.querySelectorAll('.doclib-research-card').forEach(card => {
@@ -3845,6 +3890,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       _researchSelectMode = false;
       document.getElementById('doclib-research-bulk').classList.add('hidden');
       _renderResearchGrid();
+      if (uiModule) uiModule.showToast('Moved to Trash');
     });
 
     // Research bulk archive / restore
@@ -3870,6 +3916,351 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       document.getElementById('doclib-research-bulk').classList.add('hidden');
       _renderResearchGrid();
       if (uiModule) uiModule.showToast(toArchived ? 'Archived' : 'Restored');
+    });
+
+    // ── Trash tab (documents + research) ──
+    let _trashItems = [];
+    let _trashSearch = '';
+    let _trashType = 'all';
+    let _trashSort = 'recent';
+    let _trashSelectMode = false;
+    const _trashSelected = new Set();
+    let _trashRetentionDays = 15;
+
+    function _trashKey(item) { return item.type + ':' + item.id; }
+
+    function _trashItemIcon(type) {
+      return type === 'research'
+        ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;opacity:0.5;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>'
+        : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.5;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+    }
+
+    function _syncTrashRetentionUi() {
+      const note = document.getElementById('doclib-trash-retention-note');
+      if (note) {
+        note.textContent = `Kept for ${_trashRetentionDays} day${_trashRetentionDays === 1 ? '' : 's'}.`;
+      }
+      const wrap = document.getElementById('doclib-trash-retention-wrap');
+      const input = document.getElementById('doclib-trash-retention-days');
+      if (wrap && input) {
+        wrap.style.display = window._isAdmin ? '' : 'none';
+        if (window._isAdmin && document.activeElement !== input) {
+          input.value = _trashRetentionDays;
+        }
+      }
+    }
+
+    function _trashFilteredItems() {
+      let items = _trashItems.slice();
+      if (_trashType !== 'all') items = items.filter(i => i.type === _trashType);
+      if (_trashSearch) {
+        const q = _trashSearch.toLowerCase();
+        items = items.filter(i => (i.title || '').toLowerCase().includes(q));
+      }
+      if (_trashSort === 'oldest') {
+        items.sort((a, b) => (a.deleted_at || '') > (b.deleted_at || '') ? 1 : -1);
+      } else {
+        items.sort((a, b) => (a.deleted_at || '') < (b.deleted_at || '') ? 1 : -1);
+      }
+      return items;
+    }
+
+    function _updateTrashCount() {
+      const el = document.getElementById('doclib-trash-selected-count');
+      if (el) el.textContent = _trashSelected.size + ' Selected';
+      const selBtn = document.getElementById('doclib-trash-select-btn');
+      if (selBtn) {
+        selBtn.classList.toggle('active', _trashSelectMode);
+        selBtn.textContent = _trashSelectMode ? 'Cancel' : 'Select';
+      }
+    }
+
+    async function _renderLibTrash() {
+      const grid = document.getElementById('doclib-trash-grid');
+      if (!grid) return;
+      grid.innerHTML = '<div class="hwfit-loading" style="margin:18px auto;">Loading…</div>';
+      try {
+        const [docsRes, researchRes] = await Promise.all([
+          fetch(`${API_BASE}/api/documents/trash?limit=200`, { credentials: 'same-origin' }),
+          fetch('/api/research/trash?limit=200', { credentials: 'same-origin' }),
+        ]);
+        const docsData = docsRes.ok ? await docsRes.json() : {};
+        const researchData = researchRes.ok ? await researchRes.json() : {};
+        _trashRetentionDays = Number(
+          docsData.retention_days || researchData.retention_days || _trashRetentionDays
+        ) || 15;
+        _trashItems = [
+          ...(docsData.documents || []).map(d => ({
+            type: 'documents',
+            id: d.id,
+            title: d.title || 'Untitled',
+            subtitle: [d.folder_name, d.language].filter(Boolean).join(' · '),
+            archived: !!d.archived,
+            deleted_at: d.deleted_at,
+            days_left: d.days_left,
+          })),
+          ...(researchData.research || []).map(r => ({
+            type: 'research',
+            id: r.id,
+            title: r.query || 'Untitled research',
+            subtitle: [r.category, r.source_count ? `${r.source_count} source${r.source_count === 1 ? '' : 's'}` : '']
+              .filter(Boolean).join(' · '),
+            archived: !!r.archived,
+            deleted_at: r.deleted_at,
+            days_left: r.days_left,
+          })),
+        ];
+      } catch (e) {
+        grid.innerHTML = `<div class="hwfit-loading">Failed to load Trash: ${_esc(e.message || e)}</div>`;
+        return;
+      }
+      _syncTrashRetentionUi();
+      _renderTrashGrid();
+    }
+
+    function _renderTrashGrid() {
+      const grid = document.getElementById('doclib-trash-grid');
+      if (!grid) return;
+      const stats = document.getElementById('doclib-trash-stats');
+      const docsCount = _trashItems.filter(i => i.type === 'documents').length;
+      const researchCount = _trashItems.filter(i => i.type === 'research').length;
+      document.querySelectorAll('[data-trash-type]').forEach(btn => {
+        const type = btn.dataset.trashType;
+        const label = type === 'all' ? 'All' : (type === 'documents' ? 'Documents' : 'Research');
+        const count = type === 'all' ? _trashItems.length : (type === 'documents' ? docsCount : researchCount);
+        btn.textContent = `${label} (${count})`;
+        btn.classList.toggle('active', _trashType === type);
+      });
+      _updateTrashCount();
+
+      const items = _trashFilteredItems();
+      if (stats) stats.textContent = `${items.length} item${items.length === 1 ? '' : 's'}`;
+      if (!items.length) {
+        grid.innerHTML = '<div class="doclib-empty">Trash is empty</div>';
+        return;
+      }
+
+      grid.innerHTML = '';
+      for (const item of items) {
+        const key = _trashKey(item);
+        const row = document.createElement('div');
+        row.className = 'memory-item doclib-chat-row';
+        row.dataset.trashKey = key;
+        const days = Number(item.days_left) || 0;
+        const left = days <= 0 ? 'expires today' : `${days} day${days === 1 ? '' : 's'} left`;
+        const archivedBadge = item.archived
+          ? ' <span style="font-size:9px;padding:1px 5px;border-radius:8px;background:color-mix(in srgb, var(--fg) 10%, transparent);opacity:0.7;">archived</span>'
+          : '';
+        const cb = _trashSelectMode
+          ? `<input type="checkbox" class="memory-select-cb"${_trashSelected.has(key) ? ' checked' : ''}>`
+          : '';
+        row.innerHTML =
+          '<div class="doclib-chat-header" style="display:flex;align-items:center;width:100%;gap:6px;">' +
+            cb +
+            '<div style="flex:1;min-width:0;">' +
+              `<div class="memory-item-title">${_trashItemIcon(item.type)}${_esc(item.title)}${archivedBadge}</div>` +
+              `<div class="memory-item-meta" style="font-size:10px;opacity:0.45;margin-top:2px;">` +
+                `${item.subtitle ? _esc(item.subtitle) + ' · ' : ''}Deleted ${_esc(libraryRelativeTime(item.deleted_at))} · ${left}` +
+              '</div>' +
+            '</div>' +
+            '<div class="memory-item-actions" style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' +
+              '<button class="memory-toolbar-btn" data-trash-restore title="Restore from Trash">Restore</button>' +
+              '<button class="memory-toolbar-btn danger" data-trash-purge title="Delete permanently">Delete forever</button>' +
+            '</div>' +
+          '</div>';
+
+        const cbEl = row.querySelector('.memory-select-cb');
+        if (cbEl) {
+          cbEl.addEventListener('click', e => e.stopPropagation());
+          cbEl.addEventListener('change', () => {
+            if (cbEl.checked) _trashSelected.add(key); else _trashSelected.delete(key);
+            _updateTrashCount();
+          });
+        }
+        if (_trashSelectMode) {
+          row.addEventListener('click', (e) => {
+            if (e.target.closest('button, input')) return;
+            if (_trashSelected.has(key)) _trashSelected.delete(key); else _trashSelected.add(key);
+            _renderTrashGrid();
+          });
+        }
+        row.querySelector('[data-trash-restore]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          _trashRestoreItem(item);
+        });
+        row.querySelector('[data-trash-purge]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          _trashDeleteItem(item);
+        });
+        grid.appendChild(row);
+      }
+    }
+
+    async function _trashRestoreItem(item) {
+      const endpoint = item.type === 'documents'
+        ? `${API_BASE}/api/document/${encodeURIComponent(item.id)}/restore`
+        : `/api/research/${encodeURIComponent(item.id)}/restore`;
+      try {
+        const res = await fetch(endpoint, { method: 'POST', credentials: 'same-origin' });
+        if (!res.ok) {
+          let detail = `HTTP ${res.status}`;
+          try { const j = await res.json(); if (j?.detail) detail = j.detail; } catch {}
+          throw new Error(detail);
+        }
+        _trashItems = _trashItems.filter(i => _trashKey(i) !== _trashKey(item));
+        _trashSelected.delete(_trashKey(item));
+        if (item.type === 'documents') await libraryFetch(false);
+        _renderTrashGrid();
+        if (uiModule) uiModule.showToast(item.archived ? 'Restored to Archive' : 'Restored');
+      } catch (e) {
+        if (uiModule) uiModule.showError(`Failed to restore: ${e.message || e}`);
+      }
+    }
+
+    async function _trashDeleteItem(item) {
+      const ok = await window.styledConfirm(
+        `Delete "${item.title}" permanently? This cannot be undone.`,
+        { confirmText: 'Delete forever', danger: true }
+      );
+      if (!ok) return;
+      const endpoint = item.type === 'documents'
+        ? `${API_BASE}/api/document/${encodeURIComponent(item.id)}/permanent`
+        : `/api/research/${encodeURIComponent(item.id)}/permanent`;
+      try {
+        const res = await fetch(endpoint, { method: 'DELETE', credentials: 'same-origin' });
+        if (!res.ok) {
+          let detail = `HTTP ${res.status}`;
+          try { const j = await res.json(); if (j?.detail) detail = j.detail; } catch {}
+          throw new Error(detail);
+        }
+        _trashItems = _trashItems.filter(i => _trashKey(i) !== _trashKey(item));
+        _trashSelected.delete(_trashKey(item));
+        _renderTrashGrid();
+        if (uiModule) uiModule.showToast('Permanently deleted');
+      } catch (e) {
+        if (uiModule) uiModule.showError(`Failed to delete: ${e.message || e}`);
+      }
+    }
+
+    document.getElementById('doclib-trash-search')?.addEventListener('input', (e) => {
+      _trashSearch = e.currentTarget.value.trim();
+      _renderTrashGrid();
+    });
+    document.getElementById('doclib-trash-sort')?.addEventListener('change', (e) => {
+      _trashSort = e.currentTarget.value;
+      _renderTrashGrid();
+    });
+    document.querySelectorAll('[data-trash-type]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _trashType = btn.dataset.trashType;
+        _trashSelected.clear();
+        _renderTrashGrid();
+      });
+    });
+    document.getElementById('doclib-trash-select-btn')?.addEventListener('click', () => {
+      _trashSelectMode = !_trashSelectMode;
+      _trashSelected.clear();
+      document.getElementById('doclib-trash-bulk')?.classList.toggle('hidden', !_trashSelectMode);
+      _renderTrashGrid();
+    });
+    document.getElementById('doclib-trash-bulk-cancel')?.addEventListener('click', () => {
+      _trashSelectMode = false;
+      _trashSelected.clear();
+      document.getElementById('doclib-trash-bulk')?.classList.add('hidden');
+      _renderTrashGrid();
+    });
+    document.getElementById('doclib-trash-select-all')?.addEventListener('change', (e) => {
+      if (e.currentTarget.checked) {
+        _trashFilteredItems().forEach(i => _trashSelected.add(_trashKey(i)));
+      } else {
+        _trashSelected.clear();
+      }
+      _renderTrashGrid();
+    });
+    document.getElementById('doclib-trash-bulk-restore')?.addEventListener('click', async () => {
+      const targets = _trashItems.filter(i => _trashSelected.has(_trashKey(i)));
+      if (!targets.length) return;
+      for (const item of targets) {
+        await _trashRestoreItem(item);
+      }
+      if (uiModule) uiModule.showToast(`Restored ${targets.length} item${targets.length === 1 ? '' : 's'}`);
+    });
+    document.getElementById('doclib-trash-bulk-delete')?.addEventListener('click', async () => {
+      const targets = _trashItems.filter(i => _trashSelected.has(_trashKey(i)));
+      const count = targets.length;
+      if (!count) return;
+      if (!await window.styledConfirm(
+        `Permanently delete ${count} item${count === 1 ? '' : 's'}? This cannot be undone.`,
+        { confirmText: 'Delete forever', danger: true }
+      )) return;
+      let failures = 0;
+      for (const item of targets) {
+        const endpoint = item.type === 'documents'
+          ? `${API_BASE}/api/document/${encodeURIComponent(item.id)}/permanent`
+          : `/api/research/${encodeURIComponent(item.id)}/permanent`;
+        try {
+          const res = await fetch(endpoint, { method: 'DELETE', credentials: 'same-origin' });
+          if (!res.ok) { failures++; continue; }
+          _trashItems = _trashItems.filter(i => _trashKey(i) !== _trashKey(item));
+        } catch {
+          failures++;
+        }
+      }
+      _trashSelected.clear();
+      _trashSelectMode = false;
+      document.getElementById('doclib-trash-bulk')?.classList.add('hidden');
+      _renderTrashGrid();
+      if (uiModule) {
+        if (failures) uiModule.showError(`Permanently deleted ${count - failures} · ${failures} failed`);
+        else uiModule.showToast('Permanently deleted');
+      }
+    });
+    document.getElementById('doclib-trash-empty-btn')?.addEventListener('click', async () => {
+      if (!_trashItems.length) {
+        if (uiModule) uiModule.showToast('Trash is already empty');
+        return;
+      }
+      if (!await window.styledConfirm(
+        `Permanently delete all ${_trashItems.length} item${_trashItems.length === 1 ? '' : 's'} in Trash? This cannot be undone.`,
+        { confirmText: 'Empty Trash', danger: true }
+      )) return;
+      try {
+        const results = await Promise.all([
+          fetch(`${API_BASE}/api/documents/trash/empty`, { method: 'POST', credentials: 'same-origin' }),
+          fetch('/api/research/trash/empty', { method: 'POST', credentials: 'same-origin' }),
+        ]);
+        if (results.some(r => !r.ok)) throw new Error('HTTP ' + results.map(r => r.status).join('/'));
+        _trashItems = [];
+        _trashSelected.clear();
+        _trashSelectMode = false;
+        document.getElementById('doclib-trash-bulk')?.classList.add('hidden');
+        _renderTrashGrid();
+        if (uiModule) uiModule.showToast('Trash emptied');
+      } catch {
+        if (uiModule) uiModule.showError('Failed to empty Trash');
+      }
+    });
+    document.getElementById('doclib-trash-retention-days')?.addEventListener('change', async (e) => {
+      const input = e.currentTarget;
+      const days = Math.max(1, Math.min(3650, parseInt(input.value, 10) || 15));
+      input.value = days;
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trash_retention_days: days }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        _trashRetentionDays = days;
+        _syncTrashRetentionUi();
+        if (uiModule) uiModule.showToast(`Trash retention set to ${days} day${days === 1 ? '' : 's'}`);
+        // Re-read so a shorter window immediately purges expired entries.
+        _renderLibTrash();
+      } catch {
+        if (uiModule) uiModule.showError('Failed to save Trash retention');
+        input.value = _trashRetentionDays;
+      }
     });
 
     // Shared dropdown for chats/archive menus — defined at module scope below
@@ -4030,7 +4421,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         if (totalDeleted === 0 && totalFixed === 0) {
           tidyBtn.innerHTML = '<span style="opacity:0.7">Already tidy</span>';
         } else {
-          const msg = aiMessage || `Removed ${totalDeleted} document${totalDeleted !== 1 ? 's' : ''}`;
+          const msg = aiMessage || `Moved ${totalDeleted} document${totalDeleted !== 1 ? 's' : ''} to Trash`;
           if (uiModule) uiModule.showToast(msg);
           libraryFetch(false);
         }

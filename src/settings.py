@@ -149,6 +149,9 @@ DEFAULT_SETTINGS = {
     # Email replies use email_writing_style instead because greetings,
     # signatures, and mailbox identity rules are medium-specific.
     "document_writing_style": "",
+    # Library Trash retention window. Deleted documents and research reports
+    # stay recoverable for this many days before the purge job removes them.
+    "trash_retention_days": 15,
     # Legacy ordered fallback chain for the default chat model. Values remain
     # stored for compatibility and rollback reference, but model routing no
     # longer reads this key.

@@ -17,6 +17,15 @@ from src.endpoint_resolver import resolve_endpoint
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.owner_identity import REQUEST_SENTINEL_OWNERS
 from src.constants import DEEP_RESEARCH_DIR
+from src.trash_service import (
+    empty_research_trash,
+    list_research_trash,
+    move_research_path_to_trash,
+    permanently_delete_research,
+    purge_expired_research,
+    restore_research,
+    retention_days,
+)
 
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9-]{1,128}$")
 
@@ -454,23 +463,84 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
 
     @router.delete("/api/research/{session_id}")
     async def research_delete(session_id: str, request: Request):
-        """Delete a research result from disk."""
+        """Move a research result to Trash (recoverable for the retention window)."""
         user = _require_user(request)
         _validate_session_id(session_id)
         json_path = _find_research_path(session_id)
-        deleted = False
-        if json_path is not None:
-            # SECURITY: verify ownership before letting the caller delete it.
-            try:
-                data = json.loads(json_path.read_text(encoding="utf-8"))
-                if data.get("owner") != user:
-                    raise HTTPException(404, "Research not found")
-            except HTTPException:
-                raise
-            except Exception:
-                raise HTTPException(404, "Research not found")
-            json_path.unlink()
-            deleted = True
+        if json_path is None:
+            return {"deleted": False}
+        try:
+            trashed = move_research_path_to_trash(json_path, user)
+        except PermissionError:
+            raise HTTPException(404, "Research not found")
+        except FileExistsError as e:
+            raise HTTPException(409, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"Failed to move research to Trash: {e}")
+        return {"deleted": trashed}
+
+    @router.post("/api/research/{session_id}/restore")
+    async def research_restore(session_id: str, request: Request):
+        """Restore a research result from Trash."""
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        try:
+            data = restore_research(session_id, user)
+        except FileExistsError as e:
+            raise HTTPException(409, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"Failed to restore research: {e}")
+        if data is None:
+            raise HTTPException(404, "Research not found in Trash")
+        return {"ok": True, "id": session_id, "archived": bool(data.get("archived"))}
+
+    @router.delete("/api/research/{session_id}/permanent")
+    async def research_permanent_delete(session_id: str, request: Request):
+        """Permanently delete a research result from Trash."""
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        try:
+            deleted = permanently_delete_research(session_id, user)
+        except Exception as e:
+            raise HTTPException(500, f"Failed to delete research: {e}")
+        if not deleted:
+            raise HTTPException(404, "Research not found in Trash")
+        return {"deleted": True, "id": session_id}
+
+    @router.get("/api/research/trash")
+    async def research_trash(
+        request: Request,
+        search: Optional[str] = Query(None),
+        sort: str = Query("recent"),
+        limit: int = Query(200, ge=1, le=500),
+    ):
+        """List the caller's trashed research reports."""
+        user = _require_user(request)
+        try:
+            purge_expired_research(owner=user)
+            items = list_research_trash(user)
+        except Exception as e:
+            raise HTTPException(500, f"Failed to list research trash: {e}")
+        if search:
+            needle = search.lower()
+            items = [item for item in items if needle in (item.get("query") or "").lower()]
+        if sort == "oldest":
+            items.sort(key=lambda item: item.get("deleted_at") or "")
+        total = len(items)
+        return {
+            "research": items[:limit],
+            "total": total,
+            "retention_days": retention_days(),
+        }
+
+    @router.post("/api/research/trash/empty")
+    async def research_trash_empty(request: Request):
+        """Permanently delete all of the caller's trashed research."""
+        user = _require_user(request)
+        try:
+            deleted = empty_research_trash(user)
+        except Exception as e:
+            raise HTTPException(500, f"Failed to empty research trash: {e}")
         return {"deleted": deleted}
 
     # ------------------------------------------------------------------

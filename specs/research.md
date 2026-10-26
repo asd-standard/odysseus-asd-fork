@@ -80,6 +80,8 @@ Spinoff/Discuss creates a new chat session from a saved report. It seeds the rep
 
 Research persistence uses `data/deep_research/<session_id>.json`. Current JSON can include result/report text, raw report, sources, raw findings, stats, category, archived state, hidden images, owner, timestamps, and consumed state.
 
+Deleting a report moves it to `data/deep_research/.trash/<session_id>.json` and stamps `trash_deleted_at`; top-level `*.json` scans ignore the subdirectory, so trashed reports disappear from library/detail/report/delete flows. `/api/research/trash` lists them, `/api/research/{id}/restore` restores while preserving `archived`/owner, and `/api/research/{id}/permanent` deletes only from Trash. Retention uses the shared `trash_retention_days` setting (default 15), purged on startup/daily and lazily when the trash list is read.
+
 Route access to persisted report files is path-confined. Browser routes validate
 session ids against `^[a-zA-Z0-9-]{1,128}$`, enumerate trusted `*.json` files
 under the resolved research storage root, match by exact filename, reject

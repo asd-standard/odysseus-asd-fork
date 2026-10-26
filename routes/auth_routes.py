@@ -490,7 +490,11 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         try:
             dr_dir = Path(DEEP_RESEARCH_DIR)
             if dr_dir.is_dir():
-                for p in dr_dir.glob("*.json"):
+                dr_paths = list(dr_dir.glob("*.json"))
+                trash_dir = dr_dir / ".trash"
+                if trash_dir.is_dir():
+                    dr_paths += list(trash_dir.glob("*.json"))
+                for p in dr_paths:
                     try:
                         d = json.loads(p.read_text(encoding="utf-8"))
                         if str(d.get("owner", "")).strip().lower() == old_username:
@@ -739,6 +743,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             "agent_input_token_budget": (0, 2_000_000),  # 0 = disable soft-trim
             "agent_input_token_hard_max": (1000, 2_000_000),
             "auto_compact_threshold": (50, 99),
+            "trash_retention_days": (1, 3650),
         }
         for key in DEFAULT_SETTINGS:
             if key in RETIRED_SETTING_KEYS:
