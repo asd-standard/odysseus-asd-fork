@@ -151,10 +151,22 @@ class LLMConfig:
     # assumed LAN/Tailscale peers ('SYN in <100ms'); it is too tight for public
     # cloud endpoints (offshore APIs take ~0.5-1.5s cold, with jitter), so a
     # brief blip on the first connect of an idle chat surfaced as a 503 on the
-    # streaming path (which, unlike llm_call, does not retry the connect). A
-    # genuinely dead upstream stays bounded by the dead-host cooldown. Override
-    # with env LLM_CONNECT_TIMEOUT (seconds).
+    # streaming path. A genuinely dead upstream stays bounded by the dead-host
+    # cooldown. Override with env LLM_CONNECT_TIMEOUT (seconds).
     CONNECT_TIMEOUT = float(os.getenv('LLM_CONNECT_TIMEOUT', '10') or '10')
+    # Streaming retries the connection phase only (never after the response is
+    # acquired), so a stale keep-alive socket reaped by the upstream or a
+    # momentary connect blip does not abort a whole agent turn. The default
+    # matches non-stream MAX_RETRIES; set LLM_STREAM_CONNECT_ATTEMPTS=1 to
+    # disable. Delay between attempts is RETRY_DELAY * attempt.
+    STREAM_CONNECT_ATTEMPTS = max(
+        1, int(os.getenv('LLM_STREAM_CONNECT_ATTEMPTS', '3') or '3')
+    )
+    # How long a pooled HTTP/1.1 connection may sit idle before httpx stops
+    # reusing it. Lower this if an upstream reaps idle sockets sooner than the
+    # client does (the resulting stale-socket write looks like a connect error).
+    # Override with env LLM_KEEPALIVE_EXPIRY (seconds).
+    KEEPALIVE_EXPIRY = float(os.getenv('LLM_KEEPALIVE_EXPIRY', '30') or '30')
 
 
 class _FallbackIneligibleHTTPException(HTTPException):
@@ -505,7 +517,11 @@ def _clear_host_dead(url: str) -> None:
 # repeat calls to api.anthropic.com / api.openai.com / openrouter skip the
 # 100-500ms TCP+TLS handshake. Lazy init so we bind to the running event loop.
 _http_client: Optional[httpx.AsyncClient] = None
-_http_limits = httpx.Limits(max_connections=100, max_keepalive_connections=30, keepalive_expiry=30.0)
+_http_limits = httpx.Limits(
+    max_connections=100,
+    max_keepalive_connections=30,
+    keepalive_expiry=LLMConfig.KEEPALIVE_EXPIRY,
+)
 
 def _get_http_client() -> httpx.AsyncClient:
     """Return process-wide AsyncClient. Per-request timeout is passed at call time."""
@@ -516,6 +532,84 @@ def _get_http_client() -> httpx.AsyncClient:
             limits=_http_limits, http2=False, verify=llm_verify(),
         )
     return _http_client
+
+
+_STREAM_CONNECT_RETRY_ERRORS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    # A pooled keep-alive connection reaped by the upstream can surface as a
+    # protocol error while the request is being sent / response headers awaited.
+    # PoolTimeout deliberately stays out: it means our own pool is exhausted and
+    # foreground fallback should advance immediately (existing 504 contract).
+    httpx.RemoteProtocolError,
+)
+
+
+class _RetryingStream:
+    """Open an httpx stream, retrying only the connection/response phase.
+
+    The response object is acquired manually so iteration errors raised by the
+    caller's body never re-enter the retry loop. That guarantee is what makes
+    retrying safe: no content can have been emitted before ``__aenter__``
+    returns, so a retry can never replay tokens.
+    """
+
+    def __init__(self, client, method, url, *, attempts=None, delay=None, **kwargs):
+        self._client = client
+        self._method = method
+        self._url = url
+        self._attempts = max(
+            1,
+            int(
+                LLMConfig.STREAM_CONNECT_ATTEMPTS
+                if attempts is None
+                else attempts
+            ),
+        )
+        self._delay = max(
+            0.0,
+            float(LLMConfig.RETRY_DELAY if delay is None else delay),
+        )
+        self._kwargs = kwargs
+        self._cm = None
+
+    async def __aenter__(self):
+        last_error = None
+        for attempt in range(1, self._attempts + 1):
+            try:
+                self._cm = self._client.stream(
+                    self._method, self._url, **self._kwargs
+                )
+                return await self._cm.__aenter__()
+            except _STREAM_CONNECT_RETRY_ERRORS as error:
+                last_error = error
+                self._cm = None
+                if attempt >= self._attempts:
+                    raise
+                backoff = self._delay * attempt
+                logger.warning(
+                    "Stream connect to %s failed (attempt %s/%s): %s; "
+                    "retrying in %.2fs",
+                    _host_key(self._url),
+                    attempt,
+                    self._attempts,
+                    error,
+                    backoff,
+                )
+                if backoff:
+                    await asyncio.sleep(backoff)
+            except BaseException:
+                # Not retryable: drop the half-open context so __aexit__ is a
+                # no-op (it is not invoked when __aenter__ raises).
+                self._cm = None
+                raise
+        raise last_error  # pragma: no cover - loop always returns or raises
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._cm is None:
+            return False
+        return await self._cm.__aexit__(exc_type, exc, tb)
+
 
 def _get_cached_response(cache_key: str) -> Optional[str]:
     """Get cached response if it exists."""
@@ -2686,7 +2780,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         _responses_model_announced = False
         try:
             client = _get_http_client()
-            async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+            async with _RetryingStream(client, 'POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
                 _clear_host_dead(target_url)
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
@@ -2807,7 +2901,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         _ollama_model_announced = False
         try:
             client = _get_http_client()
-            async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+            async with _RetryingStream(client, 'POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
                 _clear_host_dead(target_url)
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
@@ -2906,7 +3000,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         _anth_block_type = ""
         try:
             client = _get_http_client()
-            async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+            async with _RetryingStream(client, 'POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
                 _clear_host_dead(target_url)
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
@@ -3087,7 +3181,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
     try:
         client = _get_http_client()
         h = await apply_kimi_code_headers_async(client, h, target_url)
-        async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+        async with _RetryingStream(client, 'POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
             _clear_host_dead(target_url)
             if r.status_code != 200:
                 raw = (await r.aread()).decode(errors="replace")
