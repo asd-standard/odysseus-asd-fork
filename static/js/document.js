@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261025trash1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261026suggdrag1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -4532,6 +4532,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     }
     _hideLoadingOverlay();
     if (_diffModeActive) exitDiffMode(true);
+    // A dragged suggestion card belongs to the document it was placed over.
+    _suggCardPos = null;
     // A pending suggestion preview must not leak into the document we are
     // switching away from (or to): restore the real text first.
     _exitSuggestionPreview();
@@ -8532,6 +8534,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     if (_activeSuggestions.length === 0) {
       // Queue drained: leave the read-only diff preview and restore the document.
+      // Also drop the drag position so the NEXT batch starts anchored to its text
+      // instead of reappearing wherever this one was left.
+      _suggCardPos = null;
       _exitSuggestionPreview();
       return;
     }
@@ -8557,9 +8562,17 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       }
     }
 
-    // Position card next to the highlighted text
+    // Position card next to the highlighted text (unless the user dragged it).
     function _positionCard(card) {
       if (!textarea) return;
+
+      if (_suggCardPos) {
+        // User-placed: keep it where it was dropped, clamped into the viewport
+        // so a window resize can never strand it off-screen.
+        _suggCardPos = _applySuggCardPos(card, _suggCardPos.left, _suggCardPos.top);
+        return;
+      }
+
       const text = textarea.value;
       const idx = text.indexOf(sugg.find);
       if (idx < 0) return;
@@ -8603,10 +8616,78 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         card.style.right = '8px';
         card.style.width = 'auto';
       }
+    }
 
-      // Also position the highlight overlay
-      _clearSuggestionHighlight();
-      _highlightSuggestionText(sugg.find);
+    /**
+     * Place a dragged card at (left, top), clamped so it can never be lost.
+     *
+     * A fixed-position card left past an edge stays there for good, so every
+     * application of a stored position re-clamps it — including after a window
+     * resize, which is the usual way a floating panel gets stranded.
+     */
+    function _applySuggCardPos(card, left, top) {
+      const cardW = card.offsetWidth || 320;
+      const cardH = card.offsetHeight || 220;
+      const MIN_VISIBLE = 40;      // always keep a grab-able sliver on screen
+      const maxLeft = Math.max(0, window.innerWidth - MIN_VISIBLE);
+      const maxTop = Math.max(0, window.innerHeight - cardH - 8);
+      const x = Math.min(Math.max(left, MIN_VISIBLE - cardW), maxLeft);
+      const y = Math.min(Math.max(top, 8), maxTop);
+      card.style.position = 'fixed';
+      card.style.right = '';
+      card.style.left = x + 'px';
+      card.style.top = y + 'px';
+      // Pin the measured width. On mobile the anchored layout stretches the
+      // card with left+right, and once we clear `right` an auto width would
+      // collapse to shrink-to-fit.
+      card.style.width = cardW + 'px';
+      return { left: x, top: y };
+    }
+
+    /**
+     * Make the card draggable by its header.
+     *
+     * The card is re-created for every suggestion (Accept/Skip/‹ ›), so the
+     * position lives in `_suggCardPos` rather than on the element — otherwise
+     * it would jump back to the anchor on every step.
+     */
+    function _makeSuggCardDraggable(card) {
+      const handle = card.querySelector('.doc-suggestion-header');
+      if (!handle) return;
+      handle.title = 'Drag to move';
+
+      let drag = null;
+      handle.addEventListener('pointerdown', (e) => {
+        // Buttons in the header (‹ › ✕) must keep working.
+        if (e.button !== 0 || e.target.closest('button')) return;
+        const rect = card.getBoundingClientRect();
+        drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+        card.classList.add('dragging');
+        try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (!drag) return;
+        // Store the clamped value so the stored position is always on-screen.
+        _suggCardPos = _applySuggCardPos(
+          card, e.clientX - drag.dx, e.clientY - drag.dy
+        );
+      });
+      const endDrag = (e) => {
+        if (!drag) return;
+        drag = null;
+        card.classList.remove('dragging');
+        try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+      };
+      handle.addEventListener('pointerup', endDrag);
+      handle.addEventListener('pointercancel', endDrag);
+
+      // Double-click the header re-anchors the card to the commented text.
+      handle.addEventListener('dblclick', (e) => {
+        if (e.target.closest('button')) return;
+        _suggCardPos = null;
+        _positionCard(card);
+      });
     }
 
     // Build the card
@@ -8668,11 +8749,33 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     sugg.cardEl = card;
     document.body.appendChild(card);
 
-    // Position after a tick so scroll has taken effect
-    requestAnimationFrame(() => _positionCard(card));
+    // Highlight the commented text. Kept separate from card placement: once the
+    // user has dragged the card, placement stops following the text, but the
+    // highlight must still track scrolling.
+    const _refreshSuggHighlight = () => {
+      _clearSuggestionHighlight();
+      _highlightSuggestionText(sugg.find);
+    };
 
-    // Reposition on scroll/resize so the card stays anchored
-    const _reposition = () => { if (card.isConnected) _positionCard(card); };
+    _makeSuggCardDraggable(card);
+
+    // A previously dragged position applies immediately, before the animation
+    // frame, so a rebuilt card doesn't flash at the anchor and then jump.
+    if (_suggCardPos) {
+      _suggCardPos = _applySuggCardPos(card, _suggCardPos.left, _suggCardPos.top);
+      _refreshSuggHighlight();
+    } else {
+      // Position after a tick so scroll has taken effect
+      requestAnimationFrame(() => { _positionCard(card); _refreshSuggHighlight(); });
+    }
+
+    // Reposition on scroll/resize so the card stays anchored (or stays put, if
+    // it was dragged) — and keep the text highlight in sync either way.
+    const _reposition = () => {
+      if (!card.isConnected) return;
+      _positionCard(card);
+      _refreshSuggHighlight();
+    };
     if (textarea) textarea.addEventListener('scroll', _reposition);
     window.addEventListener('resize', _reposition);
     // Store cleanup refs on the card
@@ -9303,6 +9406,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   function isDiffModeActive() { return _diffModeActive; }
 
   let _suggestionTotal = 0;
+  // Where the user last dragged the suggestion card, or null while it is
+  // auto-anchored to the commented text. Module-level on purpose: the card
+  // element is destroyed and rebuilt for every suggestion (Accept/Skip/‹ ›),
+  // so a position stored on the element would be lost on each step.
+  let _suggCardPos = null;
   let _suggestionIndex = 0;
 
   /**
@@ -9376,6 +9484,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   function clearAllSuggestions() {
     _activeSuggestions = [];
     _suggestionTotal = 0;
+    // A dragged card is reset here too: leaving it floating after the queue is
+    // gone would strand an orphan panel.
+    _suggCardPos = null;
     _saveSuggestionsToStorage();
     _clearSuggestionHighlight();
     const old = document.getElementById('doc-suggestion-active');

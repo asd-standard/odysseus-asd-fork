@@ -14090,7 +14090,17 @@ mark.doc-find-mark.current {
   margin-bottom: 6px;
   /* Never scrolls away with the reason. */
   flex: 0 0 auto;
+  /* Drag handle: the whole header moves the card. `touch-action: none` stops a
+     tablet from scrolling the editor instead of dragging; `user-select: none`
+     stops the drag from selecting the counter text. */
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
+.doc-suggestion-card.dragging .doc-suggestion-header { cursor: grabbing; }
+/* Header buttons keep their own affordance — they are excluded from dragging. */
+.doc-suggestion-header button { cursor: pointer; touch-action: auto; }
 .doc-suggestion-nav {
   display: flex;
   align-items: center;
