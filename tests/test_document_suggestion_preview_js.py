@@ -66,8 +66,9 @@ def test_suggestion_renders_a_real_text_preview():
     # Real rows with visible marker glyphs, not spans in the highlight layer.
     assert "sugg-line-del" in RENDER
     assert "sugg-line-add" in RENDER
-    assert "'−' + e.line" in RENDER
-    assert "'+' + e.line" in RENDER
+    # Marker glyphs are their own span now (so the rest of the line can be
+    # word-split); they still distinguish removed from added rows.
+    assert "marker.textContent = isDel ? '−' : '+';" in RENDER
 
 
 def test_preview_uses_the_line_level_diff():
@@ -255,3 +256,167 @@ def test_dead_suggestions_container_is_gone():
 def test_unused_handler_alias_is_gone():
     assert "_origHandleDocSuggestions" not in DOC_JS
 
+
+
+# --------------------------------------------------------------------------
+# The editor returns to the position the batch started at
+# --------------------------------------------------------------------------
+
+
+def test_anchor_is_captured_on_entry_from_the_first_suggestion():
+    """Restoring `textarea.value` resets its scroll to the top.
+
+    Without a captured anchor the document snapped back to line 1 after the
+    last card was accepted or skipped, and the user had to scroll back down.
+    """
+    assert "_suggestionPreviewAnchorLine" in RENDER
+    assert "indexOf(sugg.find)" in RENDER
+    # Captured only on the first render of a batch (the `!active` entry block).
+    entry = RENDER[RENDER.index("if (!_suggestionPreviewActive) {"):]
+    entry = entry[: entry.index("}")]
+    assert "_suggestionPreviewAnchorLine" in entry
+    # Fallback for a FIND that no longer matches: the current scroll offset.
+    assert "_suggestionPreviewAnchorScroll = textarea.scrollTop" in entry
+
+
+def test_scroll_is_restored_after_the_value_is_restored():
+    # Order matters: assigning value resets scroll, and syncHighlighting /
+    # updateLineNumbers read the scroll while laying out. The restore must be
+    # last, or it gets undone.
+    idx_value = EXIT.index("textarea.value = original")
+    idx_sync = EXIT.index("syncHighlighting()")
+    idx_lines = EXIT.index("updateLineNumbers(textarea.value)")
+    idx_scroll = EXIT.index("textarea.scrollTop = target")
+    assert idx_value < idx_scroll
+    assert idx_sync < idx_scroll
+    assert idx_lines < idx_scroll
+
+
+def test_exit_recomputes_the_offset_for_wrapped_text():
+    # line * lineHeight under-scrolls badly in wrap-heavy prose; the mirror
+    # measurement is what makes long paragraphs land correctly.
+    assert "_scrollTargetForLine(textarea, textarea.value, anchorLine)" in EXIT
+    assert "function _scrollTargetForLine(" in DOC_JS
+    assert "_ensureMeasureMirror" in DOC_JS
+
+
+def test_exit_keeps_overlay_and_gutter_in_sync():
+    assert "highlightPre.scrollTop = textarea.scrollTop" in EXIT
+    assert "syncGutterScroll()" in EXIT
+
+
+def test_anchor_state_is_cleared_on_exit():
+    assert "_suggestionPreviewAnchorLine = null" in EXIT
+    assert "_suggestionPreviewAnchorScroll = null" in EXIT
+
+
+def test_measure_mirror_is_shared_with_selection_overlays():
+    """One geometry helper, so both measurements cannot drift apart."""
+    assert DOC_JS.count("_ensureMeasureMirror(") >= 3   # definition + 2 callers
+    # The selection overlay no longer inlines its own mirror setup.
+    assert "mirror.id = 'doc-selection-mirror'" in DOC_JS
+    assert DOC_JS.count("mirror.id = 'doc-selection-mirror'") == 1
+
+
+# --------------------------------------------------------------------------
+# Word-level highlighting inside line-based rows
+# --------------------------------------------------------------------------
+
+
+def _word_diff_js() -> str:
+    """Extract the self-contained _computeWordDiff function from document.js."""
+    sig = "function _computeWordDiff("
+    start = DOC_JS.index(sig)
+    i = DOC_JS.index("{\n", start)
+    depth = 0
+    while i < len(DOC_JS):
+        if DOC_JS[i] == "{":
+            depth += 1
+        elif DOC_JS[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return DOC_JS[start : i + 1]
+        i += 1
+    raise AssertionError("unbalanced braces in _computeWordDiff")
+
+
+def _run_word_diff(old: str, new: str):
+    """Execute the real function under node (skipped when node is absent)."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available")
+    script = (
+        _word_diff_js()
+        + f"\nconst out = _computeWordDiff({json.dumps(old)}, {json.dumps(new)});"
+        + "\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    proc = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def _changed(segments):
+    return "".join(s["text"] for s in segments if s["type"] != "equal")
+
+
+def test_word_diff_marks_only_the_changed_words():
+    segs = _run_word_diff(
+        "The budget must be approved by Friday.",
+        "The budget must be signed off by Friday.",
+    )
+    # The words that did not change must stay outside the highlight...
+    assert _changed(segs) == "approved" + "signed off"
+    # ...and the unchanged text must be preserved exactly, spacing included.
+    rebuilt = "".join(s["text"] for s in segs if s["type"] != "ins")
+    assert rebuilt == "The budget must be approved by Friday."
+
+
+def test_word_diff_is_unicode_aware():
+    """Accented words must not be split into 'changed' fragments."""
+    segs = _run_word_diff("La città è bella.", "La città è molto bella.")
+    changed = _changed(segs)
+    assert "citt" not in changed        # the accented word is untouched
+    assert "molto" in changed
+
+
+def test_word_diff_isolates_punctuation_changes():
+    segs = _run_word_diff("We stop here.", "We stop here;")
+    assert _changed(segs) == "." + ";"
+    rebuilt = "".join(s["text"] for s in segs if s["type"] != "ins")
+    assert rebuilt == "We stop here."
+
+
+def test_word_diff_bails_out_on_pathological_lines():
+    """O(tokens²) must not run on minified/base64 lines — caller falls back."""
+    long_line = " ".join(["word"] * 500)
+    assert _run_word_diff(long_line, long_line + " extra") is None
+
+
+def test_rows_stay_line_based_and_use_word_spans():
+    assert "_computeWordDiff(d, a)" in RENDER
+    assert "'sugg-line ' + (isDel ? 'sugg-line-del' : 'sugg-line-add')" in RENDER
+    assert "'−'" in RENDER and "'+'" in RENDER
+    assert "sugg-word sugg-word-del" in RENDER
+    assert "sugg-word sugg-word-add" in RENDER
+
+
+def test_full_row_tint_is_gone_but_the_faint_wash_remains():
+    # The row wash dropped from 16% to 5%; the words carry the strong tint.
+    block = CSS[CSS.index(".doc-suggestion-preview .sugg-line-del {"):]
+    block = block[: block.index("}")]
+    assert "5%" in block
+    assert "16%" not in block
+    word = CSS[CSS.index(".doc-suggestion-preview .sugg-word-del {"):]
+    word = word[: word.index("}")]
+    assert "26%" in word
+
+
+def test_unpaired_lines_mark_their_whole_content():
+    # A line with no counterpart is entirely new/removed; there is nothing to
+    # word-diff it against, so the fallback must still highlight it.
+    assert "if (!segs) {" in RENDER
+    assert "span.textContent = line;" in RENDER

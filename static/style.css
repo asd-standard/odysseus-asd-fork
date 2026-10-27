@@ -14181,14 +14181,38 @@ mark.doc-find-mark.current {
   opacity: 0.65;
 }
 .doc-suggestion-preview .sugg-line-del {
-  background: color-mix(in srgb, var(--red) 16%, transparent);
+  /* Faint wash ties the −/+ pair together; the strong signal is now on the
+     changed WORDS (.sugg-word-del), which is what the eye should follow. */
+  background: color-mix(in srgb, var(--red) 5%, transparent);
   color: var(--fg);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--red) 70%, transparent);
 }
 .doc-suggestion-preview .sugg-line-add {
-  background: color-mix(in srgb, var(--green) 16%, transparent);
+  background: color-mix(in srgb, var(--green) 5%, transparent);
   color: var(--fg);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green) 70%, transparent);
+}
+.doc-suggestion-preview .sugg-line-marker {
+  opacity: 0.75;
+}
+.doc-suggestion-preview .sugg-line-del .sugg-line-marker {
+  color: color-mix(in srgb, var(--red) 80%, var(--fg));
+}
+.doc-suggestion-preview .sugg-line-add .sugg-line-marker {
+  color: color-mix(in srgb, var(--green) 80%, var(--fg));
+}
+/* The words that actually changed inside a modified line. */
+.doc-suggestion-preview .sugg-word {
+  border-radius: 2px;
+}
+.doc-suggestion-preview .sugg-word-del {
+  background: color-mix(in srgb, var(--red) 26%, transparent);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--red) 60%, transparent);
+}
+.doc-suggestion-preview .sugg-word-add {
+  background: color-mix(in srgb, var(--green) 26%, transparent);
 }
 .doc-suggestion-preview .sugg-preview-skip,
 .doc-suggestion-preview .sugg-preview-note {

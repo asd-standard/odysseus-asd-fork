@@ -13,7 +13,7 @@ import markdownModule from './markdown.js';
 import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261026suggdrag1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261027worddiff1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -8309,30 +8309,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     // Shared mirror for measurement — same box model as the textarea
     // so any measurement we take lines up 1:1 with the rendered text.
-    let mirror = document.getElementById('doc-selection-mirror');
-    if (!mirror) {
-      mirror = document.createElement('div');
-      mirror.id = 'doc-selection-mirror';
-      // box-sizing:border-box is critical — without it the mirror's
-      // actual box width = (width prop) + horizontal padding, which is
-      // wider than the textarea's text-render area. Text wraps at a
-      // different column inside the mirror, so every measured y-offset
-      // drifts from where the real text sits. border-box makes
-      // mirror.box = textarea.clientWidth exactly.
-      mirror.style.cssText = 'position:absolute;top:0;left:0;right:0;visibility:hidden;pointer-events:none;' +
-        'white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;overflow:hidden;box-sizing:border-box;';
-      wrap.appendChild(mirror);
-    }
-    mirror.style.font = style.font;
-    mirror.style.padding = style.padding;
-    mirror.style.borderWidth = style.borderWidth;
-    mirror.style.borderStyle = 'solid';
-    mirror.style.borderColor = 'transparent';
-    mirror.style.width = textarea.clientWidth + 'px';
-    mirror.style.tabSize = style.tabSize;
-    mirror.style.letterSpacing = style.letterSpacing;
-    mirror.style.wordSpacing = style.wordSpacing;
-    mirror.style.textIndent = style.textIndent;
+    const mirror = _ensureMeasureMirror(textarea, style, wrap);
 
     const codeDoc = _isCodeDoc();
     const scrollTop = textarea.scrollTop;
@@ -8813,6 +8790,75 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   // read back out of the textarea on exit, which is what makes the restore
   // robust against anything that might touch the editor meanwhile.
   let _suggestionPreviewOriginal = null;
+  // Where to put the editor back when the queue drains, captured on entry.
+  // Restoring `textarea.value` resets its scroll to the top, so without this
+  // the document snapped back to line 1 after accepting/skipping — and the
+  // user had to scroll down to where they were working every time.
+  // `_suggestionPreviewAnchorLine` is the 0-based line of the FIRST suggestion
+  // of the batch; `_suggestionPreviewAnchorScroll` is a fallback for a FIND
+  // that no longer matches.
+  let _suggestionPreviewAnchorLine = null;
+  let _suggestionPreviewAnchorScroll = null;
+
+  /**
+   * Hidden clone with the textarea's exact box model, used to measure wrapped
+   * text. Wrapping depends on width/font/padding, so a clone is the only way to
+   * turn "line N" into a pixel offset when paragraphs wrap.
+   *
+   * Shared by the selection overlays and the suggestion-scroll restore; both
+   * need the same 1:1 geometry or their offsets drift from the real text.
+   * `box-sizing:border-box` is critical: without it the mirror's box is wider
+   * than the textarea's text area by its horizontal padding, so text wraps at a
+   * different column and every measurement is wrong.
+   */
+  function _ensureMeasureMirror(textarea, style, wrap) {
+    let mirror = document.getElementById('doc-selection-mirror');
+    if (!mirror) {
+      mirror = document.createElement('div');
+      mirror.id = 'doc-selection-mirror';
+      mirror.style.cssText = 'position:absolute;top:0;left:0;right:0;visibility:hidden;pointer-events:none;' +
+        'white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;overflow:hidden;box-sizing:border-box;';
+      wrap.appendChild(mirror);
+    }
+    mirror.style.font = style.font;
+    mirror.style.padding = style.padding;
+    mirror.style.borderWidth = style.borderWidth;
+    mirror.style.borderStyle = 'solid';
+    mirror.style.borderColor = 'transparent';
+    mirror.style.width = textarea.clientWidth + 'px';
+    mirror.style.tabSize = style.tabSize;
+    mirror.style.letterSpacing = style.letterSpacing;
+    mirror.style.wordSpacing = style.wordSpacing;
+    mirror.style.textIndent = style.textIndent;
+    return mirror;
+  }
+
+  /**
+   * Scroll offset that puts 0-based `lineIndex` about a third of a viewport
+   * from the top — the same bias the suggestion scroller uses.
+   *
+   * Measures with the mirror so soft-wrapped paragraphs land correctly; a plain
+   * `line * lineHeight` under-scrolls badly in wrap-heavy prose.
+   */
+  function _scrollTargetForLine(textarea, text, lineIndex) {
+    const style = getComputedStyle(textarea);
+    const paddingTop = parseFloat(style.paddingTop) || 10;
+    const lineHeight = parseFloat(style.lineHeight) || 20;
+    let y = null;
+    const wrap = document.getElementById('doc-editor-wrap');
+    if (wrap) {
+      try {
+        const mirror = _ensureMeasureMirror(textarea, style, wrap);
+        mirror.textContent = (text || '').split('\n').slice(0, lineIndex).join('\n');
+        y = mirror.scrollHeight - paddingTop;
+        mirror.textContent = '';
+      } catch (_) {
+        y = null;
+      }
+    }
+    if (y === null || !isFinite(y)) y = lineIndex * lineHeight;
+    return Math.max(0, y - textarea.clientHeight / 3);
+  }
 
   /** True while the editor is showing a suggestion diff instead of the document. */
   function isSuggestionPreviewActive() { return _suggestionPreviewActive; }
@@ -8840,6 +8886,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const docId = activeDocId;
       const fromModel = docId && docs.has(docId) ? (docs.get(docId).content ?? null) : null;
       _suggestionPreviewOriginal = fromModel !== null ? fromModel : textarea.value;
+      // Remember where the batch starts so the editor can be returned there.
+      // Captured from the FIRST suggestion shown, which is what the user was
+      // looking at when the cards appeared.
+      const _entryText = _suggestionPreviewOriginal || textarea.value || '';
+      const _entryIdx = sugg && sugg.find ? _entryText.indexOf(sugg.find) : -1;
+      _suggestionPreviewAnchorLine =
+        _entryIdx >= 0 ? _entryText.substring(0, _entryIdx).split('\n').length - 1 : null;
+      _suggestionPreviewAnchorScroll = textarea.scrollTop || 0;
       _suggestionPreviewDocId = docId;
       _suggestionPreviewActive = true;
       // Read-only from the moment a suggestion is shown until the queue drains.
@@ -8904,21 +8958,88 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         omitRun = 0;
       }
     };
-    entries.forEach((e, i) => {
-      if (!keep[i]) { omitRun++; return; }
-      flushOmit();
-      const row = document.createElement('div');
-      if (e.type === 'equal') {
-        row.className = 'sugg-line sugg-line-ctx';
-        row.textContent = ' ' + e.line;
-      } else if (e.type === 'delete') {
-        row.className = 'sugg-line sugg-line-del';
-        row.textContent = '−' + e.line;
-      } else {
-        row.className = 'sugg-line sugg-line-add';
-        row.textContent = '+' + e.line;
+    // Pair each deleted line with the inserted line that replaces it, so the
+    // highlight can be word-level instead of colouring the whole row. A block
+    // with unequal counts keeps its unpaired lines fully marked (an addition
+    // with no counterpart really is entirely new).
+    const rows = [];
+    for (let ri = 0; ri < entries.length; ) {
+      if (entries[ri].type === 'equal') {
+        rows.push({ type: 'equal', line: entries[ri].line, entry: ri });
+        ri++;
+        continue;
       }
-      frag.appendChild(row);
+      const dels = [], ins = [];
+      while (ri < entries.length && entries[ri].type !== 'equal') {
+        (entries[ri].type === 'delete' ? dels : ins).push(entries[ri].line);
+        ri++;
+      }
+      const pairs = Math.max(dels.length, ins.length);
+      // Deletes first, then inserts: the conventional diff order, and it keeps
+      // the "before" and "after" of a line adjacent.
+      for (let k = 0; k < pairs; k++) {
+        const d = k < dels.length ? dels[k] : undefined;
+        const a = k < ins.length ? ins[k] : undefined;
+        const wd = d !== undefined && a !== undefined ? _computeWordDiff(d, a) : null;
+        if (d !== undefined) {
+          rows.push({
+            type: 'delete', line: d,
+            segs: wd ? wd.filter((seg) => seg.type !== 'ins') : null,
+          });
+        }
+        if (a !== undefined) {
+          rows.push({
+            type: 'insert', line: a,
+            segs: wd ? wd.filter((seg) => seg.type !== 'del') : null,
+          });
+        }
+      }
+    }
+
+    const _wordRow = (rowType, line, segs) => {
+      const row = document.createElement('div');
+      const isDel = rowType === 'delete';
+      row.className = 'sugg-line ' + (isDel ? 'sugg-line-del' : 'sugg-line-add');
+      const marker = document.createElement('span');
+      marker.className = 'sugg-line-marker';
+      marker.textContent = isDel ? '−' : '+';
+      row.appendChild(marker);
+
+      const wordClass = isDel ? 'sugg-word sugg-word-del' : 'sugg-word sugg-word-add';
+      if (!segs) {
+        // No counterpart line (pure add/delete) or lines too long to word-diff:
+        // mark the whole content, which is the honest representation.
+        const span = document.createElement('span');
+        span.className = wordClass;
+        span.textContent = line;
+        row.appendChild(span);
+        return row;
+      }
+      for (const seg of segs) {
+        if (seg.type === 'equal') {
+          row.appendChild(document.createTextNode(seg.text));
+        } else {
+          const span = document.createElement('span');
+          span.className = wordClass;
+          span.textContent = seg.text;
+          row.appendChild(span);
+        }
+      }
+      return row;
+    };
+
+    rows.forEach((row) => {
+      if (row.type === 'equal') {
+        if (!keep[row.entry]) { omitRun++; return; }
+        flushOmit();
+        const el = document.createElement('div');
+        el.className = 'sugg-line sugg-line-ctx';
+        el.textContent = ' ' + row.line;
+        frag.appendChild(el);
+        return;
+      }
+      flushOmit();
+      frag.appendChild(_wordRow(row.type, row.line, row.segs));
     });
     flushOmit();
     pre.appendChild(frag);
@@ -8953,10 +9074,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const wrap = document.getElementById('doc-editor-wrap');
     const documentId = _suggestionPreviewDocId;
     const original = _suggestionPreviewOriginal;
+    const anchorLine = _suggestionPreviewAnchorLine;
+    const anchorScroll = _suggestionPreviewAnchorScroll;
 
     _suggestionPreviewActive = false;
     _suggestionPreviewDocId = null;
     _suggestionPreviewOriginal = null;
+    _suggestionPreviewAnchorLine = null;
+    _suggestionPreviewAnchorScroll = null;
 
     const pre = _suggestionPreviewEl();
     if (pre) pre.remove();
@@ -8972,6 +9097,25 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     }
     syncHighlighting();
     if (textarea) updateLineNumbers(textarea.value);
+
+    // Restore the reading position LAST: assigning `textarea.value` above resets
+    // its scroll to the top, and syncHighlighting/updateLineNumbers read that
+    // scroll while laying out the overlay and gutter. Without this the editor
+    // jumped back to line 1 after the last card was accepted or skipped.
+    if (textarea) {
+      let target = anchorScroll || 0;
+      if (anchorLine !== null && anchorLine !== undefined) {
+        // Measured (not line*lineHeight) so wrapped paragraphs land right.
+        target = _scrollTargetForLine(textarea, textarea.value, anchorLine);
+      }
+      textarea.scrollTop = target;
+      const highlightPre = document.getElementById('doc-editor-highlight');
+      if (highlightPre) {
+        highlightPre.scrollTop = textarea.scrollTop;
+        highlightPre.scrollLeft = textarea.scrollLeft;
+      }
+      syncGutterScroll();
+    }
   }
 
   // ---- Diff mode (line-level review) ----
@@ -9011,6 +9155,64 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     }
     entries.reverse();
     return entries;
+  }
+
+  /**
+   * Token-level diff of two single lines, for highlighting only the words that
+   * actually changed inside a `−`/`+` pair.
+   *
+   * Tokenisation keeps whitespace as its own token so the rendered line has
+   * exactly the original spacing, and is Unicode-aware (`\p{L}`) so accented
+   * words are not split into a changed fragment plus a coincidentally-equal one.
+   *
+   * Returns `[{type:'equal'|'del'|'ins', text}]`, or null when a line is too
+   * long to diff (the caller then marks the whole line). The cap exists because
+   * the LCS table is O(tokens²) — a minified JSON or base64 line would otherwise
+   * freeze the UI for no benefit.
+   */
+  function _computeWordDiff(oldLine, newLine) {
+    const MAX_TOKENS = 400;
+    const tokenize = (s) =>
+      (s || '').match(/\s+|\p{L}[\p{L}\p{N}]*|\p{N}+|[^\s\p{L}\p{N}]+/gu) || [];
+    const a = tokenize(oldLine);
+    const b = tokenize(newLine);
+    if (a.length > MAX_TOKENS || b.length > MAX_TOKENS) return null;
+
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+
+    const out = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+        out.push({ type: 'equal', text: a[i - 1] });
+        i--; j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        out.push({ type: 'ins', text: b[j - 1] });
+        j--;
+      } else {
+        out.push({ type: 'del', text: a[i - 1] });
+        i--;
+      }
+    }
+    out.reverse();
+
+    // Merge adjacent segments of the same kind: one span per run instead of one
+    // per token, which keeps the DOM small on prose lines.
+    const merged = [];
+    for (const seg of out) {
+      const last = merged[merged.length - 1];
+      if (last && last.type === seg.type) last.text += seg.text;
+      else merged.push({ type: seg.type, text: seg.text });
+    }
+    return merged;
   }
 
   /** Group diff entries into chunks (contiguous change blocks) */
