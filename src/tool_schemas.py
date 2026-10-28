@@ -321,7 +321,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "suggest_document",
-            "description": "Suggest improvements to the active document WITHOUT editing it. Creates inline comment bubbles the user can accept or reject. Use when the user asks for suggestions, review, improvements, or feedback.",
+            "description": "Suggest improvements to the active document WITHOUT editing it. Creates inline comment bubbles the user can accept or reject. Use when the user asks for suggestions, review, improvements, or feedback. The server narrows whole-line FIND/REPLACE pairs to the changed words, so quoting a full line or block is fine.",
             "parameters": {
                 "type": "object",
                 "properties": {

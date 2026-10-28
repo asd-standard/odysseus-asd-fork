@@ -472,6 +472,115 @@ def resolve_find_text(find_text: str, haystack: str) -> Optional[str]:
     return None
 
 
+_SPAN_TOKEN_RE = re.compile(r"\w+|[^\w\s]+|\s+", re.UNICODE)
+
+
+def _span_tokens(text: str) -> list:
+    """Tokenize text into (text, start, end) spans for word-aware narrowing."""
+    return [
+        (m.group(0), m.start(), m.end())
+        for m in _SPAN_TOKEN_RE.finditer(text or "")
+    ]
+
+
+def _narrow_suggestion_span(find_text: str, replace_text: str,
+                            document_text: str) -> tuple:
+    """Narrow a suggestion to the minimal changed token span.
+
+    Models often quote a whole line (or block) in FIND even when only a word or
+    two changes. The editor already word-diffs paired -/+ lines, but mismatched
+    line counts or large blocks can degrade that to full-line marking. Returning
+    the minimal changed span keeps the suggestion precise and lets the editor
+    highlight only the changed text.
+
+    The returned pair always reproduces the original replacement:
+        find_text[:start] + new_span + find_text[end:] == replace_text
+    Falls back to the original pair when no unique/safe span exists.
+    """
+    original = (find_text, replace_text)
+    if not find_text or find_text == replace_text:
+        return original
+
+    f_tokens = _span_tokens(find_text)
+    r_tokens = _span_tokens(replace_text)
+    if not f_tokens:
+        return original
+
+    f_texts = [tok[0] for tok in f_tokens]
+    r_texts = [tok[0] for tok in r_tokens]
+
+    prefix = 0
+    prefix_limit = min(len(f_texts), len(r_texts))
+    while prefix < prefix_limit and f_texts[prefix] == r_texts[prefix]:
+        prefix += 1
+
+    suffix = 0
+    suffix_limit = min(len(f_texts), len(r_texts)) - prefix
+    while suffix < suffix_limit and f_texts[-1 - suffix] == r_texts[-1 - suffix]:
+        suffix += 1
+
+    fs, fe = prefix, len(f_texts) - suffix
+    rs, rend = prefix, len(r_texts) - suffix
+
+    # Pure insertion: borrow one adjacent token as an anchor so FIND stays
+    # non-empty and still points at the insertion site.
+    if fs == fe:
+        if fs > 0:
+            fs -= 1
+            rs -= 1
+        elif fe < len(f_texts):
+            fe += 1
+            rend += 1
+        else:
+            return original
+
+    if fe <= fs:
+        return original
+
+    def _build():
+        f_min = find_text[f_tokens[fs][1]:f_tokens[fe - 1][2]]
+        r_min = (
+            replace_text[r_tokens[rs][1]:r_tokens[rend - 1][2]]
+            if rend > rs else ""
+        )
+        return f_min, r_min
+
+    # Expand until the narrowed FIND is unique in the document. A unique
+    # original FIND guarantees this loop can reach the full span; a non-unique
+    # one is left alone rather than risking the wrong occurrence.
+    f_min, r_min = _build()
+    while document_text.count(f_min) != 1:
+        if fs > 0:
+            fs -= 1
+            rs -= 1
+        elif fe < len(f_tokens):
+            fe += 1
+            rend += 1
+        else:
+            return original
+        f_min, r_min = _build()
+
+    if not f_min.strip():
+        # Whitespace-only changes stay whole-line; an invisible span is worse
+        # than the original context.
+        return original
+
+    # Exact positional verification: replacing the narrowed span inside the
+    # original FIND must reproduce the original replacement. This catches
+    # accidental matches when the same text appears earlier in FIND.
+    expected = find_text[:f_tokens[fs][1]] + r_min + find_text[f_tokens[fe - 1][2]:]
+    if expected != replace_text:
+        return original
+    if f_min == find_text and r_min == replace_text:
+        return original
+
+    logger.debug(
+        "suggest_document: narrowed span %r -> %r (%r -> %r)",
+        find_text[:60], f_min[:60], replace_text[:60], r_min[:60],
+    )
+    return f_min, r_min
+
+
 def parse_edit_blocks(content: str) -> list:
     """Parse <<<FIND>>>...<<<REPLACE>>>...<<<END>>> blocks."""
     edits = []
@@ -976,6 +1085,11 @@ class SuggestDocumentTool:
                         "suggest_document: matched after stripping line-number gutter from FIND"
                     )
                     s = {**s, "find": matched}
+                narrowed_find, narrowed_replace = _narrow_suggestion_span(
+                    s["find"], s["replace"], body
+                )
+                if narrowed_find != s["find"] or narrowed_replace != s["replace"]:
+                    s = {**s, "find": narrowed_find, "replace": narrowed_replace}
                 valid.append(s)
 
             if not valid:

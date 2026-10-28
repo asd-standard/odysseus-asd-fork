@@ -104,6 +104,8 @@ Deleting a document moves it to Trash (`is_active=False` plus `deleted_at`) inst
 
 `static/js/document.js` owns the browser document editor and markdown preview. Preview rendering applies code highlighting when highlight.js is present, renders Mermaid diagrams when the Mermaid runtime is available, refreshes after AI edits, and discards pending AI diffs before switching the active document.
 
+`suggest_document` is non-destructive: it validates each FIND against the current content and returns accept/skip suggestions. Before returning, the tool strips copied line-number gutters and narrows each FIND/SUGGEST pair to the minimal changed token span, expanding to a unique occurrence and falling back to the original pair when no safe span exists. This keeps the client word-level diff/highlight precise even when the model quotes whole lines or blocks.
+
 Document mutations also happen through agent tools, Codex document routes, email attachment import, and scripts. HTTP and native-agent document writers owner-reserve any internal upload/PDF references before persisting new current content or versions. Native document tool outputs include metadata that the browser can use to open/update the editor if a later stream update is missed. Those callers must preserve document owner, attachment, and version semantics.
 
 After external/workspace-untrusted context, a proposed document mutation is sealed into an exact approval with document id, current version, content digest, tool content, owner/session, and workspace. Approval continuation re-reads and verifies those fields before consuming the one-use authorization, so an intervening edit cannot apply a stale approved patch to new content.

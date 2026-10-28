@@ -24,6 +24,7 @@ from core.database import Document, Session as DbSession  # noqa: E402
 from src.agent_tools import document_tools  # noqa: E402
 from src.agent_tools.document_tools import (  # noqa: E402
     SuggestDocumentTool,
+    _narrow_suggestion_span,
     _number_document_lines,
     resolve_find_text,
     set_active_document,
@@ -222,5 +223,132 @@ async def test_suggest_accepts_find_with_copied_line_numbers():
     assert result.get("action") == "suggest", result
     assert result["count"] == 1
     # The returned suggestion must carry the REAL text, not the numbered form,
-    # or the frontend cannot locate it in the editor.
-    assert result["suggestions"][0]["find"] == body
+    # and the whole-line pair is narrowed to the changed words so the editor's
+    # word diff/highlight targets them directly.
+    suggestion = result["suggestions"][0]
+    assert suggestion["find"] == "Some"
+    assert suggestion["replace"] == "Better"
+    assert body.replace(suggestion["find"], suggestion["replace"], 1) == "# Title\nBetter text here"
+
+
+# --------------------------------------------------------------------------
+# Word-level span narrowing
+# --------------------------------------------------------------------------
+
+
+def test_narrow_word_change_drops_unchanged_line_context():
+    body = "The budget must be approved by Friday."
+    find_text = body
+    replace_text = "The budget must be signed off by Friday."
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        find_text, replace_text, body
+    )
+
+    assert narrowed_find == "approved"
+    assert narrowed_replace == "signed off"
+    assert body.replace(narrowed_find, narrowed_replace, 1) == replace_text
+
+
+def test_narrow_insertion_keeps_an_anchor_and_replaces_correctly():
+    body = "Add a note here."
+    replace_text = "Add a short note here."
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        body, replace_text, body
+    )
+
+    assert narrowed_find
+    assert len(narrowed_find) < len(body)
+    assert body.replace(narrowed_find, narrowed_replace, 1) == replace_text
+
+
+def test_narrow_deletion_keeps_deleted_words():
+    body = "The budget must be approved by Friday."
+    replace_text = "The budget must be approved."
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        body, replace_text, body
+    )
+
+    assert "by Friday" in narrowed_find
+    assert narrowed_replace == ""
+    assert body.replace(narrowed_find, narrowed_replace, 1) == replace_text
+
+
+def test_narrow_multiline_block_to_changed_region():
+    body = "alpha line\nbravo line old words here\ncharlie line"
+    replace_text = "alpha line\nbravo line new words here\ncharlie line"
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        body, replace_text, body
+    )
+
+    assert narrowed_find == "old"
+    assert narrowed_replace == "new"
+    assert body.replace(narrowed_find, narrowed_replace, 1) == replace_text
+
+
+def test_narrow_expands_ambiguous_word_until_unique():
+    body = "the cat sat\nthe cat ran"
+    replace_line = "the dog sat"
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        "the cat sat", replace_line, body
+    )
+
+    # "cat" and "the cat" both occur twice; expansion reaches the unique line.
+    assert body.count(narrowed_find) == 1
+    assert body.replace(narrowed_find, narrowed_replace, 1) == (
+        "the dog sat\nthe cat ran"
+    )
+
+
+def test_narrow_falls_back_when_find_is_not_unique():
+    body = "total 0\ntotal 0"
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        "total 0", "total 5", body
+    )
+
+    assert (narrowed_find, narrowed_replace) == ("total 0", "total 5")
+
+
+def test_narrow_full_rewrite_keeps_original_pair():
+    body = "abc def"
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        "abc def", "xyz uvw", body
+    )
+
+    assert (narrowed_find, narrowed_replace) == ("abc def", "xyz uvw")
+
+
+def test_narrow_keeps_whitespace_only_change_as_context():
+    body = "indent    here"
+
+    narrowed_find, narrowed_replace = _narrow_suggestion_span(
+        "indent    here", "indent here", body
+    )
+
+    assert (narrowed_find, narrowed_replace) == ("indent    here", "indent here")
+
+
+@pytest.mark.asyncio
+async def test_suggest_returns_narrowed_span_for_a_whole_line_suggestion():
+    _session()
+    body = "The budget must be approved by Friday."
+    set_active_document(_doc("Active doc", body))
+
+    result = await SuggestDocumentTool().execute(
+        _blocks((body, "The budget must be signed off by Friday.")),
+        {"owner": "tester"},
+    )
+
+    assert result.get("action") == "suggest", result
+    suggestion = result["suggestions"][0]
+    assert suggestion["find"] == "approved"
+    assert suggestion["replace"] == "signed off"
+    assert body.replace(suggestion["find"], suggestion["replace"], 1) == (
+        "The budget must be signed off by Friday."
+    )
