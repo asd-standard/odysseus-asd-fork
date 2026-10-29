@@ -16,7 +16,7 @@ import modelsModule from './models.js';
 import chatRenderer from './chatRenderer.js';
 import spinnerModule from './spinner.js';
 import themeModule from './theme.js';
-import documentModule from './document.js?v=20261029longlineworddiff1';
+import documentModule from './document.js?v=20261029docscroll1';
 import settingsModule from './settings.js';
 const cookbookModule = null;
 import { EVAL_PROMPTS } from './compare/index.js';

@@ -1332,7 +1332,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
     assert "/test-approval`" in skills
     assert "approval_id: approval.approval_id" in skills
     assert "['approve', 'Allow once'" in skills
-    assert index.count("app.js?v=20261028windowing1") == 2
+    assert index.count("app.js?v=20261029docscroll1") == 2
     assert "app.js?v=20260808startupshell1" not in index
     approval_module_sources = [
         (root / path).read_text()
@@ -1355,7 +1355,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
     )
     # Every approval-relevant module must be on a CURRENT version. Modules split
     # across two version groups since the active-document work: the chat/doc
-    # graph (20261028windowing1) and the settings/email graph
+    # graph (20261029docscroll1) and the settings/email graph
     # (20260815approvalsave1). What matters is that no source is on a
     # superseded version, which would let the browser pair a cached copy.
     _stale = ("20260722emailfastindex1", "20260815toolapproval4-startup")
@@ -1364,7 +1364,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
         for source in approval_module_sources
     )
     assert all(
-        ("20261028windowing1" in source) or ("20260815approvalsave1" in source)
+        ("20261029docscroll1" in source) or ("20260815approvalsave1" in source)
         or ("20260819approvalcontrol1" in source)
         for source in approval_module_sources
     )

@@ -40,6 +40,8 @@ def _function_from(src: str, signature: str) -> str:
 SHOW_CURRENT = _function_from(DOC_JS, "function _showCurrentSuggestion(")
 RENDER = _function_from(DOC_JS, "function _renderSuggestionPreview(")
 EXIT = _function_from(DOC_JS, "function _exitSuggestionPreview(")
+APPLY = _function_from(DOC_JS, "function _applySuggestion(")
+MIRROR = _function_from(DOC_JS, "function _ensureMeasureMirror(")
 
 
 # --------------------------------------------------------------------------
@@ -300,6 +302,34 @@ def test_exit_recomputes_the_offset_for_wrapped_text():
     assert "_scrollTargetForLine(textarea, textarea.value, anchorLine)" in EXIT
     assert "function _scrollTargetForLine(" in DOC_JS
     assert "_ensureMeasureMirror" in DOC_JS
+
+
+def test_preview_and_exit_use_the_same_measurement():
+    """Entering and leaving must use one geometry helper, or accepting a card
+    visibly shifts the editor by a few lines."""
+    assert "_scrollTargetForLine(textarea, text, lineNum)" in SHOW_CURRENT
+    assert "lineNum * lineH" not in SHOW_CURRENT
+
+
+def test_measure_mirror_copies_real_font_metrics():
+    """`getComputedStyle(textarea).font` is empty in Chromium; the old
+    shorthand assignment left the mirror at 16px/normal, so every measured
+    line was too tall and the restore overshot."""
+    assert "mirror.style.font = style.font" not in MIRROR
+    assert "mirror.style.fontFamily = style.fontFamily" in MIRROR
+    assert "setProperty('font-size', style.fontSize, 'important')" in MIRROR
+    assert "setProperty('line-height', style.lineHeight, 'important')" in MIRROR
+    # Glyph-metric lockdown must match the textarea too.
+    assert "mirror.style.fontVariantLigatures = style.fontVariantLigatures" in MIRROR
+    assert "mirror.style.fontKerning = style.fontKerning" in MIRROR
+
+
+def test_accepted_edits_above_the_anchor_move_it():
+    assert "_countNewlines" in DOC_JS
+    assert "_lineStartOffset" in DOC_JS
+    assert "_suggestionPreviewAnchorLine + delta" in APPLY
+    # Replacements containing `$&`/`$1` must be literal.
+    assert "base.replace(sugg.find, sugg.replace)" not in APPLY
 
 
 def test_exit_keeps_overlay_and_gutter_in_sync():

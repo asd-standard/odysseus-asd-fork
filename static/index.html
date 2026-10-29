@@ -234,8 +234,8 @@
        real request is discarded and the font fetched a second time. -->
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-Regular.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-SemiBold.woff2">
-  <link rel="stylesheet" href="/static/style.css?v=20261029longlineworddiff1">
-  <link rel="modulepreload" href="/static/app.js?v=20261029longlineworddiff1">
+  <link rel="stylesheet" href="/static/style.css?v=20261029docscroll1">
+  <link rel="modulepreload" href="/static/app.js?v=20261029docscroll1">
   <!-- ── Module identity rules (learned the hard way) ──────────────────────
        1. A module must be referenced with ONE ?v= value everywhere. The
           browser caches by full URL, so `chat.js?v=A` and `chat.js?v=B` are
@@ -253,9 +253,9 @@
        alone is invisible to a browser holding the old URL. Bump every
        reference to the module together.
        Enforced by tests/test_frontend_module_identity.py.
-       `20261029longlineworddiff1` = one minimize/dock system, explicit close
-       reporting, data-window-id identity, and a shared z-index scale. ──────────── -->
-  <link rel="modulepreload" href="/static/js/chat.js?v=20261029longlineworddiff1">
+       `20261029docscroll1` = measured suggestion-scroll restore (real font
+       metrics) on top of the unified window lifecycle/z-index work. ──────────── -->
+  <link rel="modulepreload" href="/static/js/chat.js?v=20261029docscroll1">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
@@ -2493,13 +2493,13 @@
 <script type="module" src="/static/js/chatRenderer.js?v=20260819approvalcontrol1"></script>
 <!-- chatStream.js is likewise imported by chat.js; loading it here as well
      registered its document-level listeners a second time. -->
-  <script type="module" src="/static/js/chat.js?v=20261029longlineworddiff1"></script>
+  <script type="module" src="/static/js/chat.js?v=20261029docscroll1"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
 <script type="module" src="/static/js/theme.js"></script>
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260815approvalsave1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20261029longlineworddiff1"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20261029docscroll1"></script>  <!-- app.js must be LAST -->
   <script type="module" src="/static/js/init.js?v=20260715freshroot3"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>

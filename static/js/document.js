@@ -12,7 +12,7 @@ import emojiPicker from './emojiPicker.js';
 import markdownModule from './markdown.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261029longlineworddiff1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261029docscroll1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -8548,15 +8548,15 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     const textarea = document.getElementById('doc-editor-textarea');
 
-    // Scroll to the change text
+    // Scroll to the change text — use the same measured geometry as the exit
+    // restore so accepting/skipping never nudges the editor to a different
+    // place than the preview was showing.
     if (textarea) {
       const text = textarea.value;
       const idx = text.indexOf(sugg.find);
       if (idx >= 0) {
         const lineNum = text.substring(0, idx).split('\n').length - 1;
-        const lineH = parseFloat(getComputedStyle(textarea).lineHeight) || 20;
-        const target = Math.max(0, lineNum * lineH - (textarea.clientHeight / 3));
-        textarea.scrollTop = target;
+        textarea.scrollTop = _scrollTargetForLine(textarea, text, lineNum);
       }
     }
 
@@ -8841,7 +8841,23 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         'white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;overflow:hidden;box-sizing:border-box;';
       wrap.appendChild(mirror);
     }
-    mirror.style.font = style.font;
+    // Copy each font longhand explicitly. `getComputedStyle(el).font` is an
+    // empty string in Chromium for elements like the editor textarea, so the
+    // old shorthand assignment silently left the mirror on the page's 16px
+    // font — every measured line was wrong and the editor restored a few lines
+    // past the suggestion. Size/line-height must beat the wrap's own cascade,
+    // exactly as they do on the textarea.
+    mirror.style.fontFamily = style.fontFamily;
+    mirror.style.setProperty('font-size', style.fontSize, 'important');
+    mirror.style.setProperty('line-height', style.lineHeight, 'important');
+    mirror.style.fontWeight = style.fontWeight;
+    mirror.style.fontStyle = style.fontStyle;
+    mirror.style.fontStretch = style.fontStretch;
+    mirror.style.fontVariant = style.fontVariant;
+    mirror.style.fontVariantLigatures = style.fontVariantLigatures;
+    mirror.style.fontFeatureSettings = style.fontFeatureSettings;
+    mirror.style.fontKerning = style.fontKerning;
+    mirror.style.textRendering = style.textRendering;
     mirror.style.padding = style.padding;
     mirror.style.borderWidth = style.borderWidth;
     mirror.style.borderStyle = 'solid';
@@ -8863,15 +8879,19 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
    */
   function _scrollTargetForLine(textarea, text, lineIndex) {
     const style = getComputedStyle(textarea);
-    const paddingTop = parseFloat(style.paddingTop) || 10;
+    const paddingBottom = parseFloat(style.paddingBottom) || 10;
     const lineHeight = parseFloat(style.lineHeight) || 20;
+    const lineCount = (text || '').split('\n').length;
+    lineIndex = Math.max(0, Math.min(Number(lineIndex) || 0, Math.max(0, lineCount - 1)));
     let y = null;
     const wrap = document.getElementById('doc-editor-wrap');
     if (wrap) {
       try {
         const mirror = _ensureMeasureMirror(textarea, style, wrap);
         mirror.textContent = (text || '').split('\n').slice(0, lineIndex).join('\n');
-        y = mirror.scrollHeight - paddingTop;
+        // scrollHeight includes both paddings; subtract the bottom one so `y`
+        // is the top edge of the requested line inside the content box.
+        y = mirror.scrollHeight - paddingBottom;
         mirror.textContent = '';
       } catch (_) {
         y = null;
@@ -9692,6 +9712,21 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   let _suggCardPos = null;
   let _suggestionIndex = 0;
 
+  function _countNewlines(s) {
+    return (String(s ?? '').match(/\n/g) || []).length;
+  }
+
+  /** Offset of the first character of 0-based `line` in `text`. */
+  function _lineStartOffset(text, line) {
+    let idx = 0;
+    for (let i = 0; i < line; i++) {
+      const nl = text.indexOf('\n', idx);
+      if (nl === -1) return text.length;
+      idx = nl + 1;
+    }
+    return idx;
+  }
+
   /**
    * Apply a single suggestion edit without removing it from the queue.
    *
@@ -9705,9 +9740,23 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       ? _suggestionPreviewOriginal
       : (textarea ? textarea.value : null);
     if (base === null || !sugg || !sugg.find) return;
-    if (!base.includes(sugg.find)) return;
+    const idx = base.indexOf(sugg.find);
+    if (idx === -1) return;
 
-    const updated = base.replace(sugg.find, sugg.replace);
+    // If an edit ABOVE the batch anchor adds/removes lines, the anchor line
+    // number must move with it — otherwise accepting that edit shifts the
+    // editor a few lines past where the first suggestion was.
+    if (_suggestionPreviewAnchorLine !== null && _suggestionPreviewAnchorLine !== undefined) {
+      const anchorOffset = _lineStartOffset(base, _suggestionPreviewAnchorLine);
+      if (idx < anchorOffset) {
+        const delta = _countNewlines(sugg.replace) - _countNewlines(sugg.find);
+        _suggestionPreviewAnchorLine = Math.max(0, _suggestionPreviewAnchorLine + delta);
+      }
+    }
+
+    // slice() rather than replace(): suggestion replacements may legitimately
+    // contain `$&`/`$1`, which String.replace would interpret.
+    const updated = base.slice(0, idx) + sugg.replace + base.slice(idx + sugg.find.length);
     if (_suggestionPreviewActive) {
       _suggestionPreviewOriginal = updated;
       // Keep the model in sync so exit/switch restores the accepted text.
