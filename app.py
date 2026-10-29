@@ -559,6 +559,14 @@ chat_handler      = components["chat_handler"]
 model_discovery   = components["model_discovery"]
 skills_manager    = components["skills_manager"]
 
+# Full-instance backups (admin console). The service is cheap to construct;
+# the scheduler is started in _startup_event and can be disabled with
+# ODYSSEUS_INPROCESS_BACKUPS=0.
+from services.backup import BackupScheduler, BackupService
+backup_service = BackupService()
+app.state.backup_service = backup_service
+backup_scheduler = None
+
 # TTS
 from services.tts import get_tts_service
 
@@ -754,7 +762,14 @@ app.include_router(setup_prefs_routes())
 
 # Backup (export/import user data)
 from routes.backup_routes import setup_backup_routes
-app.include_router(setup_backup_routes(memory_manager, preset_manager, skills_manager))
+app.include_router(
+    setup_backup_routes(
+        memory_manager,
+        preset_manager,
+        skills_manager,
+        backup_service=backup_service,
+    )
+)
 
 from routes.font_routes import setup_font_routes
 app.include_router(setup_font_routes())
@@ -956,7 +971,7 @@ app.router.lifespan_context = _lifespan
 
 
 async def _startup_event():
-    global upload_cleanup_task
+    global upload_cleanup_task, backup_scheduler
     logger.info("Application starting up...")
     webhook_manager.set_loop(asyncio.get_running_loop())
     # Wipe any leftover incognito sessions from previous process — they're
@@ -980,6 +995,16 @@ async def _startup_event():
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])
     app.state._startup_tasks = _startup_tasks
+
+    # Admin full backups are independent of the task/email schedulers so a
+    # deployment can disable those while still keeping backups.
+    try:
+        backup_scheduler = BackupScheduler(backup_service)
+        await backup_scheduler.start()
+        app.state.backup_scheduler = backup_scheduler
+    except Exception as e:
+        logger.warning(f"Backup scheduler failed to start (non-critical): {type(e).__name__}: {e}")
+
     if upload_cleanup_func:
         upload_cleanup_task = asyncio.create_task(upload_cleanup_func())
     # Library Trash: enforce the retention window on boot so expired items do
@@ -1202,7 +1227,13 @@ async def _startup_event():
     logger.info("Application startup complete")
 
 async def _shutdown_event():
+    global backup_scheduler
     logger.info("Application shutting down...")
+    if backup_scheduler is not None:
+        try:
+            await backup_scheduler.stop()
+        except Exception as e:
+            logger.warning(f"Backup scheduler shutdown error: {e}")
     if upload_cleanup_task:
         upload_cleanup_task.cancel()
         try:

@@ -71,7 +71,7 @@ repair_tree_ownership() {
 repair_app_tree_ownership() {
     if [ -d /app ]; then
         find /app -xdev \
-            \( -path /app/data -o -path /app/logs -o -path /app/.ssh -o -path /app/.cache -o -path /app/.local \) -prune \
+            \( -path /app/data -o -path /app/logs -o -path /app/.ssh -o -path /app/.cache -o -path /app/.local -o -path /app/backups \) -prune \
             -o -not -uid "$PUID" -print0 2>/dev/null \
             | xargs -0 -r chown "$PUID:$PGID" 2>/dev/null || true
     fi
@@ -105,7 +105,7 @@ chown "$PUID:$PGID" /app/.cache 2>/dev/null || true
 # mount with its own ownership contract. Repair its mount root so new cache
 # entries are writable, but never traverse or rewrite existing model files.
 chown "$PUID:$PGID" /app/.cache/huggingface 2>/dev/null || true
-for dir in /app/data /app/logs /app/.ssh /app/.local; do
+for dir in /app/data /app/logs /app/.ssh /app/.local /app/backups; do
     repair_bind_mount_ownership "$dir"
 done
 

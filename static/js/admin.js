@@ -3,6 +3,7 @@
 
 import uiModule from './ui.js';
 import settingsModule from './settings.js';
+import { initBackupAdmin, refreshBackupAdmin } from './backupAdmin.js';
 import { providerLogo, providerLogoFromUrl } from './providers.js';
 import { sortModelObjects } from './modelSort.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
@@ -2824,64 +2825,6 @@ function initCalDAV() {
   });
 }
 
-/* ── Data Backup (export/import) ── */
-function initBackup() {
-  el('adm-exportDataBtn').addEventListener('click', async () => {
-    const btn = el('adm-exportDataBtn');
-    const msg = el('adm-backupMsg');
-    btn.disabled = true; btn.textContent = 'Exporting...'; msg.textContent = '';
-    try {
-      const res = await fetch('/api/export', { credentials: 'same-origin' });
-      if (!res.ok) throw new Error('Export failed');
-      const blob = await res.blob();
-      const disposition = res.headers.get('Content-Disposition') || '';
-      const match = disposition.match(/filename=(.+)/);
-      const filename = match ? match[1] : 'odysseus_backup.json';
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      msg.textContent = 'Export downloaded.'; msg.className = 'admin-success';
-    } catch (e) { msg.textContent = 'Export failed: ' + e.message; msg.className = 'admin-error'; }
-    btn.disabled = false; btn.textContent = 'Export Data';
-  });
-
-  const fileInput = el('adm-importFile');
-  el('adm-importDataBtn').addEventListener('click', () => { fileInput.value = ''; fileInput.click(); });
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-    const msg = el('adm-backupMsg');
-    const btn = el('adm-importDataBtn');
-    btn.disabled = true; btn.textContent = 'Importing...'; msg.textContent = '';
-    try {
-      const text = (await file.text()).replace(/^\uFEFF/, '').trim();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error('Invalid backup file: ' + e.message);
-      }
-      const res = await fetch('/api/import', {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const result = await res.json().catch(() => null);
-      if (!result) {
-        throw new Error(`Import failed: server returned ${res.status}`);
-      }
-      if (res.ok && result.ok) {
-        msg.textContent = result.message || 'Import successful.'; msg.className = 'admin-success';
-      } else {
-        msg.textContent = result.message || result.detail || 'Import failed'; msg.className = 'admin-error';
-      }
-    } catch (e) { msg.textContent = 'Import failed: ' + e.message; msg.className = 'admin-error'; }
-    btn.disabled = false; btn.textContent = 'Import Data';
-  });
-}
-
 /* ── Danger Zone ── */
 function initDangerZone() {
   // Per-category Danger Zone wipes. Each button declares its target
@@ -3145,7 +3088,7 @@ function initAll() {
   modalEl = el('settings-modal');
   const inits = [
     initSignupToggle, initShareDefaultsToggle, initAddUser, initEndpointForm, initMcpForm,
-    initCalDAV, initBackup, initDangerZone, initTokenForm, initLogsView,
+    initCalDAV, initBackupAdmin, initDangerZone, initTokenForm, initLogsView,
     () => settingsModule.initIntegrations()
   ];
   for (const fn of inits) {
@@ -3162,6 +3105,7 @@ function refreshAll() {
   loadMcpServers();
   loadTokens();
   loadLogs(false);
+  refreshBackupAdmin().catch(e => console.error('Backup panel refresh failed', e));
 }
 
 /* ═══════════════════════════════════════════
