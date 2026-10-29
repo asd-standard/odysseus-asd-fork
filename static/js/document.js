@@ -12,7 +12,7 @@ import emojiPicker from './emojiPicker.js';
 import markdownModule from './markdown.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261028windowing1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261029longlineworddiff1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -8888,6 +8888,31 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     return document.getElementById('doc-suggestion-preview');
   }
 
+  const SUGGEST_PREVIEW_CONTEXT_CHARS = 160;
+
+  /**
+   * Bounded context window around a suggestion inside its line.
+   *
+   * The backend narrows FIND/SUGGEST to the changed words, but diffing the
+   * whole source line here would re-inflate the region. Long prose paragraphs
+   * can exceed the word-diff token cap, which used to make the entire
+   * paragraph render as one deleted/inserted row. Keep a short window around
+   * the change (and the full FIND span) instead, expanded to word boundaries.
+   */
+  function _suggestionPreviewWindow(text, idx, findLength, lineStart, lineEnd,
+                                    maxContext = SUGGEST_PREVIEW_CONTEXT_CHARS) {
+    let start = Math.max(lineStart, idx - maxContext);
+    let end = Math.min(lineEnd, idx + findLength + maxContext);
+    while (start > lineStart && !/\s/.test(text[start - 1])) start--;
+    while (end < lineEnd && !/\s/.test(text[end])) end++;
+    return {
+      start,
+      end,
+      clippedLeft: start > lineStart,
+      clippedRight: end < lineEnd,
+    };
+  }
+
   /**
    * Render a suggestion as a line diff in the read-only preview layer.
    *
@@ -8948,12 +8973,18 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     let lineEnd = original.indexOf('\n', idx + sugg.find.length);
     if (lineEnd === -1) lineEnd = original.length;
 
-    const regionOld = original.substring(lineStart, lineEnd);
+    const _win = _suggestionPreviewWindow(
+      original, idx, sugg.find.length, lineStart, lineEnd
+    );
+    const _lead = _win.clippedLeft ? '… ' : '';
+    const _trail = _win.clippedRight ? ' …' : '';
+
+    const regionOld = _lead + original.substring(_win.start, _win.end) + _trail;
 
     // The replacement replaces the whole span of `find`, which may start/end
-    // mid-line; keep the untouched head/tail of the first/last line as context.
-    const headPrefix = original.substring(lineStart, idx);
-    const tailSuffix = original.substring(idx + sugg.find.length, lineEnd);
+    // mid-line; keep the untouched head/tail of the window as context.
+    const headPrefix = _lead + original.substring(_win.start, idx);
+    const tailSuffix = original.substring(idx + sugg.find.length, _win.end) + _trail;
     const newRegion = headPrefix + (sugg.replace || '') + tailSuffix;
 
     const entries = _computeLineDiff(regionOld, newRegion);
@@ -9186,10 +9217,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
    * exactly the original spacing, and is Unicode-aware (`\p{L}`) so accented
    * words are not split into a changed fragment plus a coincidentally-equal one.
    *
-   * Returns `[{type:'equal'|'del'|'ins', text}]`, or null when a line is too
-   * long to diff (the caller then marks the whole line). The cap exists because
-   * the LCS table is O(tokens²) — a minified JSON or base64 line would otherwise
-   * freeze the UI for no benefit.
+   * Returns `[{type:'equal'|'del'|'ins', text}]`. The O(n²) LCS is capped at
+   * 400 tokens; above that a linear token-bounds diff finds the common prefix
+   * and suffix and marks only the changed middle. The cap exists because a
+   * minified JSON or base64 line would otherwise freeze the UI, but falling
+   * back to whole-line marking would hide the actual edit in long prose.
    */
   function _computeWordDiff(oldLine, newLine) {
     const MAX_TOKENS = 400;
@@ -9197,7 +9229,31 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       (s || '').match(/\s+|\p{L}[\p{L}\p{N}]*|\p{N}+|[^\s\p{L}\p{N}]+/gu) || [];
     const a = tokenize(oldLine);
     const b = tokenize(newLine);
-    if (a.length > MAX_TOKENS || b.length > MAX_TOKENS) return null;
+    if (a.length > MAX_TOKENS || b.length > MAX_TOKENS) {
+      // Linear fallback for long paragraphs: keep the common token prefix and
+      // suffix, mark the span between them. This never runs the quadratic table
+      // and still highlights only the changed words for a normal edit.
+      let prefix = 0;
+      while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) {
+        prefix++;
+      }
+      let suffix = 0;
+      while (
+        suffix < a.length - prefix
+        && suffix < b.length - prefix
+        && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+      ) {
+        suffix++;
+      }
+      const out = [];
+      if (prefix) out.push({ type: 'equal', text: a.slice(0, prefix).join('') });
+      const oldMid = a.slice(prefix, a.length - suffix).join('');
+      const newMid = b.slice(prefix, b.length - suffix).join('');
+      if (oldMid) out.push({ type: 'del', text: oldMid });
+      if (newMid) out.push({ type: 'ins', text: newMid });
+      if (suffix) out.push({ type: 'equal', text: a.slice(a.length - suffix).join('') });
+      return out;
+    }
 
     const m = a.length, n = b.length;
     const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));

@@ -14,6 +14,8 @@ suite locks the replacement behaviour:
 
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 DOC_JS = (ROOT / "static/js/document.js").read_text(encoding="utf-8")
 CSS = (ROOT / "static/style.css").read_text(encoding="utf-8")
@@ -390,10 +392,28 @@ def test_word_diff_isolates_punctuation_changes():
     assert rebuilt == "We stop here."
 
 
-def test_word_diff_bails_out_on_pathological_lines():
-    """O(tokens²) must not run on minified/base64 lines — caller falls back."""
+def test_word_diff_uses_linear_fallback_on_pathological_lines():
+    """O(tokens²) must not run on minified/base64 lines, but long prose still
+    gets word-level marking instead of a whole-line fallback."""
     long_line = " ".join(["word"] * 500)
-    assert _run_word_diff(long_line, long_line + " extra") is None
+    segs = _run_word_diff(long_line, long_line + " extra")
+    assert segs is not None
+    assert "extra" in _changed(segs)
+    rebuilt = "".join(s["text"] for s in segs if s["type"] != "ins")
+    assert rebuilt == long_line
+
+
+def test_long_line_fallback_isolates_a_middle_change():
+    old = "alpha " + " ".join(["word"] * 500) + " omega"
+    new = old.replace("word word", "changed word", 1)
+    segs = _run_word_diff(old, new)
+    assert segs is not None
+    changed = _changed(segs)
+    assert "changed" in changed
+    assert "alpha" not in changed
+    assert "omega" not in changed
+    rebuilt = "".join(s["text"] for s in segs if s["type"] != "ins")
+    assert rebuilt == old
 
 
 def test_rows_stay_line_based_and_use_word_spans():
@@ -420,3 +440,77 @@ def test_unpaired_lines_mark_their_whole_content():
     # word-diff it against, so the fallback must still highlight it.
     assert "if (!segs) {" in RENDER
     assert "span.textContent = line;" in RENDER
+
+
+# --------------------------------------------------------------------------
+# Long paragraphs: bounded preview window
+# --------------------------------------------------------------------------
+
+
+def _window_js() -> str:
+    sig = "function _suggestionPreviewWindow("
+    start = DOC_JS.index(sig)
+    i = DOC_JS.index("{\n", start)
+    depth = 0
+    while i < len(DOC_JS):
+        if DOC_JS[i] == "{":
+            depth += 1
+        elif DOC_JS[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return DOC_JS[start : i + 1]
+        i += 1
+    raise AssertionError("unbalanced braces in _suggestionPreviewWindow")
+
+
+def _run_window(text, idx, find_len, line_start, line_end, max_context=160):
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available")
+    script = (
+        _window_js()
+        + "\nconst out = _suggestionPreviewWindow("
+        + f"{json.dumps(text)}, {idx}, {find_len}, {line_start}, {line_end}, {max_context});"
+        + "\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    proc = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def test_preview_uses_a_bounded_window_not_the_whole_line():
+    assert "SUGGEST_PREVIEW_CONTEXT_CHARS = 160" in DOC_JS
+    assert "function _suggestionPreviewWindow(" in DOC_JS
+    assert "_suggestionPreviewWindow(" in RENDER
+    assert "original.substring(_win.start, _win.end)" in RENDER
+    assert "_win.clippedLeft" in RENDER and "_win.clippedRight" in RENDER
+
+
+def test_window_clips_a_long_paragraph_at_word_boundaries():
+    text = "start " + ("filler " * 100) + "TARGET phrase" + (" tail" * 100) + " end"
+    idx = text.index("TARGET")
+    out = _run_window(text, idx, len("TARGET phrase"), 0, len(text))
+
+    assert out["clippedLeft"] is True
+    assert out["clippedRight"] is True
+    assert 0 < out["start"] < idx
+    assert idx + len("TARGET phrase") <= out["end"] < len(text)
+    assert "TARGET phrase" in text[out["start"]:out["end"]]
+    # The window must not begin/end in the middle of a word.
+    assert text[out["start"] - 1].isspace()
+    assert text[out["end"]].isspace()
+
+
+def test_window_keeps_a_short_line_whole():
+    text = "a short line with TARGET"
+    idx = text.index("TARGET")
+    out = _run_window(text, idx, len("TARGET"), 0, len(text))
+
+    assert out["start"] == 0
+    assert out["end"] == len(text)
+    assert out["clippedLeft"] is False
+    assert out["clippedRight"] is False
