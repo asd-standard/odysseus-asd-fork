@@ -37,6 +37,62 @@ def get_active_document():
     return _active_document_id
 
 
+def _editor_open_active_target(doc: Any, ctx: Optional[dict]) -> bool:
+    """True when ``doc`` is the document the browser currently has open.
+
+    ``editor_open`` is an explicit per-turn frontend signal; the in-memory
+    pointer is set by stream_agent_loop from the request's active document.
+    Requiring both distinguishes "the editor is showing this document" from an
+    API caller that merely names it, so target-aware guards do not block edits
+    to other documents.
+    """
+    if not ctx or not ctx.get("editor_open"):
+        return False
+    # Email compose drafts are a special surface: the suggestion preview lives
+    # in the source editor pane, which the rich compose view hides, so
+    # suggestions on a draft are not safely applied to the To/Subject/body
+    # fields yet. Keep direct update/edit for the compose draft until that UI
+    # supports suggestions; normal documents use the suggestion-only policy.
+    if (getattr(doc, "language", "") or "").lower() == "email":
+        return False
+    if _looks_like_email_document(
+        getattr(doc, "current_content", "") or "",
+        getattr(doc, "title", "") or "",
+    ):
+        return False
+    active_id = get_active_document()
+    return bool(
+        active_id
+        and doc is not None
+        and str(getattr(doc, "id", "")) == str(active_id)
+    )
+
+
+def _editor_suggest_only_error() -> Dict:
+    return {
+        "error": (
+            "The document open in the editor can only be changed through "
+            "suggest_document. Use suggest_document with FIND/SUGGEST/REASON so "
+            "the user can accept or reject the change. Direct edit/update is for "
+            "documents that are not open in the editor; target those with an "
+            "explicit document_id."
+        ),
+        "exit_code": 1,
+        "policy": "editor_suggest_only",
+    }
+
+
+def _editor_delete_blocked_error() -> Dict:
+    return {
+        "error": (
+            "The document is open in the editor. Close it before deleting it, "
+            "or delete it from the Library."
+        ),
+        "exit_code": 1,
+        "policy": "editor_suggest_only",
+    }
+
+
 def clear_active_document(doc_id: Optional[str] = None) -> bool:
     """Clear the in-memory active-document pointer.
 
@@ -831,6 +887,9 @@ class UpdateDocumentTool:
                     db, Document, owner, action="update", requested_id=_requested
                 )
 
+            if _editor_open_active_target(doc, ctx):
+                return _editor_suggest_only_error()
+
             version_error = _approved_document_version_error(doc, ctx)
             if version_error:
                 return version_error
@@ -915,6 +974,9 @@ class EditDocumentTool:
                 return _missing_target_error(
                     db, Document, owner, action="edit", requested_id=_requested
                 )
+
+            if _editor_open_active_target(doc, ctx):
+                return _editor_suggest_only_error()
 
             version_error = _approved_document_version_error(doc, ctx)
             if version_error:
@@ -1313,6 +1375,8 @@ class ManageDocumentTool:
                     return _missing_target_error(
                         db, Document, owner, action="delete", requested_id=_requested
                     )
+                if _editor_open_active_target(doc, ctx):
+                    return _editor_delete_blocked_error()
                 title = doc.title
                 from src.trash_service import move_document_to_trash
                 move_document_to_trash(doc)

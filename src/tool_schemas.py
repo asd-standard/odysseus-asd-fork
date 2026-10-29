@@ -109,7 +109,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "create_document",
-            "description": "Create a new document in the editor panel. Use this when the user asks to write, create, build, make, or generate code, scripts, programs, games, apps, or any long-form or structured content that is more than a short paragraph, AND there is no already-open document/email draft that the request refers to. If an email compose draft is open, edit that draft instead of creating another document. NEVER put large generated content directly in chat — use this tool instead.",
+            "description": "Create a new document in the editor panel. Use this when the user asks to write, create, build, make, or generate code, scripts, programs, games, apps, or any long-form or structured content that is more than a short paragraph, AND there is no already-open document/email draft that the request refers to. If a document or email draft is already open, use suggest_document for changes to it; never create a replacement. NEVER put large generated content directly in chat — use this tool instead.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -125,11 +125,11 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "edit_document",
-            "description": "Edit a document OPEN IN THE EDITOR PANEL (created via create_document) — NOT a file on disk. For files on disk (home folder, project files, anything with a path like ~/x.txt or /path/to/file) use edit_file instead. Targeted find-and-replace with multiple FIND/REPLACE pairs per call; use for any edit smaller than a full rewrite. Do NOT send the whole file back via update_document for small edits. When no document is open in the editor, pass document_id from manage_documents list; never invent an id.",
+            "description": "Edit a document that is NOT open in the editor (created via create_document or listed by manage_documents) — NOT a file on disk. For files on disk (home folder, project files, anything with a path like ~/x.txt or /path/to/file) use edit_file instead. Targeted find-and-replace with multiple FIND/REPLACE pairs per call; use for any edit smaller than a full rewrite. Do NOT use this on a normal document open in the editor: it can only be changed through suggest_document. An open email compose draft is the exception and uses update_document/edit_document. When no document is open in the editor, pass document_id from manage_documents list; never invent an id.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "document_id": {"type": "string", "description": "Target document UUID from a manage_documents list anchor. Optional: omit to edit the document currently open in the editor."},
+                    "document_id": {"type": "string", "description": "Target document UUID from a manage_documents list anchor. Required when targeting a document while another is open in the editor; omit only when no document is open."},
                     "edits": {
                         "type": "array",
                         "description": "List of find/replace edits (first match only per edit)",
@@ -151,7 +151,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "suggest_document",
-            "description": "Suggest improvements to the active document WITHOUT editing it. Creates inline comment bubbles the user can accept or reject. Use when the user asks for suggestions, review, improvements, or feedback. The server narrows whole-line FIND/REPLACE pairs to the changed words, so quoting a full line or block is fine.",
+            "description": "Suggest improvements to the document open in the editor (or an explicitly targeted document) WITHOUT editing it. This is the required path for changing a normal open editor document (email compose drafts use update_document/edit_document). Creates inline comment bubbles the user can accept or reject. Use for any content change the user asks for on the open document, as well as review/feedback requests. The server narrows whole-line FIND/REPLACE pairs to the changed words, so quoting a full line or block is fine.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -178,11 +178,11 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "update_document",
-            "description": "Replace the ENTIRE active document. ONLY use for genuine full rewrites (>50% of lines changed). For any smaller change, use edit_document — echoing back the whole file for small edits is wasteful.",
+            "description": "Replace the ENTIRE document ONLY when it is not open in the editor. A normal document open in the editor can only be changed through suggest_document; an open email compose draft is the exception and uses update_document/edit_document. ONLY use for genuine full rewrites (>50% of lines changed). For any smaller change, use edit_document — echoing back the whole file for small edits is wasteful.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "document_id": {"type": "string", "description": "Target document UUID from a manage_documents list anchor. Optional: omit to rewrite the document currently open in the editor."},
+                    "document_id": {"type": "string", "description": "Target document UUID from a manage_documents list anchor. Required when targeting a document while another is open in the editor; omit only when no document is open."},
                     "content": {"type": "string", "description": "Complete new document content"}
                 },
                 "required": ["content"]

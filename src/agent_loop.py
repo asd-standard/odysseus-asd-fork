@@ -354,7 +354,8 @@ _DOMAIN_RULES = {
 ## Document rules
 - For long code/content (>15 lines), use `create_document` instead of pasting into chat.
 - If an active document is open, "fix this", "add X", "change Y", etc. usually refers to that document.
-- Use `edit_document` for targeted changes. Use `update_document` only for genuine full rewrites.
+- The document open in the editor (except an email compose draft) can ONLY be changed through `suggest_document`. Never call `edit_document` or `update_document` on a normal open document.
+- `edit_document`/`update_document` are only for other documents targeted by an explicit `document_id`, or for an open email compose draft.
 - For feedback/review/suggestions on an open document, use `suggest_document`.""",
     "email": """\
 ## Email rules
@@ -497,7 +498,7 @@ Create a new document in the library (Unfiled). Takes a simple filename (no path
 <language>
 <content>
 ```
-Create a NEW document in the editor panel. Only use when the user explicitly asks for a new file/document. If a document is already open in the editor, the user's request "fix this", "add X", "change Y", etc. refers to THAT document — use edit_document, never create_document.""",
+Create a NEW document in the editor panel. Only use when the user explicitly asks for a new file/document. If a document is already open in the editor, do NOT create a replacement: use suggest_document for changes to that document.""",
 
     "edit_document": """\
 ```edit_document
@@ -507,13 +508,13 @@ old text to find
 new replacement text
 <<<END>>>
 ```
-Edit a document OPEN IN THE EDITOR PANEL. Find exact text and replace it. Multiple FIND/REPLACE blocks per call OK. Use for any edit smaller than a full rewrite. **If a document is open in the editor, treat it as the user's current context: don't ask which file they mean, and don't create a new one — just edit_document the active one.** Do NOT re-send the whole file with update_document for small changes.""",
+Edit a document that is NOT open in the editor. Find exact text and replace it. Multiple FIND/REPLACE blocks per call OK. Use for any edit smaller than a full rewrite. **A normal document open in the editor can ONLY be changed through suggest_document; never call edit_document on it. An open email compose draft is the exception: use update_document/edit_document on it. If another document is the target, pass its explicit document_id.** Do NOT re-send the whole file with update_document for small changes.""",
 
     "update_document": """\
 ```update_document
 <entire new content>
 ```
-Replace the ENTIRE active document. ONLY use when you're genuinely rewriting more than half of it from scratch. For any smaller change, use edit_document — echoing back the whole file for a two-line edit wastes tokens and is hard to review.""",
+Replace the ENTIRE document ONLY when it is NOT open in the editor. A normal document open in the editor can ONLY be changed through suggest_document; an open email compose draft is the exception and uses update_document/edit_document. ONLY use for genuine full rewrites (>50% of lines changed). For any smaller change, use edit_document — echoing back the whole file for a two-line edit wastes tokens and is hard to review.""",
 
     "suggest_document": """\
 ```suggest_document
@@ -525,7 +526,7 @@ suggested replacement
 why this change improves the code
 <<<END>>>
 ```
-Suggest changes with explanations (for review/feedback requests). Does NOT modify the document: it renders inline accept/reject comments.
+Suggest changes to the document open in the editor (or an explicitly targeted document) with explanations. This is the ONLY document tool that may change a normal open editor document: edit_document and update_document are blocked for it. Email compose drafts are the exception and use update_document/edit_document. Does NOT modify the document directly; it renders inline accept/reject comments.
 
 Target: the document open in the editor by default; pass `document_id` (from `manage_documents` list) to target a different one. There is no "most recent document" fallback.
 
@@ -1448,8 +1449,8 @@ def _minimal_odysseus_doc_messages(messages: List[Dict], active_document, stream
             "Preserve the current title, language, structure, and existing meaning unless the user explicitly asks to change them.\n"
             "If the user asks for ALL CAPS/uppercase/lowercase, transform the existing document text itself.\n"
             "If the user refers to line numbers, use the numbered active document lines; never include the line numbers or tabs in FIND/REPLACE text.\n"
-            "If the user asks to add, remove, rewrite, transform, change, capitalize, shorten, expand, or otherwise apply a change, use edit_document or update_document, not suggest_document.\n"
-            "Use suggest_document only when the user explicitly asks for suggestions, feedback, or proposed improvements without applying them.\n"
+            "If the user asks to add, remove, rewrite, transform, change, capitalize, shorten, expand, or otherwise apply a change to the open document, use suggest_document.\n"
+            "Never call edit_document or update_document on the document open in the editor; those tools are blocked for it and are only for other documents targeted by an explicit document_id.\n"
             "For targeted edits:\n"
             "```edit_document\n"
             "<<<FIND>>>\n"
@@ -2063,23 +2064,25 @@ def _build_system_prompt(
                     f'The ENTIRE form is in the markdown above. Every field, on every '
                     f'page, is a bullet line you can see now.\n\n'
                     f'DO NOT try to "read the file" or "open the PDF" with an external '
-                    f'tool. The form IS the document above. Just edit it.\n\n'
+                    f'tool. The form IS the document above. Propose changes through '
+                    f'suggest_document.\n\n'
                     f'DO NOT ask the user to upload, share, or re-attach. The form is '
                     f'already loaded.\n\n'
-                    f'TO EDIT: call `edit_document` with FIND/REPLACE matching whole '
-                    f'bullet lines. The trailing HTML comment '
+                    f'TO EDIT: call `suggest_document` with FIND/SUGGEST matching whole '
+                    f'bullet lines. The open PDF form can only be changed through suggestions. '
+                    f'The trailing HTML comment '
                     f'`<!-- field=NAME type=TYPE -->` is the ground truth anchor — '
                     f'match it to pick the correct bullet.\n\n'
                     f'RULES:\n'
                     f'1. FIND the WHOLE bullet line including the trailing comment. '
-                    f'REPLACE keeps the bullet structure and the comment exactly; '
+                    f'SUGGEST keeps the bullet structure and the comment exactly; '
                     f'only the value text after the label changes.\n'
                     f'2. Text bullets — `- **label:** value <!--field=NAME-->` — '
-                    f'replace `value`.\n'
+                    f'put the new value in `value`.\n'
                     f'3. Choice bullets — `- **label** [opt1 / opt2 / opt3]: value <!--field=NAME-->` — '
-                    f'replace `value` with one of the listed options verbatim.\n'
+                    f'put one of the listed options verbatim in `value`.\n'
                     f'4. Checkbox bullets — `- [ ] **label** <!--field=NAME-->` — '
-                    f'toggle `[ ]` ↔ `[x]`.\n'
+                    f'SUGGEST toggles `[ ]` ↔ `[x]`.\n'
                     f'5. NEVER invent values. If the user gives no value, ASK. Never '
                     f'write fake names, addresses, emails, or "NaN"/"N/A"/"TBD".\n'
                     f'6. NEVER edit the front-matter `<!-- pdf_form_source ... -->` '
@@ -2108,9 +2111,9 @@ def _build_system_prompt(
                     f'document unless the user clearly says otherwise.\n'
                     f'A "[Doc edit: L25]" prefix means the user is pointing at that line — use the '
                     f'numbers above to find the text they mean.\n'
-                    f'To edit: use edit_document with <<<FIND>>>...<<<REPLACE>>>...<<<END>>>. The FIND '
+                    f'To edit: use suggest_document with <<<FIND>>>...<<<SUGGEST>>>...<<<REASON>>>...<<<END>>>. The open document can only be changed through suggestions. The FIND '
                     f'text must match the document EXACTLY and must NOT include the leading line-number '
-                    f'or tab (those are reference-only). To rewrite entirely: update_document.'
+                    f'or tab (those are reference-only).'
                 )
                 if _document_writing_style:
                     doc_ctx += (
@@ -2172,9 +2175,11 @@ def _build_system_prompt(
                 "Its text is NOT in this prompt. When the request is about it "
                 "(edit, rewrite, summarize, check, look at, \"the document\", "
                 "\"this\"), call `manage_documents` with action=read and NO "
-                "document_id to get the current text. Then use `edit_document` "
-                "for targeted changes, `update_document` only for a full rewrite, "
-                "or `suggest_document` for review comments. Do not ask the user to "
+                "document_id to get the current text. Then use `suggest_document` "
+                "for any change to a normal open document; an open email compose draft "
+                "uses `update_document`/`edit_document` as described above. `edit_document`/"
+                "`update_document` are only for other documents targeted by an explicit "
+                "document_id. Do not ask the user to "
                 "paste the document and do not go looking for it on disk. "
                 "If the user names a different document, read that one by title "
                 "or document_id instead. Never substitute 'the most recently "
@@ -4241,6 +4246,9 @@ async def stream_agent_loop(
                     workspace=workspace,
                     security_context=run_security,
                     exact_approval=exact_approval,
+                    editor_open=editor_has_document,
+                    editor_stale=editor_stale,
+                    library_preview_doc_id=library_preview_doc_id,
                 )
             finally:
                 await approved_progress_q.put(None)
@@ -6061,6 +6069,9 @@ async def stream_agent_loop(
                 tool_policy=tool_policy,
                 active_document=active_document,
                 active_email=active_email,
+                editor_has_document=editor_has_document,
+                editor_stale=editor_stale,
+                library_preview_doc_id=library_preview_doc_id,
                 external_untrusted_context_seen=(
                     run_security.external_untrusted_context_seen
                 ),

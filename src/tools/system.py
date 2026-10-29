@@ -560,6 +560,15 @@ _APP_API_BLOCKLIST_METHOD_PATH = (
     # language due_date parsing, timezone, dedup, and tag/category
     # normalization. Hitting the raw endpoint via app_api saves a
     # note/event with the wrong fields, no reminder, or the wrong tz.
+    # Use the named document tools — they enforce owner scope, the open-editor
+    # suggestion-only policy, version checks, and document versions. Raw PUT/
+    # PATCH/DELETE here would bypass all of that.
+    ("PUT",    "/api/document/"),
+    ("PATCH",  "/api/document/"),
+    ("DELETE", "/api/document/"),
+    ("POST",   "/api/documents/tidy"),
+    ("POST",   "/api/documents/ai-tidy"),
+    ("POST",   "/api/documents/trash/empty"),
     ("POST",   "/api/notes"),
     ("PUT",    "/api/notes"),
     ("DELETE", "/api/notes"),
@@ -667,6 +676,8 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
             return {"error": "Don't hit /api/notes via app_api — use the `manage_notes` tool. It accepts natural-language due_date ('11pm today', 'tomorrow at 9am'), fires reminders from the due_date itself (no separate calendar event), and uses the caller's timezone. The raw endpoint requires ISO-UTC + a separate calendar event, both of which the agent tends to get wrong.", "exit_code": 1}
         if "/api/calendar/events" in path:
             return {"error": "Don't hit /api/calendar/events via app_api — use the `manage_calendar` tool. It handles tz-aware natural-language datetimes and reminder_minutes correctly. If the user wants a note + reminder, prefer `manage_notes` with due_date — it bundles both.", "exit_code": 1}
+        if "/api/document" in path:
+            return {"error": "Don't mutate documents via app_api — use `edit_document`/`update_document` for documents not open in the editor, or `suggest_document` for the document open in the editor. Those tools enforce owner, version, and open-editor policy.", "exit_code": 1}
         return {"error": f"{method} {path} is blocked by app_api policy.", "exit_code": 1}
 
     body = args.get("body")
