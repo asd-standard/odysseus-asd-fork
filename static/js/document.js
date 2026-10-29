@@ -10172,30 +10172,67 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     return safeName + ver;
   }
 
-  function exportDocument() {
+  // Single source of truth for "selected type → file extension". The footer
+  // Download entry and the raw export path both read this so the label and
+  // the downloaded file always agree with #doc-language-select.
+  const _DOC_EXT_BY_LANG = {
+    javascript: '.js', js: '.js', python: '.py', py: '.py', html: '.html',
+    css: '.css', markdown: '.md', md: '.md', json: '.json', yaml: '.yml',
+    yml: '.yml', bash: '.sh', sh: '.sh', shell: '.sh', zsh: '.sh',
+    sql: '.sql', rust: '.rs', go: '.go', java: '.java', c: '.c',
+    cpp: '.cpp', 'c++': '.cpp', csharp: '.cs', 'c#': '.cs',
+    typescript: '.ts', ts: '.ts', ruby: '.rb', php: '.php', text: '.txt',
+    xml: '.xml', svg: '.svg', toml: '.toml', ini: '.ini', csv: '.csv',
+    // Email drafts store a markdown body, not RFC822 bytes — .md is the
+    // useful raw download; .eml would be invalid.
+    email: '.md', pdf: '.pdf',
+  };
+  const _DOC_MIME_BY_LANG = {
+    json: 'application/json',
+    markdown: 'text/markdown', md: 'text/markdown',
+    html: 'text/html',
+    css: 'text/css',
+    csv: 'text/csv',
+    xml: 'application/xml',
+    svg: 'image/svg+xml',
+    yaml: 'application/x-yaml', yml: 'application/x-yaml',
+  };
+
+  function _docExtensionForLang(lang) {
+    return _DOC_EXT_BY_LANG[(lang || '').toLowerCase()] || '.txt';
+  }
+
+  function _docMimeForLang(lang) {
+    return _DOC_MIME_BY_LANG[(lang || '').toLowerCase()] || 'text/plain';
+  }
+
+  /** Download the active document as raw source with the selected type's extension. */
+  async function exportDocument() {
     if (!activeDocId) return;
+    _dismissDocKb();
+    const lang = document.getElementById('doc-language-select')?.value || '';
+    if (lang.toLowerCase() === 'pdf') {
+      // The PDF bytes live server-side (forms/signatures) — reuse the filled
+      // PDF route instead of dumping the markdown textarea as .pdf.
+      await _downloadFilledPdf();
+      return;
+    }
+    // Flush pending edits so the file matches what the user actually sees.
+    await _saveActiveDocBeforeExport();
     const textarea = document.getElementById('doc-editor-textarea');
     if (!textarea) return;
-    const doc = docs.get(activeDocId);
-    const title = (doc && doc.title) || 'document';
-    const lang = document.getElementById('doc-language-select')?.value || '';
-    const extMap = {
-      javascript: '.js', python: '.py', html: '.html', css: '.css',
-      markdown: '.md', json: '.json', yaml: '.yml', bash: '.sh',
-      sql: '.sql', rust: '.rs', go: '.go', java: '.java', c: '.c', cpp: '.cpp', csharp: '.cs',
-      typescript: '.ts', ruby: '.rb', php: '.php', text: '.txt',
-      xml: '.xml', toml: '.toml', ini: '.ini', csv: '.csv',
-    };
-    const ext = extMap[lang] || '.txt';
-    const safeName = title.replace(/[^a-zA-Z0-9_\-. ]/g, '_').trim() || 'document';
-    const ver = doc && doc.version ? `_v${doc.version}` : '';
-    const mime = lang === 'csv' ? 'text/csv' : lang === 'json' ? 'application/json' : 'text/plain';
-    const blob = new Blob([textarea.value], { type: mime });
+    const ext = _docExtensionForLang(lang);
+    const filename = _getExportBaseName() + ext;
+    const blob = new Blob([textarea.value], { type: _docMimeForLang(lang) });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = safeName + ver + ext;
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (uiModule) uiModule.showToast(`Downloaded ${filename}`);
   }
 
   // "Import from device" — open a file picker, upload, and immediately open
@@ -10303,14 +10340,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (!rect) return;
 
     const lang = document.getElementById('doc-language-select')?.value || '';
-    const extMap = {
-      javascript: '.js', python: '.py', html: '.html', css: '.css',
-      markdown: '.md', json: '.json', yaml: '.yml', bash: '.sh',
-      sql: '.sql', rust: '.rs', go: '.go', java: '.java', c: '.c', cpp: '.cpp', csharp: '.cs',
-      typescript: '.ts', ruby: '.rb', php: '.php', text: '.txt',
-      xml: '.xml', toml: '.toml', ini: '.ini', csv: '.csv',
-    };
-    const ext = extMap[lang] || '.txt';
+    const ext = _docExtensionForLang(lang);
 
     const menu = document.createElement('div');
     menu.id = 'doc-export-menu';
@@ -10333,9 +10363,15 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     // getting too cramped for dedicated icons.
     options.push({ label: 'Import from library', fn: () => openLibrary() });
     options.push({ label: 'Import from device', fn: () => _importFromDevice(), _divider: true });
-    if (isForm) options.push({ label: 'Filled PDF (.pdf)', fn: _downloadFilledPdf });
+    if (lang.toLowerCase() === 'pdf') {
+      // No raw PDF bytes on the client — the server-side filled PDF IS the file.
+      options.push({ label: 'Download .pdf', fn: _downloadFilledPdf });
+    } else {
+      if (isForm) options.push({ label: 'Filled PDF (.pdf)', fn: _downloadFilledPdf });
+      // Follow the type picker: Python → "Download .py", Markdown → ".md", …
+      options.push({ label: `Download ${ext}`, fn: exportDocument });
+    }
     options.push(
-      { label: 'Export Markdown', fn: exportDocument },
       { label: 'Print as PDF', fn: exportAsPdf },
       { label: 'Export as Word', fn: exportAsDocx },
     );
@@ -10344,7 +10380,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const item = document.createElement('button');
       item.className = 'doc-overflow-item';
       item.textContent = opt.label;
-      item.addEventListener('click', (ev) => { ev.stopPropagation(); close(); opt.fn(); });
+      item.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        close();
+        // Actions are a mix of sync and async — normalize so a rejected
+        // download surfaces the same error UI instead of an unhandled promise.
+        Promise.resolve().then(opt.fn).catch((err) => {
+          console.error('Export action failed:', err);
+          if (uiModule) uiModule.showError('Export failed: ' + (err?.message || err));
+        });
+      });
       menu.appendChild(item);
       if (opt._divider) {
         const sep = document.createElement('div');
