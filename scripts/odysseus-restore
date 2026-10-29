@@ -193,6 +193,10 @@ def safe_extract(path: Path, target: Path) -> None:
                 destination = target.joinpath(*pure.parts)
                 if member.isdir():
                     destination.mkdir(parents=True, exist_ok=True)
+                    try:
+                        os.chmod(destination, member.mode & 0o777)
+                    except OSError:
+                        pass
                     continue
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 source = archive.extractfile(member)
@@ -341,6 +345,10 @@ def fix_permissions(data_dir: Path, uid: int, gid: int) -> None:
                     os.chown(path, uid, gid)
                 except OSError:
                     pass
+            try:
+                os.chmod(path, 0o700)
+            except OSError:
+                pass
         for name in files:
             path = Path(root) / name
             if is_root:
