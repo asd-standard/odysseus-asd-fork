@@ -355,61 +355,6 @@ class DocumentVersion(Base):
     document = relationship("Document", back_populates="versions")
 
 
-class GalleryAlbum(TimestampMixin, Base):
-    """A photo album/folder."""
-    __tablename__ = "gallery_albums"
-
-    id          = Column(String, primary_key=True, index=True)
-    name        = Column(String, nullable=False)
-    description = Column(Text, default="")
-    cover_id    = Column(String, nullable=True)  # GalleryImage.id for cover photo
-    owner       = Column(String, nullable=True, index=True)
-
-    images = relationship("GalleryImage", back_populates="album")
-
-
-class GalleryImage(TimestampMixin, Base):
-    """Stores metadata for photos and AI-generated images."""
-    __tablename__ = "gallery_images"
-
-    id         = Column(String, primary_key=True, index=True)
-    filename   = Column(String, nullable=False, unique=True)
-    prompt     = Column(Text, nullable=False, default="")
-    caption    = Column(Text, nullable=True, default="")
-    model      = Column(String, nullable=True)
-    size       = Column(String, nullable=True)
-    quality    = Column(String, nullable=True)
-    tags       = Column(String, nullable=True, default="")
-    ai_tags    = Column(Text, nullable=True, default="")       # AI-generated tags (comma-separated)
-    session_id = Column(String, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True)
-    album_id   = Column(String, ForeignKey("gallery_albums.id", ondelete="SET NULL"), nullable=True, index=True)
-    owner      = Column(String, nullable=True, index=True)
-    is_active  = Column(Boolean, default=True)
-    favorite   = Column(Boolean, default=False)
-
-    # File integrity
-    file_hash  = Column(String(64), nullable=True, index=True)  # SHA-256
-
-    # EXIF / photo metadata
-    taken_at       = Column(DateTime, nullable=True, index=True)  # EXIF DateTimeOriginal
-    camera_make    = Column(String, nullable=True)
-    camera_model   = Column(String, nullable=True)
-    gps_lat        = Column(String, nullable=True)  # stored as string for precision
-    gps_lng        = Column(String, nullable=True)
-    width          = Column(Integer, nullable=True)
-    height         = Column(Integer, nullable=True)
-    file_size      = Column(Integer, nullable=True)  # bytes
-
-    session = relationship("Session", backref=backref("gallery_images"))
-    album   = relationship("GalleryAlbum", back_populates="images")
-
-    __table_args__ = (
-        Index('ix_gallery_images_tags', 'tags'),
-        Index('ix_gallery_images_model', 'model'),
-        Index('ix_gallery_images_active', 'is_active', 'created_at'),
-    )
-
-
 class EmailAccount(TimestampMixin, Base):
     """A configured IMAP/SMTP account. Supports multiple accounts per user —
     exactly one row per owner has is_default=True.
@@ -799,38 +744,6 @@ class ScheduledTask(TimestampMixin, Base):
     __table_args__ = (
         Index('ix_scheduled_tasks_due', 'status', 'next_run'),
         Index('ix_scheduled_tasks_event', 'trigger_type', 'trigger_event', 'status'),
-    )
-
-
-class EditorDraft(TimestampMixin, Base):
-    """Persisted in-progress gallery-editor session — layered project state
-    that the user can close and reopen later. Stores the full layer payload
-    as JSON (with base64-encoded PNG dataURLs per layer) plus a small
-    thumbnail for the landing-screen list.
-    """
-    __tablename__ = "editor_drafts"
-
-    id              = Column(String, primary_key=True, index=True)
-    owner           = Column(String, nullable=True, index=True)
-    name            = Column(String, nullable=False, default="Untitled")
-    # If the draft was opened FROM a gallery photo, point back at it so we
-    # can show "Resuming edit of <photo>" and so reopening that photo picks
-    # up the same draft rather than starting fresh.
-    source_image_id = Column(String, nullable=True, index=True)
-    width           = Column(Integer, nullable=True)
-    height          = Column(Integer, nullable=True)
-    # Full draft body — layer pixels (base64 PNG dataURLs), offsets,
-    # opacities, visibility, active id, next id, etc. Kept as TEXT/JSON so
-    # we don't have to re-shape the model every time the editor adds a
-    # new piece of state.
-    payload         = Column(Text, nullable=False, default="")
-    # Tiny preview (data URL, ~128px wide) for the landing list. Stored
-    # inline so the list endpoint can return everything in one shot.
-    thumbnail       = Column(Text, nullable=True)
-    is_active       = Column(Boolean, default=True)
-
-    __table_args__ = (
-        Index('ix_editor_drafts_owner_updated', 'owner', 'is_active', 'updated_at'),
     )
 
 
@@ -1454,38 +1367,14 @@ def _migrate_add_owner_to_table(table_name: str, index_name: str):
             pass
 
 def _migrate_add_multiuser_owner_columns():
-    """Add owner column to memories, gallery_images, user_tools, comparisons."""
+    """Add owner column to memories, user_tools, comparisons."""
     _migrate_add_owner_to_table("memories", "ix_memories_owner")
-    _migrate_add_owner_to_table("gallery_images", "ix_gallery_images_owner")
     _migrate_add_owner_to_table("user_tools", "ix_user_tools_owner")
     _migrate_add_owner_to_table("comparisons", "ix_comparisons_owner")
     _migrate_add_owner_to_table("api_tokens", "ix_api_tokens_owner")
     # documents derived ownership from their session join until this column
     # existed; the legacy-owner sweep (below) backfills it on the next boot.
     _migrate_add_owner_to_table("documents", "ix_documents_owner")
-
-
-def _migrate_add_gallery_caption_column():
-    """Add OCR/vision caption storage for gallery images."""
-    import sqlite3
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    if not os.path.exists(db_path):
-        return
-    conn = None
-    try:
-        conn = sqlite3.connect(db_path)
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(gallery_images)").fetchall()]
-        if columns and "caption" not in columns:
-            conn.execute("ALTER TABLE gallery_images ADD COLUMN caption TEXT DEFAULT ''")
-            conn.commit()
-            logging.getLogger(__name__).info("Migrated: added caption column to gallery_images")
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"Migration gallery caption column failed: {e}")
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 def _migrate_add_api_token_scopes_column():
@@ -1563,11 +1452,11 @@ def _migrate_assign_legacy_owner():
         # picked up automatically because we only UPDATE when the column
         # exists; the explicit list documents intent.
         tables = [
-            "sessions", "memories", "gallery_images", "user_tools",
+            "sessions", "memories", "user_tools",
             "comparisons", "documents", "signatures", "notes",
             "calendars", "calendar_events", "integrations",
             "scheduled_tasks", "task_runs", "crew_members",
-            "gallery_albums", "gallery_people", "user_tool_data",
+            "user_tool_data",
             "api_tokens", "webhooks",
         ]
         for table in tables:
@@ -2243,7 +2132,6 @@ def init_db():
     _migrate_add_token_columns()
     _migrate_add_mode_column()
     _migrate_add_multiuser_owner_columns()
-    _migrate_add_gallery_caption_column()
     _migrate_add_api_token_scopes_column()
     _migrate_backfill_document_owner_from_session()
     _migrate_assign_legacy_owner()

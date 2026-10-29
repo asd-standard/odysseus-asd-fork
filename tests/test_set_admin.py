@@ -128,14 +128,14 @@ def test_noop_demote_of_regular_user_preserves_custom_privileges(tmp_path):
     auth_mod, mgr = _fresh_auth_manager(tmp_path)
     mgr.create_user("admin", "pw-123456", is_admin=True)
     mgr.create_user("bob", "pw-123456")
-    # Give bob a non-default privilege; DEFAULT_PRIVILEGES has can_use_bash=False.
-    assert mgr.set_privileges("bob", {"can_use_bash": True}) is True
+    # Give bob a non-default privilege.
+    assert mgr.set_privileges("bob", {"can_use_documents": False}) is True
 
     result = mgr.set_admin("bob", False, "admin")  # already a regular user
 
     assert result is auth_mod.SetAdminResult.OK
     # Privileges must NOT have been reset to defaults by the no-op.
-    assert mgr.users["bob"]["privileges"]["can_use_bash"] is True
+    assert mgr.users["bob"]["privileges"]["can_use_documents"] is False
 
 
 def test_demote_restores_pre_admin_privilege_restrictions(tmp_path):
@@ -145,7 +145,6 @@ def test_demote_restores_pre_admin_privilege_restrictions(tmp_path):
     # Tighten bob below the defaults before promoting him.
     assert mgr.set_privileges("bob", {
         "can_use_agent": False,
-        "can_generate_images": False,
         "max_messages_per_day": 50,
     }) is True
     restricted = mgr.get_privileges("bob")

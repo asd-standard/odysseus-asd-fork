@@ -7,7 +7,7 @@ import Storage from './storage.js';
 import themeModule from './theme.js';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
-import documentModule from './document.js?v=20261027worddiff1';
+import documentModule from './document.js?v=20261028windowing1';
 
 // Tool approvals are control-plane submits for the current chat. chat.js
 // deliberately leaves the composer untouched, then programmatically clicks the
@@ -49,11 +49,11 @@ export function handleUIControl(uiData) {
   try {
     if (uiEvent === 'toggle' || uiData.ui_event === 'toggle') {
       var toggleMap = {
-        web: 'web-toggle', bash: 'bash-toggle', rag: 'rag-toggle',
+        web: 'web-toggle', rag: 'rag-toggle',
         research: 'research-toggle', incognito: 'incognito-toggle',
       };
       var btnMap = {
-        web: 'web-toggle-btn', bash: 'bash-toggle-btn', rag: 'rag-indicator-btn',
+        web: 'web-toggle-btn', rag: 'rag-indicator-btn',
       };
       var chkId = toggleMap[uiData.toggle_name];
       var btnId = btnMap[uiData.toggle_name];
@@ -175,13 +175,8 @@ export function handleUIControl(uiData) {
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
       if (panel === 'documents') {
-        import('./documentLibrary.js?v=20261027worddiff1').then(function(mod) {
+        import('./documentLibrary.js?v=20261028windowing1').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'gallery') {
-        import('./gallery.js').then(function(mod) {
-          var fn = mod.openGallery || (mod.default && mod.default.openGallery);
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'email') {
@@ -192,11 +187,6 @@ export function handleUIControl(uiData) {
       } else if (panel === 'sessions') {
         import('./sessions.js').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'cookbook') {
-        import('./cookbook.js').then(function(mod) {
-          var fn = mod.open || (mod.default && mod.default.open);
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'notes') {

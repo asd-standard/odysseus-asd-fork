@@ -139,7 +139,7 @@ Native platform launchers:
 and applies it to root, console, rotating-file, and direct-uvicorn logging.
 Shell completions in `scripts/_completion/` introspect CLI `--help` output through the venv and cache subcommands.
 
-`scripts/odysseus-*` provide local CLI surfaces for backup, calendar, contacts, Cookbook, docs, gallery, logs, mail, MCP, memory, notes, personal docs, presets, research, sessions, signatures, skills, tasks, theme, and webhooks.
+`scripts/odysseus-*` provide local CLI surfaces for backup, calendar, contacts, docs, logs, mail, MCP, memory, notes, personal docs, presets, research, sessions, signatures, skills, tasks, theme, and webhooks.
 
 When route/API behavior changes, check whether a matching CLI script depends on the old shape. There is no central CLI scrubber: each credential/log/mail/task/backup/MCP/webhook script owns its own sensitive-output behavior.
 

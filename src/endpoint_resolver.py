@@ -605,11 +605,6 @@ def resolve_utility_fallback_candidates(owner: Optional[str] = None) -> list:
     return _resolve_fallback_candidates("utility_model_fallbacks", owner=owner)
 
 
-def resolve_vision_fallback_candidates(owner: Optional[str] = None) -> list:
-    """Configured fallback chain for the Vision model (`vision_model_fallbacks`)."""
-    return _resolve_fallback_candidates("vision_model_fallbacks", owner=owner)
-
-
 def _resolve_fallback_candidates(setting_key: str, owner: Optional[str] = None) -> list:
     try:
         from src.settings import get_user_setting, load_settings

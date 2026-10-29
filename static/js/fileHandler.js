@@ -362,16 +362,11 @@ export async function addFiles(files, opts = {}) {
       _showToast(`Max ${MAX_FILES} files allowed`);
       break;
     }
-    let nextFile = f;
-    if (!opts.skipCrop && _isMobileViewport() && _isCroppableImage(f)) {
-      try {
-        nextFile = await _openMobileCropper(f);
-      } catch (_) {
-        nextFile = f;
-      }
-      if (!nextFile) continue;
+    if (f.type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(f.name || '')) {
+      _showToast('Image attachments are not supported');
+      continue;
     }
-    pendingFiles.push(nextFile);
+    pendingFiles.push(f);
   }
   renderAttachStrip();
 }

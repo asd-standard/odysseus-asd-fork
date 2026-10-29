@@ -30,7 +30,7 @@ def test_tool_index_indexes_and_retrieves_from_available_lanes(monkeypatch):
 
     assert fake.collections["odysseus_tool_index_custom"].count() > 0
     assert fake.collections["odysseus_tool_index_fastembed"].count() > 0
-    assert "bash" in index.retrieve("run a shell command", k=10)
+    assert "read_library_file" in index.retrieve("read a library document", k=10)
 
 
 def test_tool_index_builtin_indexing_fails_when_all_lanes_fail():

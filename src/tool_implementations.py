@@ -38,23 +38,6 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# Cookbook (model serving) domain extracted to src/tools/cookbook.py
-# (slice 1, #4082/#4071). Re-imported here so this module stays a working
-# facade. cookbook.py pulls `_internal_headers` / `_INTERNAL_BASE` back
-# function-locally from this facade (which re-exports them from _common).
-from src.tools.cookbook import (  # noqa: F401
-    do_download_model, do_serve_model, do_list_served_models,
-    do_stop_served_model, do_tail_serve_output, do_list_downloads,
-    do_cancel_download, do_search_hf_models, do_adopt_served_model,
-    do_list_cookbook_servers, do_list_serve_presets, do_serve_preset,
-    do_list_cached_models,
-    _cookbook_servers, _resolve_cookbook_host, _cookbook_env_for_host,
-    _infer_serve_port, _infer_serve_host, _ensure_served_endpoint,
-    _cookbook_register_task, _cookbook_apply_retry_suggestion,
-    _scan_running_model_processes, _cookbook_kill_session,
-    _MODEL_PROCESS_PATTERNS,
-    _string_arg, _validate_cookbook_ssh_target,
-)
 # Search domain extracted to src/tools/search.py (slice 1, #4082/#4071).
 # Re-imported here so this module stays a working facade.
 from src.tools.search import do_search_chats  # noqa: F401
@@ -62,8 +45,6 @@ from src.tools.search import do_search_chats  # noqa: F401
 from src.tools.notes import do_manage_notes  # noqa: F401
 # Calendar domain extracted to src/tools/calendar.py (slice 1, #4082/#4071).
 from src.tools.calendar import do_manage_calendar  # noqa: F401
-# Image domain extracted to src/tools/image.py (slice 1, #4082/#4071).
-from src.tools.image import do_edit_image  # noqa: F401
 # Research domain extracted to src/tools/research.py (slice 1, #4082/#4071).
 from src.tools.research import do_manage_research, do_trigger_research  # noqa: F401
 # Contacts domain extracted to src/tools/contacts.py (slice 1, #4082/#4071).

@@ -84,7 +84,7 @@ async def do_manage_endpoints(content: str, owner: Optional[str] = None) -> Dict
 # MCP server management tool
 # ---------------------------------------------------------------------------
 
-# Parallel to routes/cookbook_helpers._validate_serve_cmd but deliberately the
+# Deliberately the
 # opposite policy: that gate guards an admin-only serve command and allows
 # interpreters (python3/etc) because model-serving needs them, whereas this is
 # the model/prompt-injection-reachable manage_mcp path, so interpreters and
@@ -547,9 +547,6 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             "teacher model": "teacher_model", "teacher": "teacher_enabled",
             "utility model": "utility_model", "research model": "research_model",
             "research max tokens": "research_max_tokens",
-            "vision model": "vision_model", "vision": "vision_enabled",
-            "image model": "image_model", "image quality": "image_quality",
-            "image gen": "image_gen_enabled", "image generation": "image_gen_enabled",
             "reminder channel": "reminder_channel", "reminders": "reminder_channel",
             "ntfy topic": "reminder_ntfy_topic",
             "webhook integration": "reminder_webhook_integration_id",
@@ -571,7 +568,6 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             return key in DEFAULT_SETTINGS and key not in RETIRED_SETTING_KEYS
 
         _ENUMS = {
-            "image_quality": ["low", "medium", "high"],
             "reminder_channel": ["browser", "email", "ntfy", "webhook"],
         }
         def _coerce(value, default):
@@ -673,7 +669,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 return {"error": f"{key} must be one of: {', '.join(_ENUMS[key])}.", "exit_code": 1}
             s = load_settings()
             s[key] = value
-            if key in {"default_model", "research_model", "utility_model", "task_model", "vision_model", "image_model"}:
+            if key in {"default_model", "research_model", "utility_model", "task_model"}:
                 resolved = _endpoint_model_from_cache(str(value))
                 if resolved:
                     prefix = key[:-6]
@@ -699,14 +695,11 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
         elif action in ("disable_tool", "enable_tool", "list_tools"):
             # Tool-toggle actions. These edit settings.json:disabled_tools
             # (the global list read on every chat request) rather than
-            # prefs.json. Friendly aliases accepted: "shell" -> "bash",
-            # "search" -> "web_search", "browser" -> "builtin_browser",
-            # "documents" -> the document tool set, "memory" ->
-            # manage_memory, etc.
+            # prefs.json. Friendly aliases accepted: "search" -> "web_search",
+            # "browser" -> "builtin_browser", "documents" -> the document tool
+            # set, "memory" -> manage_memory, etc.
             from src.settings import get_setting, save_settings, load_settings
             _ALIASES = {
-                "shell": ["bash"],
-                "terminal": ["bash"],
                 "search": ["web_search", "web_fetch"],
                 "web": ["web_search", "web_fetch"],
                 "browser": ["builtin_browser"],
@@ -714,8 +707,6 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 "doc": ["create_document", "edit_document", "update_document", "suggest_document"],
                 "memory": ["manage_memory"],
                 "skills": ["manage_skills"],
-                "images": ["generate_image"],
-                "image": ["generate_image"],
                 "tasks": ["manage_tasks"],
                 "notes": ["manage_notes"],
                 "calendar": ["manage_calendar"],
@@ -735,8 +726,8 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 return {
                     "response": (
                         f"Currently disabled: {', '.join(current) if current else '(none)'}.\n"
-                        "Common toggles: shell (bash), search (web_search), browser, documents, "
-                        "memory, skills, images, tasks, notes, calendar, email."
+                        "Common toggles: search (web_search), browser, documents, "
+                        "memory, skills, tasks, notes, calendar, email."
                     ),
                     "disabled": list(current),
                     "exit_code": 0,
@@ -744,7 +735,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
 
             tool_name = (args.get("tool") or args.get("name") or "").strip().lower()
             if not tool_name:
-                return {"error": "tool name required (e.g. 'shell', 'search', 'bash')", "exit_code": 1}
+                return {"error": "tool name required (e.g. 'search', 'documents', 'email')", "exit_code": 1}
             targets = _ALIASES.get(tool_name, [tool_name])
 
             settings = load_settings()

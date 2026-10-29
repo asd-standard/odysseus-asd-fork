@@ -31,27 +31,18 @@ def test_plan_mode_blocks_mutating_tools():
     disabled = plan_mode_disabled_tools()
     # A representative spread of mutating/external tools must be blocked.
     for name in (
-        "write_file", "send_email", "reply_to_email", "manage_memory",
-        "manage_settings", "create_document", "edit_document", "download_model",
-        "generate_image", "trigger_research",
+        "send_email", "reply_to_email", "manage_memory",
+        "manage_settings", "create_document", "edit_document",
+        "trigger_research",
     ):
         assert name in disabled, f"{name} must be blocked in plan mode"
 
 
 def test_plan_mode_allows_readonly_tools():
     disabled = plan_mode_disabled_tools()
-    # Read-only investigation tools stay enabled, including the discovery tools
-    # (grep/glob/ls) that replace freestyle shell.
-    for name in ("read_file", "grep", "glob", "ls", "web_search", "web_fetch", "search_chats"):
+    # Read-only investigation tools stay enabled.
+    for name in ("list_library_files", "read_library_file", "read_upload", "web_search", "web_fetch", "search_chats"):
         assert name not in disabled, f"{name} should be usable in plan mode"
-
-
-def test_plan_mode_blocks_shell():
-    # bash/python can mutate and can't be constrained read-only, so plan mode
-    # must block them (the whole point of dropping shell from plan mode).
-    disabled = plan_mode_disabled_tools()
-    for name in ("bash", "python"):
-        assert name in disabled, f"{name} must be blocked in plan mode"
 
 
 def test_disabled_never_intersects_allowlist():
@@ -85,7 +76,7 @@ def test_fail_closed_fallback_blocks_mutations(monkeypatch):
     )
     disabled = ts.plan_mode_disabled_tools()
     assert disabled, "plan mode must never fail open (empty disabled set)"
-    assert "write_file" in disabled
+    assert "create_document" in disabled
     assert "send_email" in disabled
     assert disabled == set(_PLAN_MODE_KNOWN_MUTATORS)
 

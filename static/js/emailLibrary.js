@@ -2563,6 +2563,7 @@ export function openEmailLibrary(opts = {}) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.id = 'email-lib-modal';
+  modal.setAttribute('data-window-id', 'email-lib-modal');
   modal.innerHTML = `
     <div class="modal-content doclib-modal-content" style="width:min(720px, 92vw);background:var(--bg);">
       <div class="modal-header">
@@ -3339,6 +3340,9 @@ export function closeEmailLibrary() {
   _cancelEmailPrewarm();
   const modal = document.getElementById('email-lib-modal');
   if (modal) modal.remove();
+  // Removed, not hidden: report the departure so the window this displaced
+  // (and its chip) comes back.
+  try { Modals.notifyClosed('email-lib-modal', { destroyed: true }); } catch (_) {}
   if (_libSyncTicker) {
     clearInterval(_libSyncTicker);
     _libSyncTicker = null;
@@ -6680,7 +6684,7 @@ function _wireAttachmentHandlers(reader, folder) {
               ownerModal.classList.add('hidden');
             }
           }
-          const docMod = await import('./document.js?v=20261027worddiff1');
+          const docMod = await import('./document.js?v=20261028windowing1');
           const load = (docMod && docMod.loadDocument) || (docMod && docMod.default && docMod.default.loadDocument);
           if (typeof load === 'function') {
             await load(json.doc_id);
@@ -7029,13 +7033,13 @@ async function _openEmailAsTab(em, folder) {
   const modal = document.createElement('div');
   modal.className = 'modal email-reader-tab-modal';
   modal.id = modalId;
+  modal.setAttribute('data-window-id', modalId);
   modal.innerHTML = `
     <div class="modal-content doclib-modal-content email-reader-tab-content" style="background:var(--bg);width:min(720px, 92vw);display:flex;flex-direction:column;">
       <div class="modal-header">
         <h4 style="display:flex;align-items:center;gap:6px;min-width:0;flex:1;">
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:8px;">${_esc(em.subject || '(no subject)')}</span>
         </h4>
-        <button class="minimize-btn" type="button" title="Minimize">_</button>
         <button class="close-btn" type="button" title="Close">&#x2716;</button>
       </div>
       <div class="modal-body email-reader-tab-body" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0;padding:0;">
@@ -7083,8 +7087,8 @@ async function _openEmailAsTab(em, folder) {
       }
     },
   });
-  // Wire the `_` minimize button via modalManager (it sees our .minimize-btn
-  // already exists and just binds the click handler).
+  // Wire the `_` minimize button via modalManager (it creates the canonical
+  // .modal-minimize-btn when the header has none).
   try { Modals.injectMinimizeButton(modal, modalId); } catch {}
   // X button fully closes the tab (tears down and unregisters).
   modal.querySelector('.close-btn')?.addEventListener('click', (ev) => {
@@ -7120,7 +7124,7 @@ async function _openEmailAsTab(em, folder) {
       document.removeEventListener('mouseup', stopDrag);
     };
     mh.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.close-btn, .minimize-btn, .modal-minimize-btn')) return;
+      if (e.target.closest('.close-btn, .modal-minimize-btn')) return;
       e.preventDefault();
       startDrag(e.clientX, e.clientY);
       document.addEventListener('mousemove', onDrag);

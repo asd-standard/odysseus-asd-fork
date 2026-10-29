@@ -130,9 +130,7 @@ function _zoneForContent(content, x, y) {
   // crushes it. Let it tile only into the normal right half, where the nav can
   // flip to top tabs via CSS when the window gets narrow.
   if (modal && modal.id === 'settings-modal' && zone.name !== 'right-half') return null;
-  if (modal && (modal.id === 'cookbook-modal'
-      || modal.id === 'theme-modal')
-      && zone.name !== 'fullscreen') return null;
+  if (modal && modal.id === 'theme-modal' && zone.name !== 'fullscreen') return null;
   return zone;
 }
 

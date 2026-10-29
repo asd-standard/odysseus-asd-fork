@@ -17,13 +17,11 @@ from core.database import (
     CalendarEvent,
     Document,
     DocumentVersion,
-    GalleryImage,
     Note,
     Session as DbSession,
 )
 from src.auth_helpers import effective_user
 from src.attachment_refs import attachment_refs_from_metadata
-from src.constants import GENERATED_IMAGES_DIR
 from src.upload_handler import (
     UploadCleanupSafetyError,
     count_recent_uploads,
@@ -104,14 +102,6 @@ def _collect_persisted_upload_references() -> tuple[set[str], set[str]]:
         for (content,) in db.query(DocumentVersion.content).yield_per(500):
             referenced_ids.update(_upload_ids_from_persisted_text(content))
 
-        for filename, file_hash in db.query(
-            GalleryImage.filename,
-            GalleryImage.file_hash,
-        ).yield_per(500):
-            referenced_ids.update(_upload_ids_from_persisted_text(filename))
-            if file_hash:
-                referenced_hashes.add(str(file_hash))
-
         for image_url, color, content, items in db.query(
             Note.image_url,
             Note.color,
@@ -190,70 +180,6 @@ def setup_upload_routes(upload_handler):
             return None
         return session_id
 
-    def _promote_chat_image_to_gallery(meta: dict, owner: str | None, session_id: str | None = None) -> str | None:
-        """Make chat-uploaded images visible in Gallery without changing chat storage."""
-        is_image_file = getattr(upload_handler, "is_image_file", None)
-        if not callable(is_image_file):
-            return None
-        if not is_image_file(meta.get("name", ""), meta.get("mime", "")):
-            return None
-
-        source_path = meta.get("path")
-        if not source_path or not os.path.isfile(source_path):
-            return None
-
-        db = SessionLocal()
-        try:
-            file_hash = meta.get("hash")
-            if file_hash:
-                q = db.query(GalleryImage).filter(
-                    GalleryImage.file_hash == file_hash,
-                    GalleryImage.is_active == True,  # noqa: E712
-                )
-                if owner:
-                    q = q.filter(GalleryImage.owner == owner)
-                existing = q.first()
-                if existing:
-                    return existing.id
-
-            image_dir = Path(GENERATED_IMAGES_DIR)
-            image_dir.mkdir(parents=True, exist_ok=True)
-            ext = Path(meta.get("name") or source_path).suffix.lower()
-            if ext not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-                mime_ext = {
-                    "image/png": ".png",
-                    "image/jpeg": ".jpg",
-                    "image/jpg": ".jpg",
-                    "image/webp": ".webp",
-                    "image/gif": ".gif",
-                }.get(meta.get("mime", ""))
-                ext = mime_ext or ".png"
-            filename = f"{uuid.uuid4().hex[:12]}{ext}"
-            dest_path = image_dir / filename
-            shutil.copy2(source_path, dest_path)
-
-            image_id = str(uuid.uuid4())
-            db.add(GalleryImage(
-                id=image_id,
-                filename=filename,
-                prompt=meta.get("name") or "Chat upload",
-                model="chat-upload",
-                owner=owner,
-                session_id=_valid_session_id_for_owner(db, session_id, owner),
-                file_hash=file_hash,
-                width=meta.get("width"),
-                height=meta.get("height"),
-                file_size=meta.get("size"),
-            ))
-            db.commit()
-            return image_id
-        except Exception as e:
-            db.rollback()
-            logger.warning("Failed to add chat image upload to gallery: %s", e)
-            return None
-        finally:
-            db.close()
-    
     @router.post("")
     async def api_upload(
         request: Request,
@@ -288,8 +214,13 @@ def setup_upload_routes(upload_handler):
         for u in files:
             try:
                 owner = effective_user(request)
+                _is_image = getattr(upload_handler, "is_image_file", None)
+                if callable(_is_image) and _is_image(u.filename or "", u.content_type or ""):
+                    raise HTTPException(
+                        400,
+                        "Image uploads are not supported on this deployment.",
+                    )
                 meta = upload_handler.save_upload(u, client_ip, owner=owner)
-                gallery_id = _promote_chat_image_to_gallery(meta, owner, session_id)
                 item = {
                     "id": meta["id"],
                     "name": meta["name"],
@@ -303,8 +234,6 @@ def setup_upload_routes(upload_handler):
                     "height": meta.get("height"),
                     "is_duplicate": meta.get("is_duplicate", False)
                 }
-                if gallery_id:
-                    item["gallery_id"] = gallery_id
                 out.append(item)
             except HTTPException:
                 raise
@@ -352,9 +281,7 @@ def setup_upload_routes(upload_handler):
 
     @router.get("/{file_id}")
     async def download_file(request: Request, file_id: str, thumb: int = 0):
-        """Serve an uploaded file by its ID. `?thumb=1` returns a small cached
-        JPEG thumbnail for images (used by chat attachment previews) so the
-        client isn't downloading the full-resolution photo just to show it tiny."""
+        """Serve an uploaded non-image file by its ID."""
         if not upload_handler.validate_upload_id(file_id):
             raise HTTPException(400, "Invalid file ID")
         import mimetypes as _mt
@@ -379,30 +306,6 @@ def setup_upload_routes(upload_handler):
         path = _resolve_upload_path(file_id)
         mime = (info or {}).get("mime") or _mt.guess_type(path)[0] or "application/octet-stream"
         from fastapi.responses import FileResponse
-        # Downscaled thumbnail for image previews — generated once and cached.
-        if thumb and mime.startswith("image/"):
-            try:
-                from PIL import Image, ImageOps
-                thumb_dir = os.path.join(_upload_root(), ".thumbs")
-                os.makedirs(thumb_dir, exist_ok=True)
-                thumb_path = os.path.join(thumb_dir, file_id + ".jpg")
-                if (not os.path.exists(thumb_path)
-                        or os.path.getmtime(thumb_path) < os.path.getmtime(path)):
-                    im = Image.open(path)
-                    # iPhone / camera JPEGs encode rotation in EXIF rather than
-                    # the pixel data. Browsers honour that on the original via
-                    # image-orientation:from-image, but PIL strips EXIF when it
-                    # saves the JPEG thumb, leaving the pixels sideways. Bake
-                    # the rotation into the pixels before thumbnailing.
-                    im = ImageOps.exif_transpose(im)
-                    im.thumbnail((320, 320))
-                    if im.mode not in ("RGB", "L"):
-                        im = im.convert("RGB")
-                    im.save(thumb_path, "JPEG", quality=80)
-                return FileResponse(thumb_path, media_type="image/jpeg", headers=UPLOAD_RESPONSE_HEADERS)
-            except Exception as e:
-                logger.warning(f"Thumbnail generation failed for {file_id}: {e}")
-                # Fall through to the full image.
         return FileResponse(
             path,
             media_type=mime,
@@ -412,117 +315,10 @@ def setup_upload_routes(upload_handler):
 
     def _load_upload_info(file_id: str):
         """Look up the uploads.json record for a file_id, with owner/auth checks."""
-        # Corruption-tolerant load (see download_file): a bad uploads.json yields
-        # {} rather than raising JSONDecodeError out of the vision path.
+        # Corruption-tolerant load: a bad uploads.json yields {} rather than
+        # raising JSONDecodeError from upload lookups.
         db = upload_handler._load_upload_index()
         return next((fi for fi in db.values() if fi.get("id") == file_id), None)
-
-    def _vision_cache_path(file_id: str) -> str:
-        cache_dir = os.path.join(_upload_root(), ".vision")
-        os.makedirs(cache_dir, exist_ok=True)
-        return os.path.join(cache_dir, file_id + ".txt")
-
-    def _sync_gallery_caption_for_upload(info: dict | None, owner: str | None, text: str) -> None:
-        """Copy upload OCR/vision text onto the promoted gallery image row."""
-        if not info:
-            return
-        file_hash = info.get("hash")
-        if not file_hash:
-            return
-        db = SessionLocal()
-        try:
-            q = db.query(GalleryImage).filter(
-                GalleryImage.file_hash == file_hash,
-                GalleryImage.is_active == True,  # noqa: E712
-            )
-            if owner:
-                q = q.filter(GalleryImage.owner == owner)
-            img = q.first()
-            if not img:
-                return
-            img.caption = (text or "").strip()
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            logger.warning("Failed to sync OCR caption to gallery image: %s", e)
-        finally:
-            db.close()
-
-    @router.get("/{file_id}/vision")
-    async def get_vision_text(request: Request, file_id: str, force: int = 0):
-        """Return the vision-model OCR/description for an uploaded image.
-        Cached under UPLOAD_DIR/.vision/{file_id}.txt — first call computes,
-        subsequent loads are instant. Pass force=1 to recompute."""
-        if not upload_handler.validate_upload_id(file_id):
-            raise HTTPException(400, "Invalid file ID")
-        info = _load_upload_info(file_id)
-        auth_mgr = getattr(request.app.state, "auth_manager", None)
-        auth_configured = bool(auth_mgr and auth_mgr.is_configured)
-        current_user = effective_user(request)
-        file_owner = info.get("owner") if info else None
-        if auth_configured:
-            if not current_user:
-                raise HTTPException(403, "Access denied")
-            if file_owner != current_user and not auth_mgr.is_admin(current_user):
-                raise HTTPException(404, "File not found")
-        path = _resolve_upload_path(file_id)
-        import mimetypes as _mt
-        mime = (info or {}).get("mime") or _mt.guess_type(path)[0] or ""
-        if not mime.startswith("image/"):
-            raise HTTPException(400, "Not an image")
-        cache_path = _vision_cache_path(file_id)
-        if not force and os.path.exists(cache_path):
-            try:
-                with open(cache_path, encoding="utf-8") as f:
-                    cached_text = f.read()
-                _sync_gallery_caption_for_upload(info, file_owner or current_user, cached_text)
-                return {"text": cached_text, "cached": True}
-            except Exception as e:
-                logger.warning(f"Vision cache read failed for {file_id}: {e}")
-        from src.document_processor import analyze_image_with_vl
-        try:
-            text = analyze_image_with_vl(path, owner=current_user) or ""
-        except Exception as e:
-            logger.error(f"Vision analysis failed for {file_id}: {e}")
-            raise HTTPException(500, f"Vision analysis failed: {e}")
-        try:
-            with open(cache_path, "w", encoding="utf-8") as f:
-                f.write(text)
-        except Exception as e:
-            logger.warning(f"Vision cache write failed for {file_id}: {e}")
-        _sync_gallery_caption_for_upload(info, file_owner or current_user, text)
-        return {"text": text, "cached": False}
-
-    @router.put("/{file_id}/vision")
-    async def put_vision_text(request: Request, file_id: str):
-        """Persist a user-edited vision/OCR text for an attachment. Stored in
-        the same cache file so the chat send picks it up as the override."""
-        if not upload_handler.validate_upload_id(file_id):
-            raise HTTPException(400, "Invalid file ID")
-        info = _load_upload_info(file_id)
-        if not info:
-            raise HTTPException(404, "File not found")
-        auth_mgr = getattr(request.app.state, "auth_manager", None)
-        auth_configured = bool(auth_mgr and auth_mgr.is_configured)
-        current_user = effective_user(request)
-        file_owner = info.get("owner")
-        if auth_configured:
-            if not current_user:
-                raise HTTPException(403, "Access denied")
-            if file_owner != current_user and not auth_mgr.is_admin(current_user):
-                raise HTTPException(404, "File not found")
-        _resolve_upload_path(file_id)
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            raise HTTPException(400, "Request body must be valid JSON")
-        text = (body or {}).get("text", "")
-        if not isinstance(text, str):
-            raise HTTPException(400, "text must be a string")
-        with open(_vision_cache_path(file_id), "w", encoding="utf-8") as f:
-            f.write(text)
-        _sync_gallery_caption_for_upload(info, file_owner or current_user, text)
-        return {"ok": True}
 
     async def periodic_rate_limit_cleanup():
         """Background task to run cleanup every hour"""

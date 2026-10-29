@@ -100,7 +100,7 @@ Search does not have one canonical result shape yet. Current shapes include:
 
 Chat/session transcript search is separate from web search but now uses `chat_messages_fts` when available, sanitizes FTS queries, and batches message lookup after FTS hits to avoid per-hit database reads.
 
-Search owns Open Graph image extraction for fetched pages. Research owns promotion of those images into research sources and visual reports. This is not a standalone web image-search provider or gallery image proxy.
+Search owns Open Graph image extraction for fetched pages. Research owns promotion of those images into research sources and visual reports. This is not a standalone web image-search provider.
 
 ## YouTube
 

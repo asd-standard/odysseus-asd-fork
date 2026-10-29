@@ -331,14 +331,14 @@ def test_pop_notifications_owner_filtered():
 # Task action allowlist
 # ---------------------------------------------------------------------------
 
-def test_admin_only_actions_set_contains_shell_runners():
-    """The constant defining shell-executing action types must include
-    the three risky entries. Catches accidental removal."""
+def test_admin_only_actions_no_longer_contains_shell_runners():
+    """Shell/SSH/script actions were removed from the task scheduler."""
     from src.task_action_policy import ADMIN_ONLY_TASK_ACTIONS
 
-    assert "run_local" in ADMIN_ONLY_TASK_ACTIONS
-    assert "run_script" in ADMIN_ONLY_TASK_ACTIONS
-    assert "ssh_command" in ADMIN_ONLY_TASK_ACTIONS
+    assert "run_local" not in ADMIN_ONLY_TASK_ACTIONS
+    assert "run_script" not in ADMIN_ONLY_TASK_ACTIONS
+    assert "ssh_command" not in ADMIN_ONLY_TASK_ACTIONS
+    assert "cookbook_serve" not in ADMIN_ONLY_TASK_ACTIONS
 
 
 def test_task_create_notification_default_allows_action_specific_defaults():

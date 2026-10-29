@@ -14,10 +14,10 @@
 
 - Imports all feature modules.
 - Exposes a few modules on `window` for legacy inter-module reachability
-  (`themeModule`, `sessionModule`, `uiModule`, `adminModule`, `cookbookModule`).
+  (`themeModule`, `sessionModule`, `uiModule`, `adminModule`).
 - Patches `fetch` so any `401` redirects the user to `/login`.
 - Fetches the default chat configuration and handles deep-link route openers
-  (`/notes`, `/calendar`, `/email`, `/memory`, `/gallery`, `/cookbook`, `/library`, `/tasks`).
+  (`/notes`, `/calendar`, `/email`, `/memory`, `/library`, `/tasks`).
 - Wires global event listeners: chat-history scrolling, popups, Escape handling,
   drag-and-drop/paste attachment handling, transcription export, sidebar toggles,
   rail/tool buttons, and session sorting.
@@ -136,7 +136,6 @@ The largest and most central subsystem. Chat submission → backend SSE → prog
 
 | Module | Responsibility |
 |---|---|
-| **`gallery.js`** / **`galleryEditor.js`** | Gallery/image library and canvas editor entry points. |
 | **`emailInbox.js`** / **`emailLibrary.js`** | Email inbox reader and library modal. Sub-modules handle signatures, reply recipients, state, and signature folding. |
 | **`calendar.js`** / **`calendar/utils.js`** / **`calendar/reminders.js`** | Calendar views, event forms, reminders. |
 | **`tasks.js`** | Scheduled task/recurring LLM job UI. |
@@ -148,9 +147,6 @@ The largest and most central subsystem. Chat submission → backend SSE → prog
 
 | Module | Responsibility |
 |---|---|
-| **`cookbook.js`** | Cookbook main UI: hardware fitting, presets, action panels. |
-| **`cookbook-hwfit.js`** / **`cookbook-diagnosis.js`** / **`cookbook-deps-recipes.js`** | Hardware-fit scoring, dependency diagnosis, recipe handling. |
-| **`cookbookDownload.js`** / **`cookbookServe.js`** / **`cookbookRunning.js`** / **`cookbookSchedule.js`** / **`cookbookPorts.js`** / **`cookbookProgressSignal.js`** | Model download/serve flow, running job cards, scheduling, port detection, and progress computation. |
 
 ---
 
@@ -222,7 +218,7 @@ Foreground vs background streams:
   into `chatRenderer.js`, `streamingRenderer.js`, `chatStream.js`, and `researchSynapse.js`.
 - New major subsystems added since the original summary: compare mode
   (`compare/`), document editor streaming (`document.js`), research UI
-  (`research/`), model cookbook (`cookbook*.js`), group chat (`group.js`),
+  (`research/`), group chat (`group.js`),
   voice/TTS (`voiceRecorder.js`, `tts-ai.js`), skill UI (`skills.js`), and
   slash autocomplete (`slashAutocomplete.js`).
 - `sessions.js` now owns sidebar session state, streaming/research indicators,

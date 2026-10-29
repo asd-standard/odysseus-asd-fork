@@ -49,7 +49,6 @@ async def _list_and_call(script: str, tool: str, arguments: dict, data_dir: Path
     [
         ("memory_server.py", "manage_memory", {"action": "list"}, None),
         ("rag_server.py", "manage_rag", {"action": "list"}, None),
-        ("image_gen_server.py", "generate_image", {"prompt": ""}, "prompt"),
         ("email_server.py", "list_email_accounts", {}, None),
     ],
 )

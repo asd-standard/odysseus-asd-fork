@@ -74,29 +74,11 @@ _register(
     ToolEffect.USER_INTERACTION,
 )
 _register(
-    {
-        "list_cached_models",
-        "list_cookbook_servers",
-        "list_downloads",
-        "list_models",
-        "list_serve_presets",
-        "list_served_models",
-    },
+    {"list_models"},
     ToolEffect.READ_PRIVATE,
-    # These readers return provider-controlled model identifiers or durable
-    # user/admin-authored Cookbook and process state.  Local brokering does not
+    # Model identifiers are provider-controlled, so local brokering does not
     # make the returned text server-authored.
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
-)
-_register(
-    {"search_hf_models"},
-    ToolEffect.BROKERED_NETWORK_READ,
-    result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
-)
-_register(
-    {"glob", "grep", "ls", "read_file"},
-    ToolEffect.READ_WORKSPACE,
-    result_integrity=ResultIntegrity.WORKSPACE_UNTRUSTED,
 )
 _register(
     {"web_search"},
@@ -120,25 +102,13 @@ _register(
         "search_emails",
         "list_library_files",
         "read_library_file",
+        "read_upload",
         "list_sessions",
-        "tail_serve_output",
         "vault_get",
         "vault_search",
     },
     ToolEffect.READ_PRIVATE,
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
-)
-_register(
-    {"bash", "manage_bg_jobs", "python"},
-    ToolEffect.EXECUTE_CODE,
-    result_integrity=ResultIntegrity.WORKSPACE_UNTRUSTED,
-)
-_register(
-    {"apply_patch", "edit_file", "write_file"},
-    ToolEffect.WRITE_WORKSPACE,
-    # Successful writes include unified diffs that can echo arbitrary existing
-    # workspace content back into the next model round.
-    result_integrity=ResultIntegrity.WORKSPACE_UNTRUSTED,
 )
 _register(
     {
@@ -201,7 +171,7 @@ _register(
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
 )
 _register(
-    {"edit_image", "generate_image", "trigger_research"},
+    {"trigger_research"},
     ToolEffect.NETWORK_EGRESS,
     ToolEffect.WRITE_PRIVATE,
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
@@ -233,18 +203,8 @@ _register(
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
 )
 _register(
-    {
-        "adopt_served_model",
-        "cancel_download",
-        "download_model",
-        "serve_model",
-        "serve_preset",
-        "stop_served_model",
-        "vault_unlock",
-    },
+    {"vault_unlock"},
     ToolEffect.ADMIN_CHANGE,
-    # Cookbook/process operations can return stored presets, provider data,
-    # remote shell output, and command errors.
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
 )
 _register(
@@ -362,7 +322,6 @@ _ACTION_DESTRUCTIVE: Mapping[str, frozenset[str]] = MappingProxyType(
         "manage_contact": frozenset({"delete"}),
         "manage_documents": frozenset({"delete", "tidy"}),
         "manage_endpoints": frozenset({"delete"}),
-        "manage_bg_jobs": frozenset({"kill", "stop", "cancel", "terminate"}),
         "manage_memory": frozenset({"delete"}),
         "manage_mcp": frozenset({"delete"}),
         "manage_notes": frozenset({"delete"}),

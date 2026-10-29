@@ -12,25 +12,29 @@
  *   import * as Modals from './modalManager.js';
  *
  *   // After building the modal element and adding it to the body:
- *   Modals.register('gallery-modal', {
- *     railBtnId: 'tool-gallery-btn',
- *     restoreFn: () => { ...whatever the tool needs to do when un-hiding... },
+ *   Modals.register('calendar-modal', {
+ *     railBtnId: 'rail-calendar',
+ *     restoreFn: () => { ...whatever the tool needs to do when re-shown... },
  *     closeFn:   () => { ...full teardown — remove modal element etc... },
  *   });
  *
  *   // From the sidebar/rail button click handler:
- *   if (!Modals.toggle('gallery-modal')) {
+ *   if (!Modals.toggle('calendar-modal')) {
  *     // No registered modal — build and open it fresh.
- *     openGallery();
+ *     openCalendar();
  *   }
  */
 
 import { previewZoneAt, clearPreview, snapModalToZone } from './tileManager.js';
 import { suspendDock, resumeDock, clearRightDock, applyEdgeDock } from './modalSnap.js';
-import { dismissOrRemove } from './escMenuStack.js';
-import { nextToolWindowZ } from './toolWindowZOrder.js';
+import { nextToolWindowZ, TOOL_WINDOW_SELECTOR } from './toolWindowZOrder.js';
+import { createForegroundStack } from './foregroundStack.js';
+import { Z } from './zLayers.js';
 
 const _state = new Map(); // id -> { restoreFn, closeFn, railBtnId, isMinimized, restoreMinHeight }
+// Guards against a module's close button calling Modals.close(id) from inside
+// the closeFn the manager just invoked (auto-wired closeFn clicks that button).
+const _closing = new Set();
 
 const _rememberedDockKey = (id) => `odysseus-modal-remembered-dock-${id}`;
 function _rememberDock(id, side) {
@@ -59,12 +63,24 @@ function _applyRememberedDock(id) {
 
 // Monotonic stacking counter so the most-recently-surfaced tool window always
 // sits on top. Tool modals otherwise carry fixed CSS z-indexes (base .modal
-// = 250, cookbook/theme = 260, …), so restoring one from the dock could leave
+// = 250, theme = 260, …), so restoring one from the dock could leave
 // it BEHIND an already-open tool with a higher static z-index. Start above
-// those statics and bump on every bring-to-front.
-let _modalTopZ = 300;
+// those statics and bump on every bring-to-front. When no other tool window is
+// visible the counter resets, so a long session cannot climb into the split /
+// dock / chip tiers.
+let _modalTopZ = Z.windowRaised;
 function _bringToFront(modal) {
   if (!modal) return;
+  let anyOtherVisible = false;
+  try {
+    document.querySelectorAll(TOOL_WINDOW_SELECTOR).forEach((el) => {
+      if (el === modal) return;
+      if (el.classList.contains('hidden') || el.classList.contains('modal-minimized')) return;
+      if (getComputedStyle(el).display === 'none') return;
+      anyOtherVisible = true;
+    });
+  } catch (_) {}
+  if (!anyOtherVisible) _modalTopZ = Z.windowRaised;
   const z = nextToolWindowZ({
     exclude: modal,
     current: getComputedStyle(modal).zIndex,
@@ -126,31 +142,51 @@ function _setBadge(btnIds, on) {
 
 // ── Bottom dock — visible chip per minimized modal ──
 
-const _LABELS = {
-  'cookbook-modal':    { label: 'Cookbook',  icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>' },
-  'calendar-modal':    { label: 'Calendar',  icon: 'M3 4h18v18H3zM16 2v4M8 2v4M3 10h18' },
-  'gallery-modal':     { label: 'Gallery',   icon: 'M3 3h18v18H3zM8.5 8.5l3 3M21 15l-5-5L5 21' },
-  'tasks-modal':       { label: 'Tasks',     icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' },
-  'doclib-modal':      { label: 'Library',   icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2zM9 7h6M9 11h4' },
+const _WINDOWS = {
+  'calendar-modal':    { label: 'Calendar',  icon: 'M3 4h18v18H3zM16 2v4M8 2v4M3 10h18', rail: 'rail-calendar', sidebar: 'tool-calendar-btn' },
+  'tasks-modal':       { label: 'Tasks',     icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11', rail: 'rail-tasks', sidebar: 'tool-tasks-btn' },
+  'doclib-modal':      { label: 'Library',   icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2zM9 7h6M9 11h4', rail: 'rail-archive', sidebar: 'tool-library-btn' },
   // Full SVG markup (not a single path-d) — the rounded-lobe brain needs
   // three sub-paths, which the dock renderer supports when the icon string
   // contains '<'.
-  'memory-modal':      { label: 'Brain',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>' },
-  'notes-panel':       { label: 'Notes',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>' },
-  'email-lib-modal':   { label: 'Email',     icon: 'M2 4h20v16H2zM22 7l-9.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7' },
+  'memory-modal':      { label: 'Brain',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>', rail: null, sidebar: 'tool-memory-btn' },
+  'notes-panel':       { label: 'Notes',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>', rail: 'rail-notes', sidebar: 'tool-notes-btn' },
+  'email-lib-modal':   { label: 'Email',     icon: 'M2 4h20v16H2zM22 7l-9.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7', rail: null, sidebar: null },
   // The Prompt window (characters / inject / group). Syringe = "prompt" icon,
   // matching its title bar. Full SVG markup (multi-path) per the dock renderer.
-  'custom-preset-modal': { label: 'Prompt',  icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>' },
-  'research-overlay':  { label: 'Research',  icon: 'M3 11a8 8 0 1 0 16 0a8 8 0 1 0-16 0M21 21l-4.35-4.35M11 8L11 14M8 11L14 11' },
-  'theme-modal':       { label: 'Theme',     icon: 'M12 2a10 10 0 1 0 10 10c0-1-1-2-2-2h-2a2 2 0 0 1 0-4h1a2 2 0 0 0 0-4 10 10 0 0 0-7-2zM7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM12 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM16.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z' },
-  'compare-model-overlay': { label: 'Compare',  icon: 'M4.5 4h5A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-5A1.5 1.5 0 0 1 3 18.5v-13A1.5 1.5 0 0 1 4.5 4ZM15.5 4h5A1.5 1.5 0 0 1 22 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-13A1.5 1.5 0 0 1 15.5 4ZM10 8h4M10 16h4' },
-  'settings-modal':    { label: 'Settings',  icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.4.4.62.94.6 1.51V11a2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z' },
-  'ge-shortcuts-modal':{ label: 'Shortcuts', icon: 'M2 6h20v12H2zM6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10' },
+  'custom-preset-modal': { label: 'Prompt',  icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>', rail: null, sidebar: null },
+  'research-overlay':  { label: 'Research',  icon: 'M3 11a8 8 0 1 0 16 0a8 8 0 1 0-16 0M21 21l-4.35-4.35M11 8L11 14M8 11L14 11', rail: 'rail-research', sidebar: 'tool-research-btn' },
+  'theme-modal':       { label: 'Theme',     icon: 'M12 2a10 10 0 1 0 10 10c0-1-1-2-2-2h-2a2 2 0 0 1 0-4h1a2 2 0 0 0 0-4 10 10 0 0 0-7-2zM7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM12 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM16.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z', rail: null, sidebar: 'tool-theme-btn' },
+  'compare-model-overlay': { label: 'Compare',  icon: 'M4.5 4h5A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-5A1.5 1.5 0 0 1 3 18.5v-13A1.5 1.5 0 0 1 4.5 4ZM15.5 4h5A1.5 1.5 0 0 1 22 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-13A1.5 1.5 0 0 1 15.5 4ZM10 8h4M10 16h4', rail: 'rail-compare', sidebar: 'tool-compare-btn' },
+  'settings-modal':    { label: 'Settings',  icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.4.4.62.94.6 1.51V11a2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z', rail: null, sidebar: 'tool-settings-btn' },
   // Virtual id — the doc editor pane isn't a modal, but it minimizes to a
   // chip via the same dock infrastructure.
-  'doc-panel':         { label: 'Document', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8' },
+  'doc-panel':         { label: 'Document', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8', virtual: true },
 };
 
+// Derived from the one registry so a window is declared in exactly one place.
+// Runtime registrants (email readers, transient popups) add themselves to
+// _WINDOWS via register(..., { label }) and never need rail/sidebar wiring.
+const _AUTO_WIRE = Object.fromEntries(
+  Object.entries(_WINDOWS)
+    .filter(([, w]) => !w.virtual)
+    .map(([id, w]) => [id, { rail: w.rail ?? null, sidebar: w.sidebar ?? null }]),
+);
+
+/** Resolve a window element by registry id. The element's DOM id may differ
+ *  from its registry id (Notes registers as `notes-panel` but the element is
+ *  `#notes-pane`), so the stable identity lives in `data-window-id`. */
+function _windowEl(id) {
+  if (!id || typeof document === 'undefined') return null;
+  return document.querySelector(`[data-window-id="${id}"]`) || document.getElementById(id);
+}
+
+/** Stamp `data-window-id` onto a known window element (idempotent). */
+function _tagWindow(id) {
+  const el = _windowEl(id);
+  if (el && !el.hasAttribute('data-window-id')) el.setAttribute('data-window-id', id);
+  return el;
+}
 function _ensureDock() {
   let dock = document.getElementById('minimized-dock');
   if (dock) return dock;
@@ -239,6 +275,30 @@ function _applyDockPos(dock) {
   dock.style.bottom = 'auto';
   dock.style.transform = 'none';
 }
+
+// A free chip near the viewport edge is off-screen after the window shrinks.
+// Clamp every remembered position on resize (the load path already does this at
+// startup) and re-render so a chip can never be stranded.
+let _chipResizeRaf = null;
+window.addEventListener('resize', () => {
+  if (_chipResizeRaf) return;
+  _chipResizeRaf = requestAnimationFrame(() => {
+    _chipResizeRaf = null;
+    let changed = false;
+    for (const [id, pos] of _chipPositions) {
+      const left = Math.max(4, Math.min(window.innerWidth - 44, pos.left));
+      const top = Math.max(4, Math.min(window.innerHeight - 44, pos.top));
+      if (left !== pos.left || top !== pos.top) {
+        _chipPositions.set(id, { left, top });
+        changed = true;
+      }
+    }
+    if (changed) {
+      _saveDockState();
+      _renderDock();
+    }
+  });
+});
 
 // True when `chipRect` is close enough to the dock's current location that
 // dropping a free-dragged chip there should re-attach it to the chain.
@@ -346,7 +406,7 @@ function _renderDock() {
   _applyDockPos(dock);
   dock.innerHTML = '';
   for (const id of renderIds) {
-    const meta = _LABELS[id] || { label: id, icon: '' };
+    const meta = _WINDOWS[id] || { label: id, icon: '' };
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'minimized-dock-chip';
@@ -397,11 +457,14 @@ function _renderDock() {
     // transform: translateX(-50%) doesn't shift their `position: fixed`
     // coords. Dock-resident chips render as normal flex children.
     const pos = _chipPositions.get(id);
-    if (pos && window.innerWidth <= 768) {
+    // Free-positioned chips render outside the dock on every platform. A chip
+    // only gets a position when it was displaced (seeded bottom-left) or moved
+    // there by the user, so docked chips are unaffected.
+    if (pos) {
       chip.style.setProperty('position', 'fixed', 'important');
       chip.style.setProperty('left', `${pos.left}px`, 'important');
       chip.style.setProperty('top', `${pos.top}px`, 'important');
-      chip.style.setProperty('z-index', '10020', 'important');
+      chip.style.setProperty('z-index', String(Z.chipFree), 'important');
       document.body.appendChild(chip);
     } else {
       dock.appendChild(chip);
@@ -539,7 +602,7 @@ function _initChainPhysics(grabbedChip, dock, startX, startY) {
     l.chip.style.margin = '0';
     l.chip.style.transition = 'none';
     l.chip.style.animation = 'none';
-    l.chip.style.zIndex = (l.dockIdx === grabbedIdx) ? '10001' : '10000';
+    l.chip.style.zIndex = String(l.dockIdx === grabbedIdx ? Z.chipDrag : Z.chipFree);
     document.body.appendChild(l.chip);
   }
   // Hide the now-empty dock element itself so it doesn't show a blank pad.
@@ -737,6 +800,18 @@ function _wireChipDrag(chip, dock) {
       return;
     }
 
+    // Desktop, free-positioned chip: drag it individually. Without this the
+    // gesture moved the whole dock, so a chip parked bottom-left could never be
+    // repositioned on its own.
+    if (_chipPositions.has(chip.dataset.modalId)) {
+      dragMode = 'free';
+      chip.setPointerCapture(e.pointerId);
+      chip.addEventListener('pointermove', onPointerMove);
+      chip.addEventListener('pointerup', onPointerUp, { once: true });
+      chip.addEventListener('pointercancel', onPointerUp, { once: true });
+      return;
+    }
+
     // Desktop — reorder vs move-dock
     const chips = [...dock.querySelectorAll('.minimized-dock-chip')];
     const idx = chips.indexOf(chip);
@@ -797,7 +872,7 @@ function _wireChipDrag(chip, dock) {
     // Desktop: dragging a chip into a screen snap zone previews restoring the
     // window + snapping it there (top → maximize/fullscreen, right → right
     // dock). Releasing in the zone commits it (see onPointerUp).
-    if (e.pointerType !== 'touch' && window.innerWidth > 768) {
+    if (dragMode !== 'free' && e.pointerType !== 'touch' && window.innerWidth > 768) {
       const z = previewZoneAt(e.clientX, e.clientY, modal);
       // Ignore the bottom zone — the dock lives at the bottom, so horizontal
       // chip reordering must not get hijacked into a bottom-half snap.
@@ -820,16 +895,17 @@ function _wireChipDrag(chip, dock) {
     }
 
     if (dragMode === 'free') {
-      const tz = trashZone.getBoundingClientRect();
-      const tzcx = tz.left + tz.width / 2;
-      const tzcy = tz.top + tz.height / 2;
-      const dist = Math.hypot(e.clientX - tzcx, e.clientY - tzcy);
-      const inZone = dist < CAPTURE_RADIUS;
+      // No trash zone on desktop; everything below degrades to a plain move.
+      const tz = trashZone ? trashZone.getBoundingClientRect() : null;
+      const tzcx = tz ? tz.left + tz.width / 2 : 0;
+      const tzcy = tz ? tz.top + tz.height / 2 : 0;
+      const dist = tz ? Math.hypot(e.clientX - tzcx, e.clientY - tzcy) : Infinity;
+      const inZone = !!tz && dist < CAPTURE_RADIUS;
       // Trash X stays visible for the entire drag; only .engaged tracks
       // when the chip is close enough to capture.
       let tx = e.clientX - (chipStartLeft + chip.offsetWidth / 2);
       let ty = e.clientY - (chipStartTop + chip.offsetHeight / 2);
-      if (inZone) {
+      if (inZone && tz) {
         const pull = 1 - (dist / CAPTURE_RADIUS);
         const sx = tzcx - (chipStartLeft + chip.offsetWidth / 2);
         const sy = tzcy - (chipStartTop + chip.offsetHeight / 2);
@@ -841,12 +917,12 @@ function _wireChipDrag(chip, dock) {
       // inline styles set via .style on some Safari versions.
       chip.style.setProperty('transition', 'none', 'important');
       chip.style.setProperty('transform', `translate(${tx}px, ${ty}px) scale(${inZone ? 1.12 : 1.05})`, 'important');
-      chip.style.setProperty('z-index', '10030', 'important');
+      chip.style.setProperty('z-index', String(Z.chipDrag), 'important');
       chip.style.setProperty('position', 'fixed', 'important');
       chip.style.setProperty('left', `${chipStartLeft}px`, 'important');
       chip.style.setProperty('top', `${chipStartTop}px`, 'important');
       chip.style.setProperty('pointer-events', 'none', 'important');
-      if (inZone !== overTrash) {
+      if (trashZone && inZone !== overTrash) {
         overTrash = inZone;
         trashZone.classList.toggle('engaged', overTrash);
       }
@@ -857,7 +933,7 @@ function _wireChipDrag(chip, dock) {
     if (dragMode === 'reorder') {
       chip.style.transition = 'none';
       chip.style.transform = `translate(${dx}px, ${dy}px) scale(1.05)`;
-      chip.style.zIndex = '10030';
+      chip.style.zIndex = String(Z.chipDrag);
 
       // Find sibling under cursor and swap
       const siblings = [...dock.querySelectorAll('.minimized-dock-chip:not(.dragging)')];
@@ -1138,10 +1214,219 @@ function _wireChipDrag(chip, dock) {
   chip.addEventListener('pointerdown', onPointerDown);
 }
 
-// Tracks which _LABELS entries were created by `register(..., {label, icon})`
+// Tracks which _WINDOWS entries were created by `register(..., {label, icon})`
 // (vs. the built-in static ones). Only these should be removed in
 // `unregister` — built-in labels stay for the lifetime of the page.
 const _customLabelIds = new Set();
+
+// ── Foreground stack — one window in front; the rest collapse to chips ──
+//
+// Opening (or restoring) a tool window collapses whatever was in front of it,
+// and when that window leaves the foreground the displaced one comes back.
+// The ordering logic lives in ./foregroundStack.js (DOM-free, unit-tested);
+// this section is only the DOM adapter.
+
+const _fgStack = createForegroundStack();
+
+// Windows can opt out of displacement with a `data-mm-no-displace` attribute
+// (e.g. reference overlays the user deliberately keeps open above a tool).
+
+// Virtual windows (no DOM element of their own) whose collapse is owned by
+// their module — the document panel hides itself, so Modals.minimize() alone
+// would set the state without hiding anything.
+const _minimizeHooks = new Map();
+
+function _canDisplace(id) {
+  if (!id) return false;
+  // Only real tool windows take part. `.modal` is also used for transient
+  // dialogs (styledConfirm/styledPrompt overlays): those are not windows and
+  // must never collapse the editor behind them. The registry is the allowlist —
+  // built-ins live in _WINDOWS, everything else registers with a label.
+  if (!_WINDOWS[id] && !_AUTO_WIRE[id]) return false;
+  const modal = _windowEl(id);
+  if (modal && modal.hasAttribute('data-mm-no-displace')) return false;
+  return true;
+}
+
+function _composerClearance() {
+  try {
+    const n = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--composer-clearance')
+    );
+    return Number.isFinite(n) ? n : 12;
+  } catch (_) {
+    return 12;
+  }
+}
+
+/**
+ * Park a collapsed window's chip bottom-left, above the composer, stacking
+ * upwards so several displaced windows don't land on top of each other.
+ * Only the first time: once the user drags it, their position wins.
+ */
+function _seedChipPosition(id) {
+  if (!id || _chipPositions.has(id)) return;
+  const taken = _chipPositions.size;
+  _chipPositions.set(id, {
+    left: 12,
+    top: Math.max(8, window.innerHeight - _composerClearance() - 44 - taken * 40),
+  });
+  _saveDockState();
+}
+
+function _collapseForDisplacement(id) {
+  // Suppress the impending hidden-transition: this minimize is a consequence of
+  // another window opening, and must not also unwind id's own displaced parent.
+  _fgStack.suppressNext(id);
+  const hook = _minimizeHooks.get(id);
+  if (hook) {
+    try { hook(); } catch (e) { console.error('minimize hook failed for', id, e); }
+    _seedChipPosition(id);
+    _renderDock();
+    return;
+  }
+  minimize(id);
+  _seedChipPosition(id);
+  _renderDock();
+}
+
+function _fgOpened(id) {
+  if (!_canDisplace(id)) return;
+  const { minimize: parent } = _fgStack.opened(id);
+  if (!parent || parent === id) return;
+  // Edge-docked windows are part of the split layout (email beside a reader,
+  // notes/doc beside chat): they stay visible and are never collapsed to a
+  // chip when another window opens.
+  if (_isEdgeDocked(_windowEl(parent))) return;
+  // A window can be visible without ever having been registered (the Library is
+  // auto-wired but registers lazily). Register it now so it can be collapsed.
+  let state = _state.get(parent);
+  if (!state && _AUTO_WIRE[parent]) state = _autoRegister(parent);
+  // Only displace a window that is genuinely open and still registered.
+  if (!state || state.isMinimized) return;
+  _collapseForDisplacement(parent);
+}
+
+function _isEdgeDocked(el) {
+  return !!el && (el.classList.contains('modal-left-docked')
+    || el.classList.contains('modal-right-docked')
+    || el.classList.contains('email-snap-left'));
+}
+
+function _fgLeft(id) {
+  if (!_canDisplace(id)) return;
+  const { restore: parent } = _fgStack.left(id);
+  if (!parent) return;
+  const state = _state.get(parent);
+  if (state && state.isMinimized) {
+    try { restore(parent); } catch (e) { console.error('restore after replacement failed:', e); }
+  }
+}
+
+/**
+ * Public hooks for windows the manager cannot observe directly.
+ * The document panel is the only one today: it is not a modal element.
+ */
+export function notifyOpened(id) { _fgOpened(id); }
+export function notifyLeft(id) { _fgLeft(id); }
+export function forgetForeground(id) { _fgStack.forget(id); }
+/**
+ * A window closed. `destroyed` means its element was removed and can never
+ * come back: drop its restoration chain and its manager state/chip.
+ *
+ * Safe to call from a module close path as well as from the visibility
+ * observer — `_fgLeft` and `unregister` are both idempotent.
+ */
+export function notifyClosed(id, { destroyed = false } = {}) {
+  if (!id) return;
+  _fgLeft(id);
+  if (destroyed) {
+    _fgStack.forget(id);
+    if (_state.has(id)) unregister(id);
+  }
+}
+export function registerMinimizeHook(id, fn) {
+  if (id && typeof fn === 'function') _minimizeHooks.set(id, fn);
+}
+
+/** Attach the visibility observer to a modal element (idempotent). */
+function _observeModal(id) {
+  const modal = id && _windowEl(id);
+  if (!modal || !modal.classList.contains('modal') || modal._mmVisibilityObs) return;
+  if (!modal.hasAttribute('data-window-id')) modal.setAttribute('data-window-id', id);
+  const isVisible = () => !modal.classList.contains('hidden')
+      && getComputedStyle(modal).display !== 'none';
+  modal._mmVisLast = isVisible();
+  const obs = new MutationObserver(() => {
+    const vis = isVisible();
+    if (vis === modal._mmVisLast) return;
+    modal._mmVisLast = vis;
+    if (vis) {
+      _bringToFront(modal);
+      _applyRememberedDock(id);
+      _emitModalOpened(id, modal);
+      _fgOpened(id);
+    } else {
+      _fgLeft(id);
+    }
+  });
+  obs.observe(modal, { attributes: true, attributeFilter: ['class', 'style'] });
+  modal._mmVisibilityObs = obs;
+  if (modal._mmVisLast) {
+    // Already visible when we started observing (opened before registration).
+    _bringToFront(modal);
+    _applyRememberedDock(id);
+    _emitModalOpened(id, modal);
+    _fgOpened(id);
+  }
+}
+
+// Some tool windows are not `.modal` elements (Notes is a `.notes-pane`) and
+// announce their foreground themselves. Honour that signal so they can be
+// displaced like every other window — their module owns the DOM side.
+if (typeof window !== 'undefined') {
+  window.addEventListener('odysseus:modal-opened', (e) => {
+    const id = e && e.detail && e.detail.id;
+    if (id) _fgOpened(id);
+  });
+}
+
+function _observeAllModals(root) {
+  if (!root || root.nodeType !== 1) return;
+  const els = [];
+  if (root.matches && root.matches('.modal[id], [data-window-id]')) els.push(root);
+  if (root.querySelectorAll) {
+    root.querySelectorAll('.modal[id], [data-window-id]').forEach((el) => els.push(el));
+  }
+  for (const el of els) {
+    if (!el.classList || !el.classList.contains('modal')) continue;
+    const id = el.getAttribute('data-window-id') || el.id;
+    if (!id) continue;
+    if (!el.hasAttribute('data-window-id')) el.setAttribute('data-window-id', id);
+    _observeModal(id);
+  }
+}
+
+// Tool windows are built lazily (the Library appears on first open), so attach
+// the observer the moment a `.modal` element lands in the DOM. Without this the
+// first open of a lazily-built window could never displace anything: the
+// per-id observer only existed after `register`, which those windows do lazily.
+if (typeof document !== 'undefined') {
+  const _modalObserver = new MutationObserver((muts) => {
+    for (const m of muts) {
+      for (const node of m.addedNodes) _observeAllModals(node);
+    }
+  });
+  const _startModalObserver = () => {
+    _modalObserver.observe(document.body, { childList: true, subtree: true });
+    _observeAllModals(document.body);
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _startModalObserver);
+  } else {
+    _startModalObserver();
+  }
+}
 
 export function register(id, { restoreFn, closeFn, railBtnId, sidebarBtnId, label, icon } = {}) {
   // railBtnId can be a single id or an array; we accept both rail and sidebar separately too.
@@ -1156,41 +1441,18 @@ export function register(id, { restoreFn, closeFn, railBtnId, sidebarBtnId, labe
     restoreMinHeight: '',
   });
   // Auto-stack: whichever modal becomes visible last sits on top of any
-  // already-open modals. The various tool open() functions (gallery,
-  // memory/brain, tasks, etc.) all just toggle `.hidden` or `display` —
-  // observe both and bump the z-index on the visible→hidden→visible
-  // transition. Idempotent on re-register.
-  const _modalEl = document.getElementById(id);
-  if (_modalEl && !_modalEl._mmAutoStackObs) {
-    const _isVisible = () => !_modalEl.classList.contains('hidden')
-        && getComputedStyle(_modalEl).display !== 'none';
-    _modalEl._mmAutoStackLast = _isVisible();
-    const obs = new MutationObserver(() => {
-      const vis = _isVisible();
-      if (vis && !_modalEl._mmAutoStackLast) {
-        _bringToFront(_modalEl);
-        _applyRememberedDock(id);
-        _emitModalOpened(id, _modalEl);
-      }
-      _modalEl._mmAutoStackLast = vis;
-    });
-    obs.observe(_modalEl, { attributes: true, attributeFilter: ['class', 'style'] });
-    _modalEl._mmAutoStackObs = obs;
-    // If it's already visible at register time (e.g. modal opened before
-    // register completes), bump it once now too.
-    if (_modalEl._mmAutoStackLast) {
-      _bringToFront(_modalEl);
-      _applyRememberedDock(id);
-      _emitModalOpened(id, _modalEl);
-    }
-  }
+  // already-open modals. The various tool open() functions all just toggle
+  // `.hidden` or `display` — observe both and bump the z-index on the
+  // visible→hidden→visible transition. Idempotent on re-register.
+  _tagWindow(id);
+  _observeModal(id);
   // Allow callers to supply their own chip label/icon (path d="..." or
   // full <svg>...</svg>) so ephemeral things like FX popups can dock
   // into the same chain without needing an entry in the built-in
-  // _LABELS table. Track the id so `unregister` can drop the entry
+  // _WINDOWS table. Track the id so `unregister` can drop the entry
   // and avoid an unbounded-growth leak (v2 review HIGH-3).
   if (label || icon) {
-    _LABELS[id] = { label: label || id, icon: icon || '' };
+    _WINDOWS[id] = { label: label || id, icon: icon || '' };
     _customLabelIds.add(id);
   }
   // If a docked window was minimized and its chip was closed, reopen the
@@ -1206,9 +1468,13 @@ export function unregister(id) {
   if (s) _setBadge(s.btnIds, false);
   _state.delete(id);
   _chipPositions.delete(id);
-  // Drop any per-popup _LABELS entry created at register-time.
+  // Destroyed window: its displacement pairs can never restore anything.
+  // Deferred so a hide-transition observer callback (a microtask) can still
+  // hand the foreground back to the window this one displaced.
+  setTimeout(() => _fgStack.forget(id), 0);
+  // Drop any per-popup _WINDOWS entry created at register-time.
   if (_customLabelIds.has(id)) {
-    delete _LABELS[id];
+    delete _WINDOWS[id];
     _customLabelIds.delete(id);
   }
   // Also prune the dock-order list so a re-rendered dock doesn't try
@@ -1306,25 +1572,36 @@ export function toggle(id) {
 /** Full close — calls closeFn (which should tear down DOM + state) and unregisters. */
 export function close(id) {
   const s = _state.get(id);
-  if (!s) return;
-  const modalBeforeClose = document.getElementById(id);
-  const contentBeforeClose = modalBeforeClose?.querySelector?.('.modal-content');
-  const suspendedDockSide = contentBeforeClose?._dockSuspended
-    || (modalBeforeClose?.classList?.contains('modal-left-docked') ? 'left'
-        : modalBeforeClose?.classList?.contains('modal-right-docked') ? 'right'
-          : null);
-  const shouldRememberDock = s.isMinimized && !!suspendedDockSide;
-  if (shouldRememberDock) _rememberDock(id, suspendedDockSide);
-  else _forgetDock(id);
-  try { s.closeFn(); } catch (e) { console.error('closeFn:', e); }
-  // Some tools (cookbook) animate their close over ~250ms before adding
-  // .hidden. If the user re-opens the tool before that finishes, open()
-  // sees the modal as "still visible" and takes its no-op early-return
-  // path — making the tool feel unresponsive. Force the modal into a
-  // fully-closed state synchronously so subsequent open() calls always
-  // hit the real open path.
-  const modal = document.getElementById(id);
-  if (modal) {
+  if (!s || _closing.has(id)) return;
+  _closing.add(id);
+  try {
+    // Closing a chip (an already-minimized window) is a dismissal, not a
+    // hand-back: drop its pairs so nothing pops back later. A foreground close
+    // is left alone — its hide-transition restores what it displaced.
+    if (s.isMinimized) _fgStack.forget(id);
+    const modalBeforeClose = document.getElementById(id);
+    const contentBeforeClose = modalBeforeClose?.querySelector?.('.modal-content');
+    const suspendedDockSide = contentBeforeClose?._dockSuspended
+      || (modalBeforeClose?.classList?.contains('modal-left-docked') ? 'left'
+          : modalBeforeClose?.classList?.contains('modal-right-docked') ? 'right'
+            : null);
+    const shouldRememberDock = s.isMinimized && !!suspendedDockSide;
+    if (shouldRememberDock) _rememberDock(id, suspendedDockSide);
+    else _forgetDock(id);
+    try { s.closeFn(); } catch (e) { console.error('closeFn:', e); }
+    // Some tools animate their close over ~250ms before adding
+    // .hidden. If the user re-opens the tool before that finishes, open()
+    // sees the modal as "still visible" and takes its no-op early-return
+    // path — making the tool feel unresponsive. Force the modal into a
+    // fully-closed state synchronously so subsequent open() calls always
+    // hit the real open path.
+    const modal = document.getElementById(id);
+    if (!modal) {
+      // closeFn removed the element: no visibility transition will ever fire,
+      // so report the departure now.
+      notifyClosed(id, { destroyed: true });
+      return;
+    }
     // Tear down the live dock push/classes before hiding. If this close came
     // from a minimized dock chip, the side was persisted above and register()
     // will intentionally re-apply it on the next open.
@@ -1341,23 +1618,28 @@ export function close(id) {
       content.style.animation = '';
       content.style.opacity = '';
     }
+    _setBadge(s.btnIds, false);
+    _state.delete(id);
+    _chipPositions.delete(id);
+    _saveDockState();
+    _renderDock();
+  } finally {
+    _closing.delete(id);
   }
-  _setBadge(s.btnIds, false);
-  _state.delete(id);
-  _chipPositions.delete(id);
-  _saveDockState();
-  _renderDock();
 }
 
 /** Inject a minimize (`_`) button next to the close button in a modal.
  * Skips if a minimize button already exists (any class containing "minimize"). */
 export function injectMinimizeButton(modal, modalId) {
+  if (!modal) return;
   const header = modal.querySelector('.modal-header');
   if (!header) return;
-  if (header.querySelector('.modal-minimize-btn, .minimize-btn, [data-minimize]')) {
-    // An existing minimize button is present — wire it to the manager instead
-    const existing = header.querySelector('.minimize-btn, [data-minimize]');
-    if (existing && !existing.dataset._modalsBound) {
+  if (header.querySelector('.modal-minimize-btn')) return;
+  // A window may ship its own minimize control (marked with data-minimize);
+  // bind it to the manager once instead of adding a second button.
+  const existing = header.querySelector('[data-minimize]');
+  if (existing) {
+    if (!existing.dataset._modalsBound) {
       existing.dataset._modalsBound = '1';
       existing.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1373,7 +1655,7 @@ export function injectMinimizeButton(modal, modalId) {
   btn.title = 'Minimize';
   btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="18" x2="19" y2="18"/></svg>';
   // Anchor the _/X pair to the right edge regardless of the header's
-  // justify-content. Some headers (cookbook) use `space-between`, which
+  // justify-content. Some headers use `space-between`, which
   // would otherwise distribute three children as left/center/right and
   // strand the `_` in the middle. `margin-left:auto` eats the free space
   // to the left so `_` + close sit snug at the right.
@@ -1401,27 +1683,8 @@ export function injectMinimizeButton(modal, modalId) {
 // modal that gets swipe-dismissed so the rail/sidebar shows the badge and
 // clicking the same button restores it. Tools that need rebuild-on-restore
 // can still register explicitly with custom restoreFn/closeFn.
-const _AUTO_WIRE = {
-  'cookbook-modal':       { rail: 'rail-cookbook',  sidebar: 'tool-cookbook-btn' },
-  'calendar-modal':       { rail: 'rail-calendar',  sidebar: 'tool-calendar-btn' },
-  'gallery-modal':        { rail: 'rail-gallery',   sidebar: 'tool-gallery-btn' },
-  'tasks-modal':          { rail: 'rail-tasks',     sidebar: 'tool-tasks-btn' },
-  'doclib-modal':         { rail: 'rail-archive',   sidebar: 'tool-library-btn' },
-  'memory-modal':         { rail: null,             sidebar: 'tool-memory-btn' },
-  'notes-panel':          { rail: 'rail-notes',     sidebar: 'tool-notes-btn' },
-  // Email already has its own #email-unread-dot inline next to the title —
-  // don't add a second modalManager badge that lands at the right edge.
-  'email-lib-modal':      { rail: null,             sidebar: null },
-  'research-overlay':     { rail: 'rail-research',  sidebar: 'tool-research-btn' },
-  'theme-modal':          { rail: null,             sidebar: 'tool-theme-btn' },
-  'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn' },
-  'compare-model-overlay':{ rail: 'rail-compare',   sidebar: 'tool-compare-btn' },
-  'ge-shortcuts-modal':   { rail: null,             sidebar: null },
-  // Prompt window opens from the overflow menu (no rail/sidebar button), but
-  // wiring it here makes tab-down use the new .minimized-dock-chip instead of
-  // the legacy .modal-dock-item.
-  'custom-preset-modal':  { rail: null,             sidebar: null },
-};
+// _AUTO_WIRE is derived from _WINDOWS above.
+
 
 function _autoRegister(id) {
   if (_state.has(id)) return _state.get(id);
@@ -1454,9 +1717,13 @@ function _autoRegister(id) {
 // either via the `_` button click or via swipe-dismiss.
 function _scanAndWire() {
   for (const id of Object.keys(_AUTO_WIRE)) {
-    const modal = document.getElementById(id);
+    const modal = _tagWindow(id);
     if (!modal) continue;
     injectMinimizeButton(modal, id);
+    // Also attach the visibility observer here: the auto-wired windows are not
+    // registered until something minimizes them, so this is the only place
+    // that guarantees they can take/displace the foreground.
+    _observeModal(id);
   }
 }
 const _scanTimer = setInterval(_scanAndWire, 1000);
@@ -1470,7 +1737,6 @@ if (document.readyState !== 'loading') {
 // Tools that survive a swipe-down as a dock chip. Anything else falls
 // through to the legacy close handler and goes away entirely.
 const _SWIPE_DOWN_MINIMIZES = new Set([
-  'cookbook-modal',
   'calendar-modal',
   'email-lib-modal',
 ]);
@@ -1499,18 +1765,6 @@ function _clearEmailSplitAfterMinimize() {
 // Re-route swipe-dismiss to minimize-rather-than-close — but only for the
 // allowlisted tools above. For every other modal, return early so the
 // default close handler runs and the modal goes away.
-// Close any open body-mounted popups (kebab dropdowns, split-button menus,
-// etc.) when the cookbook modal is swiped away. Otherwise the dropdowns
-// stay floating in the middle of the page with no anchor.
-window.addEventListener('modal-dismissed', (e) => {
-  const id = e.detail?.id;
-  if (id === 'cookbook-modal') {
-    document.querySelectorAll(
-      '.cookbook-task-dropdown, .cookbook-gpu-split-menu, .hwfit-cached-dropdown, .cookbook-saved-menu, .cookbook-dep-menu'
-    ).forEach(dismissOrRemove);
-  }
-});
-
 window.addEventListener('modal-dismissed', (e) => {
   const id = e.detail?.id;
   if (!id) return;
@@ -1557,4 +1811,4 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-export default { register, unregister, isRegistered, isMinimized, minimize, restore, toggle, close, injectMinimizeButton };
+export default { register, unregister, isRegistered, isMinimized, minimize, restore, toggle, close, injectMinimizeButton, notifyOpened, notifyLeft, notifyClosed, forgetForeground, registerMinimizeHook };

@@ -15,7 +15,7 @@ This spec covers durable state in:
 - `core/atomic_io.py`;
 - `src/attachment_refs.py`, `src/upload_handler.py`, and
   `routes/upload_routes.py` for durable upload references and retention;
-- JSON stores managed by `core/auth.py`, `src/settings.py`, `src/api_key_manager.py`, `src/preset_manager.py`, `src/integrations.py`, `src/upload_handler.py`, `src/personal_docs.py`, `src/research_handler.py`, `src/bg_jobs.py`, `routes/prefs_routes.py`, canonical `routes/contacts/contacts_routes.py` and `routes/vault/vault_routes.py` plus their shims, `routes/cookbook_routes.py`, and memory/skills managers;
+- JSON stores managed by `core/auth.py`, `src/settings.py`, `src/api_key_manager.py`, `src/preset_manager.py`, `src/integrations.py`, `src/upload_handler.py`, `src/personal_docs.py`, `src/research_handler.py`, `routes/prefs_routes.py`, canonical `routes/contacts/contacts_routes.py` and `routes/vault/vault_routes.py` plus their shims, and memory/skills managers;
 - `routes/email_helpers.py` scheduled-email storage;
 - `routes/backup_routes.py` and `scripts/odysseus-backup`;
 - runtime data under `data/`.
@@ -40,7 +40,7 @@ Current model families include:
 
 - chat sessions, messages, and `chat_messages_fts` transcript-search state/triggers;
 - documents and document versions;
-- gallery albums/images, editor drafts, signatures, generated-media metadata;
+- signatures and document version history;
 - email accounts, model endpoints, MCP servers, comparisons;
 - provider auth sessions for OAuth/device-flow-backed provider credentials;
 - API tokens, admin-global webhooks, user tools/tool data, integrations;
@@ -76,13 +76,13 @@ Runtime behavior:
 
 Startup backfills include document-owner backfill from linked sessions, blanket legacy owner assignment for SQL and selected JSON stores, `user_prefs.json` per-user nesting, email account seeding from legacy settings, and encryption rewrites for legacy plaintext endpoint, signature, and email secrets. Failed encryption rewrites are logged and retried on later startup.
 
-Owner-claiming is partly automatic and partly manual. `core.database._migrate_assign_legacy_owner()` assigns many ownerless SQL rows and selected JSON records to the primary admin when auth data exists, while `scripts/claim_ownerless.py` is an explicit local utility for claiming older ownerless memories, skills, sessions, documents, gallery rows, and comparisons.
+Owner-claiming is partly automatic and partly manual. `core.database._migrate_assign_legacy_owner()` assigns many ownerless SQL rows and selected JSON records to the primary admin when auth data exists, while `scripts/claim_ownerless.py` is an explicit local utility for claiming older ownerless memories, skills, sessions, documents, and comparisons.
 
 ## Ownership And Access
 
-Owner columns are security-relevant. Current owner-bearing domains include sessions, documents, gallery images/albums, editor drafts, model endpoints, signatures, API tokens, user tools/tool data, comparisons, crew members, scheduled tasks/task runs, memories, notes, calendars/events, email accounts, and integrations. Webhooks are admin-global today and do not have an owner column.
+Owner columns are security-relevant. Current owner-bearing domains include sessions, documents, model endpoints, signatures, API tokens, user tools/tool data, comparisons, crew members, scheduled tasks/task runs, memories, notes, calendars/events, email accounts, and integrations. Webhooks are admin-global today and do not have an owner column.
 
-Route code owns filtering for its domain. `src.auth_helpers.owner_filter()` is the common helper where available; gallery, documents, calendar, email, skills, and other surfaces also use local filters. Null-owner compatibility is domain-specific: shared endpoints may include null owners, while strict gates and disk stores may reject them. Do not rely on frontend filtering for access control.
+Route code owns filtering for its domain. `src.auth_helpers.owner_filter()` is the common helper where available; documents, calendar, email, skills, and other surfaces also use local filters. Null-owner compatibility is domain-specific: shared endpoints may include null owners, while strict gates and disk stores may reject them. Do not rely on frontend filtering for access control.
 
 `src.owner_identity` defines the storage-only Default/Local owner `__odysseus_local__`. `effective_storage_owner()` maps an absent caller to it only when auth is explicitly disabled, preserves named owners, and rejects request sentinels; `storage_owner_for_request()` also resolves bearer tokens to their real owner. This is a new canonical contract, not a completed migration. SQL `NULL` and missing JSON owners still usually mean legacy/shared/unscoped compatibility; older route dependencies can return `""`, chat/agent paths can pass `None`, and calendar routes retain fallback-owner behavior. Email account helpers treat ownerless rows as single-user/global only for empty-owner mode; for non-empty owners, old ownerless rows are visible only when mailbox/from-address matches. Multi-user callers must continue to pass or derive a non-empty effective owner deliberately.
 
@@ -103,7 +103,7 @@ Current JSON/local stores include:
 - `data/auth.json` for users, password hashes, TOTP, privileges, and auth settings;
 - `data/sessions.json` for persisted browser session tokens;
 - `data/settings.json`, user preferences, feature flags, integration settings, and `data/embedding_endpoint.json`;
-- presets, API key manager state, memory/skills state, upload metadata, personal docs indexes, research JSON, background jobs, contacts/vault JSON, and task/cookbook auxiliary state.
+- presets, API key manager state, memory/skills state, upload metadata, personal docs indexes, research JSON, contacts/vault JSON, and task auxiliary state.
 
 Cookbook state lives under the shared `DATA_DIR` path through the `COOKBOOK_STATE_FILE` constant. Search cache/analytics, FastEmbed cache fallback, uploads, generated media, logs, and auxiliary SQLite stores also resolve from shared data-dir constants and must work with source, Docker, and frozen data-dir defaults.
 

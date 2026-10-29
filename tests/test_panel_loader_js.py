@@ -129,32 +129,6 @@ def test_a_thunk_that_throws_synchronously_rejects_rather_than_escaping():
     assert out["rejected"] == "boom"
 
 
-def test_the_image_editor_is_registered():
-    js = textwrap.dedent(
-        f"""
-        const {{ panelNames }} = await import('{_PANELS}');
-        console.log(JSON.stringify(panelNames()));
-        """
-    )
-    assert "editor" in json.loads(_run(js))
-
-
-# ── Offline coverage ──────────────────────────────────────────────────────
-# A lazily-loaded panel is never fetched during a normal page load, so it only
-# lands in the service-worker cache if sw.js precaches it explicitly. Miss one
-# module and the panel opens fine online and dies offline — the failure mode is
-# invisible until someone is on a plane. This walks the editor's import graph
-# and pins that every file in it is listed in PANEL_PRECACHE, query string
-# included (the SW matches on the full URL).
-
-_SW = _REPO / "static" / "sw.js"
-_JS_DIR = _REPO / "static" / "js"
-
-_STATIC_IMPORT = re.compile(
-    r"""(?:^|\n)\s*(?:import\s+(?:[^;'"()]*?\s+from\s+)?|export\s+(?:\*|\{[^}]*\})\s+from\s+)['"]([^'"]+)['"]"""
-)
-
-
 def _editor_module_graph() -> set[str]:
     """Every module statically reachable from galleryEditor.js, as '<path>[?query]'."""
     seen: set[str] = set()
@@ -184,18 +158,3 @@ def _panel_precache_entries() -> set[str]:
     return set(re.findall(r"'([^']+)'", block.group(1)))
 
 
-def test_every_lazy_editor_module_is_precached_for_offline_use():
-    graph = _editor_module_graph()
-    precached = _panel_precache_entries()
-    # Shared modules (ui.js, spinner.js, ...) are still eagerly loaded by
-    # index.html, so they are cached by the normal page load. Only the part of
-    # the graph that nothing else pulls in needs an explicit entry.
-    lazy_only = {
-        m for m in graph
-        if m == "galleryEditor.js" or m.split("?")[0].startswith("editor/")
-    }
-    missing = {f"/static/js/{m}" for m in lazy_only} - precached
-    assert not missing, (
-        "these editor modules load lazily but are not in PANEL_PRECACHE, so the "
-        f"editor would not open offline: {sorted(missing)}"
-    )

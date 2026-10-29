@@ -6,6 +6,7 @@ import themeModule from '../theme.js';
 import createResearchSynapse from '../researchSynapse.js';
 import spinnerModule from '../spinner.js';
 import { sortModelIds } from '../modelSort.js';
+import * as Modals from '../modalManager.js';
 
 // Rotating research textarea placeholders — pick one at random each
 // time the panel is rendered so the example keeps feeling fresh.
@@ -218,28 +219,19 @@ export function init(apiBase, markdownMod, sessionMod) {
 
 export function isOpen() { return _open; }
 export function toggle() {
-  if (_open) {
-    // If minimized, restore instead of closing
-    const overlay = document.getElementById('research-overlay');
-    if (overlay && overlay.style.display === 'none') {
-      overlay.style.display = '';
-      const btn = document.getElementById('tool-research-btn');
-      if (btn) btn.classList.remove('minimized');
-      return;
-    }
-    closePanel();
-  } else {
-    openPanel();
+  if (Modals.isMinimized('research-overlay')) {
+    Modals.restore('research-overlay');
+    return;
   }
+  if (_open) closePanel();
+  else openPanel();
 }
 
 export function openPanel(focusJobId) {
   if (_open) {
-    const overlay = document.getElementById('research-overlay');
-    if (overlay && overlay.style.display === 'none') {
-      overlay.style.display = '';
-      const btn = document.getElementById('tool-research-btn');
-      if (btn) btn.classList.remove('minimized');
+    if (Modals.isMinimized('research-overlay')) {
+      Modals.restore('research-overlay');
+      return;
     }
     document.body.classList.add('research-panel-view');
     if (focusJobId) _focusJob(focusJobId);
@@ -257,6 +249,7 @@ export function openPanel(focusJobId) {
   const overlay = document.createElement('div');
   overlay.id = 'research-overlay';
   overlay.className = 'modal research-overlay';
+  overlay.setAttribute('data-window-id', 'research-overlay');
 
   // Match doclib/gallery/calendar modal sizing exactly so research feels like
   // the rest of the modal family (centered, ~640px, 85vh).
@@ -328,6 +321,10 @@ function _focusJob(jobId) {
 export function closePanel() {
   if (!_open) return;
   _open = false;
+
+  // The overlay is removed (not hidden), so the manager's observer never sees
+  // it leave. Report the close and drop the restoration chain.
+  try { Modals.notifyClosed('research-overlay', { destroyed: true }); } catch (_) {}
 
   if (_onDocKeydown) {
     document.removeEventListener('keydown', _onDocKeydown);
@@ -447,10 +444,7 @@ function _resetCategoryToAuto() {
 function _wireEvents(pane) {
   pane.querySelector('#research-panel-close').addEventListener('click', closePanel);
   pane.querySelector('#research-panel-minimize')?.addEventListener('click', () => {
-    const overlay = document.getElementById('research-overlay');
-    if (overlay) overlay.style.display = 'none';
-    const btn = document.getElementById('tool-research-btn');
-    if (btn) btn.classList.add('minimized');
+    Modals.minimize('research-overlay');
   });
   pane.querySelector('#research-start-btn').addEventListener('click', _handleStart);
   pane.querySelector('#research-add-btn').addEventListener('click', _handleAdd);

@@ -1,14 +1,11 @@
 # src/document_processor.py
-"""Document processing: PDF/OCR extraction, text file handling, image VL analysis, user content building."""
+"""Document processing: PDF/OCR extraction, text file handling, user content building."""
 
 import os
 import logging
 import mimetypes
 import base64
-import tempfile
 from typing import List, Dict, Any
-
-from src.llm_core import llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +107,7 @@ def _process_text_file(path: str) -> str:
 
 
 def _process_pdf(path: str, owner: str | None = None, max_chars: int | None = 15000) -> str:
-    """Process PDF file with text extraction (pypdf). Uses VL model for image-heavy pages.
+    """Process PDF file with text extraction (pypdf).
 
     ``max_chars=None`` returns the full extracted text (used when persisting the
     document body); the default caps it for inline chat context.
@@ -124,30 +121,6 @@ def _process_pdf(path: str, owner: str | None = None, max_chars: int | None = 15
             page_text = (page.extract_text() or "").strip()
             if page_text:
                 pdf_text += f"\n\n[Page {page_num + 1} text]:\n{page_text}"
-
-            # For pages with images but little text, try VL model
-            try:
-                images = list(page.images)
-            except Exception:
-                images = []
-            if images and len(page_text) < 50:
-                for img_index, img in enumerate(images[:3]):  # cap at 3 images per page
-                    try:
-                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                            temp_img_path = tmp.name
-                        try:
-                            img.image.save(temp_img_path, "PNG")  # pypdf -> PIL image
-                            ocr_text = analyze_image_with_vl(temp_img_path, owner=owner)
-                            if ocr_text and "unavailable" not in ocr_text.lower():
-                                pdf_text += f"\n\n[Page {page_num + 1} image {img_index + 1} text]: {ocr_text}"
-                        finally:
-                            try:
-                                os.unlink(temp_img_path)
-                            except OSError:
-                                pass
-                    except Exception as e:
-                        logger.warning(f"Failed to analyze image in PDF: {e}")
-                        continue
 
         if pdf_text:
             if max_chars is not None and len(pdf_text) > max_chars:
@@ -336,104 +309,6 @@ def strip_pdf_content_marker(text: str) -> str:
     return (text or "").removeprefix(_PDF_CONTENT_MARKER).strip()
 
 
-def _load_vl_settings() -> dict:
-    """Load admin settings from disk."""
-    try:
-        from src.settings import load_settings
-        return load_settings()
-    except Exception:
-        return {}
-
-
-def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
-    """Resolve the vision model to (url, model_id, headers).
-
-    Uses admin-configured model if set, otherwise tries auto-detection
-    of known vision-capable models across configured endpoints.
-    """
-    from src.ai_interaction import _resolve_model
-
-    if configured:
-        return _resolve_model(configured, owner=owner)
-
-    # Auto-detect: try known vision-capable models in priority order
-    candidates = [
-        "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
-        "claude-sonnet-4-5-20250929", "claude-opus-4-20250514",
-        "gemini-2.0-flash", "gemini-2.5-pro",
-        "llava", "pixtral", "qwen2-vl",
-    ]
-    for candidate in candidates:
-        try:
-            return _resolve_model(candidate, owner=owner)
-        except (ValueError, Exception):
-            continue
-
-    raise ValueError("No vision model available")
-
-
-def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> dict:
-    """Analyze an image and return both text and the model that produced it."""
-    logger.info(f"Analyzing image with VL model: {image_path}")
-    try:
-        settings = _load_vl_settings()
-        if not settings.get("vision_enabled", True):
-            return {"text": "[Vision is disabled — enable it in Settings → Vision]", "model": ""}
-        vl_model = settings.get("vision_model", "")
-
-        try:
-            url, model_id, headers = _resolve_vl_model(vl_model, owner=owner)
-        except ValueError:
-            return {"text": "[No vision model configured — set one in Settings → Vision]", "model": vl_model or ""}
-
-        with open(image_path, "rb") as f:
-            img_data = base64.b64encode(f.read()).decode("utf-8")
-
-        ext = os.path.splitext(image_path)[1].lower()
-        mime_map = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".gif": "gif", ".webp": "webp"}
-        img_format = mime_map.get(ext, "jpeg")
-
-        vl_messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Describe this image in detail"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/{img_format};base64,{img_data}"}},
-                ],
-            }
-        ]
-        # Vision-specific fallback chain (Settings → Vision → Fallbacks). A
-        # downed vision endpoint can fall through to the next configured model
-        # — same shape as task/chat but its own list (`vision_model_fallbacks`).
-        try:
-            from src.endpoint_resolver import resolve_vision_fallback_candidates
-            _vl_candidates = [(url, model_id, headers)] + resolve_vision_fallback_candidates(owner=owner)
-        except Exception:
-            _vl_candidates = [(url, model_id, headers)]
-
-        last_err = None
-        for i, (_url, _model, _headers) in enumerate([c for c in _vl_candidates if c and c[0] and c[1]]):
-            try:
-                description = llm_call(_url, _model, vl_messages, headers=_headers, timeout=120)
-                logger.info("VL analysis complete with model %s", _model)
-                return {"text": description, "model": _model}
-            except Exception as e:
-                last_err = e
-                tag = "primary" if i == 0 else "candidate"
-                logger.warning(f"[vision fallback] {tag} {_model} failed ({type(e).__name__}); trying next")
-                continue
-        raise last_err if last_err else RuntimeError("No vision model endpoint configured")
-
-    except Exception as e:
-        logger.error(f"VL model unavailable: {e}")
-        return {"text": "[VL model unavailable - image not analyzed]", "model": ""}
-
-
-def analyze_image_with_vl(image_path: str, owner: str | None = None) -> str:
-    """Analyze an image using the admin-configured Vision-Language model."""
-    return analyze_image_with_vl_result(image_path, owner=owner).get("text", "")
-
-
 def build_user_content(
     text: str,
     attachment_ids: list[str] | None,
@@ -479,23 +354,9 @@ def build_user_content(
         display_name = upload_info.get("name") or upload_info.get("original_name") or path
 
         if upload_handler.is_image_file(display_name, mime):
-            try:
-                with open(path, "rb") as image_file:
-                    encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                # Extensionless uploads (e.g. a pasted screenshot) have no ext,
-                # so fall back to the resolved MIME subtype rather than emitting
-                # an invalid "data:image/;base64," with an empty subtype.
-                image_format = ext[1:] or (mime.split("/", 1)[1] if mime.startswith("image/") else "png")
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/{image_format};base64,{encoded_string}"},
-                })
-            except Exception as e:
-                logger.error(f"Failed to encode image {fid}: {e}")
-                if content and content[0]["type"] == "text":
-                    content[0]["text"] += "\n\n[Image attached but could not be processed]"
-                else:
-                    content.insert(0, {"type": "text", "text": "[Image attached but could not be processed]"})
+            logger.warning("Skipping image attachment %s: image support is disabled", fid)
+            if content and content[0]["type"] == "text":
+                content[0]["text"] += "\n\n[Image attachment ignored: image support is disabled]"
 
         elif upload_handler.is_audio_file(display_name, mime):
             try:

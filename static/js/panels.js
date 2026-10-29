@@ -14,9 +14,7 @@
  * sw.js) — they are off the critical path, not off the offline manifest.
  */
 
-const LOADERS = {
-  editor: () => import('./galleryEditor.js'),
-};
+const LOADERS = {};
 
 /**
  * Build a memoising loader over a name -> import-thunk map. Exported so the

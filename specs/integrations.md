@@ -74,7 +74,7 @@ Current API-token consumers include:
 - companion read endpoints;
 - selected session and owner-attribution helpers described in `auth-security.md`.
 
-The Cookbook scoped-agent surface currently exposes `cookbook:read` and `cookbook:launch` in Settings and checks them in Codex routes; those scope names must stay reconciled with `routes.api_token_routes.ALLOWED_SCOPES`.
+
 
 ## Generic API Integrations
 

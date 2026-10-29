@@ -12,6 +12,7 @@ import markdownModule from './markdown.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { langIcon } from './langIcons.js';
 import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import * as Modals from './modalManager.js';
 
 // ── Injected references from documentModule ──
 let API_BASE = '';
@@ -2318,6 +2319,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'doclib-modal';
+    modal.setAttribute('data-window-id', 'doclib-modal');
     modal.innerHTML = `
       <div class="modal-content doclib-modal-content" style="width:min(900px, 94vw);background:var(--bg);">
         <div class="modal-header">
@@ -4518,6 +4520,10 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
   export function closeLibrary() {
     if (!_libraryOpen) return;
     _libraryOpen = false;
+    // This modal is REMOVED, not hidden, so ModalManager's visibility observer
+    // never sees it leave. Tell the foreground stack explicitly, otherwise the
+    // window this one displaced (the document editor) stays collapsed as a chip.
+    try { Modals.notifyClosed('doclib-modal', { destroyed: true }); } catch (_) {}
     _librarySelectMode = false;
     _librarySelectedIds.clear();
     _libraryImportMode = false;

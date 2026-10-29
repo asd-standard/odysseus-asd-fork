@@ -16,7 +16,7 @@ This spec covers current app runtime wiring in:
 - `src/host_docker_access.py`;
 - `core/middleware.py`;
 - all route setup functions registered from `app.py`, including canonical
-  `routes/admin_wipe/`, `routes/cleanup/`, `routes/compare/`, `routes/contacts/`, `routes/document/`, `routes/gallery/`, `routes/history/`, `routes/mcp/`, `routes/memory/`, `routes/note/`, `routes/research/`, `routes/search/`, `routes/task/`, `routes/vault/`, and `routes/webhook/` packages plus top-level compatibility shims;
+  `routes/admin_wipe/`, `routes/cleanup/`, `routes/compare/`, `routes/contacts/`, `routes/document/`, `routes/history/`, `routes/mcp/`, `routes/memory/`, `routes/note/`, `routes/research/`, `routes/search/`, `routes/task/`, `routes/vault/`, and `routes/webhook/` packages plus top-level compatibility shims;
 - `routes/prefs_routes.py`, `routes/workspace_routes.py`, and `companion/routes.py`;
 - `src/generated_images.py` for generated-media file resolution;
 - `launcher.py`, `Odysseus.spec`, and platform launcher scripts where frozen/native startup changes runtime paths;
@@ -39,12 +39,12 @@ durable writers and cleanup use one lifecycle owner.
 Current router call sites include:
 
 - auth, uploads, emoji, sessions, admin wipe, memory, skills, chat, workspace, research, history, search, presets, diagnostics, cleanup, personal docs, embeddings, model endpoints;
-- TTS/STT, documents, signatures, gallery, editor drafts, scheduled tasks, assistant, calendar, shell, Cookbook, HW Fit, compare, preferences, backup, fonts, Copilot and ChatGPT Subscription auth;
+- TTS/STT, documents, signatures, scheduled tasks, assistant, calendar, compare, preferences, backup, fonts, Copilot and ChatGPT Subscription auth;
 - MCP, webhooks, API tokens, notes, email, Codex/Claude scoped APIs, vault, contacts, and companion routes.
 
-Admin wipe, cleanup, compare, contacts, documents, gallery, history, MCP, memory, notes, research, search, tasks, vault, and webhooks have canonical subpackage modules. Their old top-level route modules replace their `sys.modules` entries with the canonical module object so legacy imports, `importlib`, and monkeypatch tests target the same module that `app.py` uses. `app.py` imports task setup from `routes.task.task_routes`.
+Admin wipe, cleanup, compare, contacts, documents, history, MCP, memory, notes, research, search, tasks, vault, and webhooks have canonical subpackage modules. Their old top-level route modules replace their `sys.modules` entries with the canonical module object so legacy imports, `importlib`, and monkeypatch tests target the same module that `app.py` uses. `app.py` imports task setup from `routes.task.task_routes`.
 
-The SPA routes `/`, `/notes`, `/calendar`, `/cookbook`, `/email`, `/memory`, `/gallery`, `/tasks`, and `/library` all serve `static/index.html`. `static/` is served with revalidation for `.js`, `.css`, and `.html` because the frontend ships raw browser modules with no hashed build output.
+The SPA routes `/`, `/notes`, `/calendar`, `/email`, `/memory`, `/tasks`, and `/library` all serve `static/index.html`. `static/` is served with revalidation for `.js`, `.css`, and `.html` because the frontend ships raw browser modules with no hashed build output.
 
 Direct app-owned endpoints include `/api/generated-image/{filename}`, `/backgrounds`, `/login`, `/api/version`, `/api/health`, `/api/ready`, `/api/runtime`, and `/api/activity/heartbeat`. `/backgrounds` points at `static/backgrounds.html`; if that file is absent or the route remains auth-gated, that is route/static drift rather than an intentional public contract.
 
@@ -56,9 +56,9 @@ Effective middleware order matters. CORS, `SecurityHeadersMiddleware`, `_Request
 
 Security headers include HSTS and a restrictive `Permissions-Policy` that disables camera/geolocation and only allows microphone from self.
 
-`_TIMEOUT_EXEMPT_PREFIXES` owns hard-timeout bypass policy. It is prefix-based and currently exempts all subroutes under `/api/chat`, `/api/shell/stream`, `/api/research`, `/api/model/download`, `/api/model/probe`, `/api/model-endpoints`, `/api/cookbook/setup`, `/api/upload`, `/api/image`, and `/api/memory/audit`. Memory audit has its own longer inactivity timeout.
+`_TIMEOUT_EXEMPT_PREFIXES` owns hard-timeout bypass policy. It is prefix-based and currently exempts all subroutes under `/api/chat`, `/api/research`, `/api/model/download`, `/api/model/probe`, `/api/model-endpoints`, `/api/upload`, and `/api/memory/audit`. Memory audit has its own longer inactivity timeout.
 
-Generated-image path resolution fails closed for invalid names, path escape, and missing files. Ownership checks are best-effort when a current user exists: gallery rows owned by a different user return 404, rowless generated files are allowed, and DB/helper failures fail open. See `auth-security.md` for `LOCALHOST_BYPASS`, internal-tool loopback, proxy-header exclusion, and owner-impersonation policy.
+Image generation and generated-image serving are removed in this build. See `auth-security.md` for `LOCALHOST_BYPASS`, internal-tool loopback, proxy-header exclusion, and owner-impersonation policy.
 
 ## Runtime Behavior
 
@@ -70,7 +70,7 @@ Generated-image path resolution fails closed for invalid names, path escape, and
 
 ## Lifespan Startup
 
-Upload cleanup first snapshots durable chat, document, gallery, note, and
+Upload cleanup first snapshots durable chat, document, note, and
 calendar references and aborts on scan or upload-index integrity failure.
 
 Startup purges leftover incognito sessions, reconciles default scheduled tasks before the task runner starts, and backfills legacy skill owners when possible.

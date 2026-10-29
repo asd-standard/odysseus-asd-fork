@@ -11,7 +11,13 @@
 # for setup details.
 services:
   odysseus:
-    build: .
+    build:
+      context: .
+      # Optional extras (PyMuPDF, markitdown, faster-whisper, ddgs) are opt-in.
+      # Set INSTALL_OPTIONAL=true in .env for a feature-parity deployment and
+      # rebuild with `docker compose build odysseus`.
+      args:
+        INSTALL_OPTIONAL: ${INSTALL_OPTIONAL:-false}
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
     volumes:
@@ -99,6 +105,12 @@ services:
         condition: service_healthy
       chromadb:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7000/api/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
     restart: unless-stopped
     # NVIDIA overlay (from docker/gpu.nvidia.yml).
     deploy:

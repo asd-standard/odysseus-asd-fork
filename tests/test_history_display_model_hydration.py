@@ -494,11 +494,6 @@ async def test_model_send_routes_hydrate_before_context_build(monkeypatch, path)
     )
     monkeypatch.setattr(chat_routes, "resolve_session_auth", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(chat_routes, "get_session_mode", lambda *_args: "chat")
-    monkeypatch.setattr(
-        chat_routes,
-        "_is_image_generation_session",
-        lambda *_args, **_kwargs: False,
-    )
     monkeypatch.setattr(chat_routes, "web_search_enabled_for_turn", lambda *_args: False)
 
     router = chat_routes.setup_chat_routes(

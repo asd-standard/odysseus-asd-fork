@@ -1149,6 +1149,10 @@ export function openPanel() {
   }
   _open = true;
   _editingId = null;
+  // Register before announcing: a window opening over Notes must be able to
+  // collapse it, which needs a registered state entry.
+  _ensureNotesChipRegistered();
+  try { Modals.notifyOpened('notes-panel'); } catch (_) {}
   _searchQuery = '';
   _clearViewedReminderGlows();
   _firedDotDismissedAt = Date.now();
@@ -1180,6 +1184,9 @@ export function openPanel() {
   const pane = document.createElement('div');
   pane.id = 'notes-pane';
   pane.className = 'notes-pane';
+  // Registry identity differs from the DOM id (`notes-panel` vs `notes-pane`)
+  // because the panel is not a `.modal` and owns its own show/hide logic.
+  pane.setAttribute('data-window-id', 'notes-panel');
   pane.innerHTML = `
     <div class="notes-mobile-grabber" id="notes-mobile-grabber" aria-hidden="true"></div>
     <div class="notes-pane-header">
@@ -1616,6 +1623,10 @@ function _renderLabelsInto(_body) {
 }
 
 function _ensureNotesChipRegistered() {
+  // Notes is not a `.modal`, so ModalManager cannot hide it. Tell it how to
+  // collapse this window; the foreground stack calls this when another window
+  // opens over the notes panel.
+  try { Modals.registerMinimizeHook('notes-panel', () => closePanel('down')); } catch (_) {}
   if (Modals.isRegistered('notes-panel')) return;
   Modals.register('notes-panel', {
     railBtnId: 'rail-notes',
@@ -1634,10 +1645,15 @@ export function closePanel(direction) {
   _editingId = null;
   _clearViewedReminderGlows();
   const _minimize = direction === 'down';
+  // Leaving the foreground: the window this one displaced comes back (a
+  // minimize hands it back; a close restores it). Then a real close drops the
+  // chain so nothing can resurrect a destroyed panel.
+  try { Modals.notifyLeft('notes-panel'); } catch (_) {}
   if (_minimize) {
     _ensureNotesChipRegistered();
   } else if (Modals.isRegistered('notes-panel')) {
     Modals.unregister('notes-panel');
+    try { Modals.forgetForeground('notes-panel'); } catch (_) {}
   }
 
   // Drop the document keydown listener and the 30s reminder interval —

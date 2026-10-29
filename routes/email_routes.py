@@ -4067,7 +4067,7 @@ def setup_email_routes():
         return {"success": True, "token": token, "filename": safe_name, "size": size}
 
     def _load_odysseus_attachment_source(db, kind: str, item_id: str, owner: str):
-        from core.database import Document as _Doc, GalleryImage as _GI
+        from core.database import Document as _Doc
         from core.database import Session as _Sess
 
         if kind == "document":
@@ -4098,26 +4098,14 @@ def setup_email_routes():
                 base = f"{base}.{ext}"
             return {"filename": base, "content": (doc.current_content or "").encode("utf-8")}
 
-        if kind == "gallery":
-            img = db.query(_GI).filter(_GI.id == item_id, _GI.is_active == True).first()
-            if not img:
-                raise HTTPException(status_code=404, detail="Image not found")
-            if owner and img.owner and img.owner != owner:
-                raise HTTPException(status_code=404, detail="Image not found")
-            from routes.gallery.gallery_routes import _gallery_image_path
-            src = _gallery_image_path(img.filename)
-            if not src.exists() or not src.is_file():
-                raise HTTPException(status_code=404, detail="Image file not found")
-            return {"filename": _safe_compose_filename(img.filename or "gallery-image.png"), "path": src}
-
         raise HTTPException(status_code=400, detail="Unknown attachment kind")
 
     @router.post("/compose-from-odysseus")
     async def compose_from_odysseus(data: dict, owner: str = Depends(require_owner)):
-        """Stage an Odysseus document or gallery image as a compose upload."""
+        """Stage an Odysseus document as a compose upload."""
         kind = str(data.get("kind") or "").strip().lower()
         item_id = str(data.get("id") or "").strip()
-        if kind not in {"document", "gallery"} or not item_id:
+        if kind != "document" or not item_id:
             raise HTTPException(status_code=400, detail="Expected kind and id")
         try:
             from core.database import SessionLocal as _SL
@@ -4138,7 +4126,7 @@ def setup_email_routes():
 
     @router.post("/compose-from-odysseus-zip")
     async def compose_from_odysseus_zip(data: dict, owner: str = Depends(require_owner)):
-        """Stage several Odysseus documents/gallery images as one zip attachment."""
+        """Stage several Odysseus documents as one zip attachment."""
         raw_items = data.get("items") or []
         if not isinstance(raw_items, list) or not raw_items:
             raise HTTPException(status_code=400, detail="Expected items")
@@ -4168,7 +4156,7 @@ def setup_email_routes():
                             continue
                         kind = str(item.get("kind") or "").strip().lower()
                         item_id = str(item.get("id") or "").strip()
-                        if kind not in {"document", "gallery"} or not item_id:
+                        if kind != "document" or not item_id:
                             continue
                         src = _load_odysseus_attachment_source(db, kind, item_id, owner)
                         zname = unique_name(src["filename"])

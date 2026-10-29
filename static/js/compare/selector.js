@@ -8,6 +8,7 @@ import { _clearProbeWaves } from './probe.js';
 import uiModule from '../ui.js';
 import spinnerModule from '../spinner.js';
 import themeModule from '../theme.js';
+import * as Modals from '../modalManager.js';
 
 const escapeHtml = uiModule.esc;
 
@@ -65,6 +66,7 @@ async function showModelSelector() {
     const overlay = document.createElement('div');
     overlay.id = 'compare-model-overlay';
     overlay.className = 'modal';
+    overlay.setAttribute('data-window-id', 'compare-model-overlay');
 
     const content = document.createElement('div');
     content.className = 'modal-content';
@@ -83,17 +85,21 @@ async function showModelSelector() {
 
     // Minimize (_) + Close (✕) grouped in one wrapper so they're always
     // adjacent on the right (the auto-injected minimize otherwise drifted
-    // away from the close). The minimize carries .minimize-btn so the modal
-    // manager wires it instead of injecting a second one.
+    // away from the close). Wire the minimize button to ModalManager
+    // explicitly so it works before the next scan.
     const headerCtrls = document.createElement('div');
     headerCtrls.style.cssText = 'display:flex;align-items:center;gap:6px;flex-shrink:0;';
 
     const headerMinBtn = document.createElement('button');
     headerMinBtn.type = 'button';
-    headerMinBtn.className = 'modal-minimize-btn minimize-btn';
+    headerMinBtn.className = 'modal-minimize-btn';
     headerMinBtn.title = 'Minimize';
     headerMinBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="18" x2="19" y2="18"/></svg>';
     headerMinBtn.style.margin = '0';
+    headerMinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      Modals.minimize('compare-model-overlay');
+    });
 
     const headerCloseBtn = document.createElement('button');
     headerCloseBtn.className = 'close-btn';

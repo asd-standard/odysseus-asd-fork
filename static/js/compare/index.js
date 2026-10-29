@@ -40,6 +40,7 @@ import themeModule from '../theme.js';
 import presetsModule from '../presets.js';
 import markdownModule from '../markdown.js';
 import { bindMenuDismiss } from '../escMenuStack.js';
+import * as Modals from '../modalManager.js';
 
 var escapeHtml = uiModule.esc;
 
@@ -176,6 +177,9 @@ async function deactivate(teardown) {
     ? [...state._paneSessionIds] : [];
 
   removeOverlays();
+  // The overlay was removed, not hidden: tell the manager explicitly so the
+  // window Compare displaced gets its place back.
+  try { Modals.notifyClosed('compare-model-overlay', { destroyed: true }); } catch (_) {}
   state.isActive = false;
   state._streaming = false;
   state._paneSessionIds = [];

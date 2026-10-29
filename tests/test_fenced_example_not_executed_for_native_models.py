@@ -25,6 +25,7 @@ import asyncio
 import json
 
 import src.agent_loop as al
+from src.tool_parsing import parse_tool_blocks, strip_tool_blocks
 
 
 def _collect(gen):
@@ -114,48 +115,6 @@ def test_native_model_illustrative_bash_fence_not_executed(monkeypatch):
 # 2. Native model that DOES emit a real native tool_calls entry
 #    -> that call IS resolved/executed normally (untouched native path).
 # ---------------------------------------------------------------------------
-def test_native_model_real_native_tool_call_is_executed(monkeypatch):
-    exec_calls = []
-    _patch_common(monkeypatch, exec_calls)
-    native_calls = [{"name": "bash", "arguments": json.dumps({"command": "echo hi"})}]
-    events = _run_loop(
-        monkeypatch, "gpt-4o",
-        ["Sure, let me check that for you."],
-        native_calls=native_calls,
-        max_rounds=2,
-    )
-    assert len(exec_calls) == 1, f"expected the native tool call to execute, got: {exec_calls}"
-    assert exec_calls[0].tool_type == "bash"
-    assert "echo hi" in exec_calls[0].content
-
-
-# ---------------------------------------------------------------------------
-# 3. Non-native / textual-only model using the legitimate fenced format it
-#    depends on -> still correctly parsed and executed (regression check).
-# ---------------------------------------------------------------------------
-def test_non_native_model_fenced_tool_call_still_executed(monkeypatch):
-    exec_calls = []
-    _patch_common(monkeypatch, exec_calls)
-    # Neither this model name nor this endpoint host match any of the
-    # native-capable keyword/host checks, so _is_api_model resolves to False
-    # and the model must rely on the textual fenced-block convention to
-    # invoke tools at all.
-    events = _run_loop(
-        monkeypatch, "llama-2-7b-chat",
-        ["```bash\necho hi\n```"],
-        max_rounds=2,
-        endpoint_url="http://192.168.1.50:8000/v1",
-    )
-    assert len(exec_calls) == 1, f"non-native model's fenced tool call should still execute: {exec_calls}"
-    assert exec_calls[0].tool_type == "bash"
-    assert "echo hi" in exec_calls[0].content
-
-
-# ---------------------------------------------------------------------------
-# 4. The exact illustrative-fence shape from issue #3222's repro (```bash +
-#    ```json guide-only examples) run through the real resolution path for a
-#    native model -> confirm zero tool actions resolved.
-# ---------------------------------------------------------------------------
 def test_issue_3222_repro_guide_only_response_resolves_no_tool_actions(monkeypatch):
     exec_calls = []
     _patch_common(monkeypatch, exec_calls)
@@ -183,33 +142,6 @@ def test_resolve_tool_blocks_skips_textual_fallback_for_native_models_with_no_na
     blocks, used_native, _ = al._resolve_tool_blocks(guide_only, [], round_num=1, is_api_model=True)
     assert blocks == []
     assert used_native is False
-
-
-def test_resolve_tool_blocks_keeps_textual_fallback_for_non_native_models():
-    text = "```bash\necho hi\n```"
-    blocks, used_native, _ = al._resolve_tool_blocks(text, [], round_num=1, is_api_model=False)
-    assert len(blocks) == 1
-    assert blocks[0].tool_type == "bash"
-    assert used_native is False
-
-
-def test_resolve_tool_blocks_native_path_untouched_when_native_calls_present():
-    native_calls = [{"name": "bash", "arguments": json.dumps({"command": "echo hi"})}]
-    blocks, used_native, _ = al._resolve_tool_blocks("some prose", native_calls, round_num=1, is_api_model=True)
-    assert used_native is True
-    assert len(blocks) == 1
-    assert blocks[0].tool_type == "bash"
-
-
-# ---------------------------------------------------------------------------
-# Booyaka101's review on #3356: short-circuiting the *whole* parser for native
-# models (`tool_blocks = [] if is_api_model else parse_tool_blocks(...)`) also
-# silently dropped explicit [TOOL_CALL]/<invoke>/<tool_code>/DSML markup that
-# leaked into content as text — a real regression for e.g. DeepSeek-V falling
-# back to DSML when it can't emit structured tool_calls. The fix gates ONLY
-# the fenced-code pattern (via `skip_fenced=`) so Patterns 2-5 stay active.
-# ---------------------------------------------------------------------------
-from src.tool_parsing import parse_tool_blocks, strip_tool_blocks  # noqa: E402
 
 
 def test_skip_fenced_still_recovers_xml_invoke_markup():
@@ -292,12 +224,6 @@ def test_skip_fenced_still_recovers_dsml_markup():
     assert "latest python release" in blocks[0].content
 
 
-def test_skip_fenced_ignores_only_the_fenced_pattern():
-    text = "```bash\nnpm run plan:articles\n```"
-    assert parse_tool_blocks(text, skip_fenced=True) == []
-    assert len(parse_tool_blocks(text, skip_fenced=False)) == 1
-
-
 def test_resolve_tool_blocks_recovers_invoke_markup_for_native_model_with_no_native_calls():
     """End-to-end: a native model (is_api_model=True) that emitted no
     structured tool_calls but leaked an <invoke> call into its text content
@@ -325,13 +251,6 @@ def test_strip_tool_blocks_preserves_fence_when_skip_fenced():
     cleaned = strip_tool_blocks(text, skip_fenced=True)
     assert "```bash" in cleaned
     assert "npm run plan:articles" in cleaned
-
-
-def test_strip_tool_blocks_still_strips_fence_by_default():
-    text = "Here's an example:\n\n```bash\nnpm run plan:articles\n```\n\nJust copy that."
-    cleaned = strip_tool_blocks(text, skip_fenced=False)
-    assert "```bash" not in cleaned
-    assert "npm run plan:articles" not in cleaned
 
 
 def test_strip_tool_blocks_always_strips_invoke_and_dsml_regardless_of_skip_fenced():

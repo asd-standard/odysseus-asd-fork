@@ -16,9 +16,9 @@ import modelsModule from './models.js';
 import chatRenderer from './chatRenderer.js';
 import spinnerModule from './spinner.js';
 import themeModule from './theme.js';
-import documentModule from './document.js?v=20261027worddiff1';
+import documentModule from './document.js?v=20261028windowing1';
 import settingsModule from './settings.js';
-import cookbookModule from './cookbook.js';
+const cookbookModule = null;
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
 import { getSettings } from './appConfig.js';
@@ -5857,13 +5857,6 @@ const COMMANDS = {
     handler: _cmdTourCompare,
     usage: '/tour-compare'
   },
-  'tour-cookbook': {
-    alias: ['cookbook-tour'],
-    category: 'Tours',
-    help: 'Cookbook tour: hardware, downloads, serving',
-    handler: _cmdTourCookbook,
-    usage: '/tour-cookbook'
-  },
   'tour-research': {
     alias: ['research-tour'],
     category: 'Tours',
@@ -5891,13 +5884,6 @@ const COMMANDS = {
     help: 'Settings tour: models, integrations, appearance',
     handler: _cmdTourSettings,
     usage: '/tour-settings'
-  },
-  'tour-gallery': {
-    alias: ['gallery-tour'],
-    category: 'Tours',
-    help: 'Gallery tour: photos, albums, editor',
-    handler: _cmdTourGallery,
-    usage: '/tour-gallery'
   },
   'tour-brain': {
     alias: ['brain-tour', 'tour-memory', 'memory-tour'],
@@ -5947,14 +5933,7 @@ const COMMANDS = {
     hidden: true,
     help: 'Open a tool panel',
     handler: _cmdOpen,
-    usage: '/open Cookbook'
-  },
-  cookbook: {
-    alias: ['cook'],
-    category: 'Tools',
-    help: 'Open Cookbook; use "serve" to jump to model serving',
-    handler: (args, ctx) => _cmdToolPanel('cookbook', args, ctx),
-    usage: '/cookbook  ·  /cookbook serve qwen'
+    usage: '/open Documents'
   },
   email: {
     alias: ['mail', 'inbox'],
@@ -5990,13 +5969,6 @@ const COMMANDS = {
     help: 'Open Library',
     handler: (args, ctx) => _cmdToolPanel('library', args, ctx),
     usage: '/library'
-  },
-  gallery: {
-    alias: ['photos'],
-    category: 'Tools',
-    help: 'Open Gallery',
-    handler: (args, ctx) => _cmdToolPanel('gallery', args, ctx),
-    usage: '/gallery'
   },
   research: {
     alias: [],

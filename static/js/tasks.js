@@ -11,6 +11,7 @@ import { sortModelIds } from './modelSort.js';
 import { ordinalSuffix } from './util/ordinal.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 import { getSettings, invalidateSettings } from './appConfig.js';
+import * as Modals from './modalManager.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -629,16 +630,8 @@ const _CATEGORY_MAP = {
   daily_brief:                'Assistant',
   test_skills:                'Skills',
   audit_skills:               'Skills',
-  ssh_command:          'System',
-  run_script:           'System',
-  run_local:            'System',
-  cookbook_serve:       'Cookbook',
 };
-// Cookbook serves listed FIRST so a just-saved schedule shows at the
-// top instead of scrolling off the bottom of the list. The remaining
-// order is preserved for backwards-compatibility with users who've
-// learned where things are.
-const _CATEGORY_ORDER = ['Cookbook', 'Other', 'Calendar', 'Email', 'Chats', 'Documents', 'Memory', 'Research', 'Skills', 'Assistant', 'System'];
+const _CATEGORY_ORDER = ['Other', 'Calendar', 'Email', 'Chats', 'Documents', 'Memory', 'Research', 'Skills', 'Assistant', 'System'];
 const _CATEGORY_ICONS = {
   Calendar:  '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   Email:     '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
@@ -2605,7 +2598,6 @@ function _classifyResult(text) {
 const _CATEGORY_HUES = [
   { hue: 210, kw: /\b(email|inbox|mail|smtp|imap|reply|summary|spam|urgency)\b/i },     // blue   — email
   { hue: 280, kw: /\b(research|web ?search|deep[-_ ]research|sources?|investigate)\b/i },// purple — research
-  { hue:  35, kw: /\b(cookbook|model[-_ ]?(serve|download)|hf|huggingface|vllm|llama|ollama)\b/i }, // amber — cookbook
   { hue: 150, kw: /\b(calendar|event|meeting|appointment|schedule)\b/i },                // green  — calendar
   { hue: 330, kw: /\b(reminder|note|notify|alert)\b/i },                                 // pink   — reminders
   { hue:  10, kw: /\b(check[-_ ]?in|morning|evening|daily|standup)\b/i },                // red    — check-ins
@@ -2632,7 +2624,6 @@ function _categoryHue(taskName, kind) {
 const _CATEGORY_LABELS = [
   { label: 'email',     kw: /\b(email|inbox|mail|smtp|imap|reply|spam|urgency)\b/i },
   { label: 'research',  kw: /\b(research|web ?search|deep[-_ ]research|sources?|investigate)\b/i },
-  { label: 'cookbook',  kw: /\b(cookbook|model[-_ ]?(serve|download)|hf|huggingface|vllm|llama|ollama)\b/i },
   { label: 'calendar',  kw: /\b(calendar|event|meeting|appointment|schedule)\b/i },
   { label: 'reminders', kw: /\b(reminder|note|notify|alert)\b/i },
   { label: 'check-in',  kw: /\b(check[-_ ]?in|morning|evening|daily|standup)\b/i },
@@ -2960,6 +2951,7 @@ export function openTasks(focusId, opts) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.id = 'tasks-modal';
+  modal.setAttribute('data-window-id', 'tasks-modal');
   modal.innerHTML = `
     <div class="modal-content tasks-modal-content">
       <div class="modal-header">
@@ -3089,6 +3081,9 @@ export function closeTasks() {
   if (!_open) return;
   _open = false;
   _viewingRuns = null;
+  // This window is removed (after its closing animation), so the visibility
+  // observer can never report it leaving. Restore what it displaced now.
+  try { Modals.notifyClosed('tasks-modal', { destroyed: true }); } catch (_) {}
   const modal = document.getElementById('tasks-modal');
   if (modal) {
     const content = modal.querySelector('.modal-content');

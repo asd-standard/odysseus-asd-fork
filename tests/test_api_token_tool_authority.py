@@ -220,32 +220,6 @@ async def test_todos_read_token_is_denied_before_inline_memory_persistence():
     assert raised.value.status_code == 403
 
 
-def test_a_delegated_run_is_denied_the_shell_even_when_the_gate_never_arms():
-    """The approval prompt is raised only once untrusted context is seen.
-
-    An agent run driven by a token that carries no untrusted context reaches
-    ``bash`` with no prompt to bypass at all, so refusing token-answered
-    approvals does not by itself close the path.
-    """
-    context = ToolRunSecurityContext(
-        external_untrusted_context_seen=False,
-        delegated_credential=True,
-    )
-
-    assert context.decision_for("bash").allowed is False
-    assert context.decision_for("python").allowed is False
-
-
-def test_a_delegated_run_cannot_be_handed_the_gate_bypass():
-    context = ToolRunSecurityContext(
-        external_untrusted_context_seen=True,
-        delegated_credential=True,
-        approval_gate_bypassed=True,
-    )
-
-    assert context.decision_for("bash").allowed is False
-
-
 def test_a_delegated_run_still_allows_tools_that_are_not_privileged():
     context = ToolRunSecurityContext(
         external_untrusted_context_seen=False,
@@ -267,7 +241,7 @@ def test_delegated_runs_lose_the_tools_a_non_admin_would_lose():
 
     blocked = delegated_credential_blocked_tools()
 
-    assert {"bash", "python", "read_file", "write_file", "send_email"} <= blocked
+    assert {"send_email", "manage_documents", "manage_settings"} <= blocked
     assert "web_search" not in blocked
     assert "manage_notes" not in blocked
 

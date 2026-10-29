@@ -24,10 +24,8 @@ from core.atomic_io import atomic_write_json as _atomic_write_json  # noqa: E402
 DEFAULT_PRIVILEGES = {
     "can_use_agent": True,
     "can_use_browser": True,
-    "can_use_bash": False,
     "can_use_documents": True,
     "can_use_research": True,
-    "can_generate_images": True,
     "can_manage_memory": True,
     "max_messages_per_day": 0,
     "allowed_models": [],
@@ -454,7 +452,7 @@ class AuthManager:
             else:
                 # Restore the stashed pre-admin map. Fall back to defaults for
                 # users created as admins (their stored map is ADMIN_PRIVILEGES,
-                # which must not leak past demotion — e.g. can_use_bash) and
+                # which must not leak past demotion) and
                 # for admins promoted before the stash existed.
                 target["privileges"] = dict(
                     target.pop("privileges_before_admin", None)

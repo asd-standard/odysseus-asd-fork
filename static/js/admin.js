@@ -25,10 +25,8 @@ function esc(s) { return uiModule.esc(s); }
 const PRIV_LABELS = {
   can_use_agent: 'Agent mode',
   can_use_browser: 'Browser automation',
-  can_use_bash: 'Shell / Python / Files',
   can_use_documents: 'Document editor',
   can_use_research: 'Deep research',
-  can_generate_images: 'Image generation',
   can_manage_memory: 'Memory & skills',
 };
 
@@ -1870,7 +1868,6 @@ const TOOL_META = {
   edit_document:     { name: 'Edit Document',    desc: 'Find & replace in documents',     cat: 'Documents',  ctx: '~200' },
   suggest_document:  { name: 'Suggest Changes',  desc: 'Propose document edits',          cat: 'Documents',  ctx: '~200' },
   manage_documents:  { name: 'Manage Documents', desc: 'List, delete, organize docs',     cat: 'Documents',  ctx: '~150' },
-  generate_image:    { name: 'Generate Image',   desc: 'Create images via AI',            cat: 'Media',      ctx: '~150' },
   manage_memory:     { name: 'Memory',           desc: 'Save and recall memories',        cat: 'Knowledge',  ctx: '~200' },
   manage_skills:     { name: 'Skills',           desc: 'Learn and use procedures',        cat: 'Knowledge',  ctx: '~200' },
   manage_rag:        { name: 'RAG / Docs',       desc: 'Query indexed documents',         cat: 'Knowledge',  ctx: '~150' },
@@ -2525,8 +2522,6 @@ const _TOKEN_SCOPES = [
   { key: 'calendar:write',    label: 'Calendar write',    detail: 'Create and update calendar events' },
   { key: 'memory:read',       label: 'Memory read',       detail: 'Read memory when enabled' },
   { key: 'memory:write',      label: 'Memory write',      detail: 'Write memory when enabled' },
-  { key: 'cookbook:read',     label: 'Cookbook read',     detail: 'List cookbook tasks + tail their tmux output' },
-  { key: 'cookbook:launch',   label: 'Cookbook launch',   detail: 'Launch and stop cookbook serve tasks' },
 ];
 
 function _renderTokenScopeRows(t) {
@@ -2756,8 +2751,7 @@ function initWebhookForm() {
 /* ── Features ── */
 const featureLabels = {
   web_search: 'Web Search', deep_research: 'Deep Research',
-  memory: 'Memory', document_editor: 'Document Editor', rag: 'RAG Knowledge Base', sensitive_filter: 'Sensitive Info Filter',
-  gallery: 'Gallery'
+  memory: 'Memory', document_editor: 'Document Editor', rag: 'RAG Knowledge Base', sensitive_filter: 'Sensitive Info Filter'
 };
 
 async function loadFeatures() {
@@ -2896,7 +2890,7 @@ function initDangerZone() {
   const _LABELS = {
     chats: 'chats', memory: 'memory entries', skills: 'skills',
     notes: 'notes', tasks: 'tasks', documents: 'documents',
-    gallery: 'gallery images', calendar: 'calendar items',
+    calendar: 'calendar items',
   };
   const _wipeMsg = el('adm-wipeMsg');
   modalEl.querySelectorAll('[data-wipe-kind]').forEach(btn => {

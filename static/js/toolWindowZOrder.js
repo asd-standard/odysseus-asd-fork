@@ -1,3 +1,5 @@
+import { Z } from './zLayers.js';
+
 export const TOOL_WINDOW_SELECTOR = 'body > .modal, body > .research-overlay, body > .notes-pane-backdrop';
 
 export function topToolWindowZ(options = {}) {
@@ -5,7 +7,7 @@ export function topToolWindowZ(options = {}) {
     exclude = null,
     root = globalThis.document,
     getStyle = globalThis.getComputedStyle,
-    floor = 250,
+    floor = Z.windowBase,
   } = options;
   let top = floor;
   if (!root || typeof root.querySelectorAll !== 'function' || typeof getStyle !== 'function') return top;
@@ -28,19 +30,12 @@ export function nextToolWindowZ(options = {}) {
   return top + 1;
 }
 
-// Dock chips pinned by the minimized-dock drag interactions reach z 10030
-// (free-drag) / 10020 (mobile rest) — see modalManager.js. A body-portaled
-// dropdown has to clear those too, not just the open tool-window stack, so this
-// floor keeps it above a chip even when no modal is currently raised.
-const DOCK_OVERLAY_FLOOR = 10030;
-
 // The z a body-portaled dropdown/menu needs so it always sits just above every
-// open tool window (and the dock chips) right now. Tool modals get a
+// open tool window, the dock pad, and a dragged chip. Tool modals get a
 // monotonically increasing z from the bring-to-front counter (modalManager),
-// which climbs unbounded over a long session — so the hardcoded `z-index: 10001`
-// these dropdowns historically used eventually rendered them BEHIND their own
-// modal (#4720). Derive the value from the live stack instead, sharing the same
-// single source of truth as nextToolWindowZ().
+// so the hardcoded `z-index: 10001` these dropdowns historically used
+// eventually rendered them BEHIND their own modal (#4720). Derive the value
+// from the live stack instead, sharing the same tier table as the rest.
 export function topPortalZ(options = {}) {
-  return Math.max(topToolWindowZ(options), DOCK_OVERLAY_FLOOR) + 1;
+  return Math.max(topToolWindowZ(options), Z.portalFloor, Z.chipDrag) + 1;
 }

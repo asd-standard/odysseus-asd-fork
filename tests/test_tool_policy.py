@@ -65,7 +65,7 @@ def test_guide_only_policy_blocks_and_hides_tools():
     assert policy.mode == "guide_only"
     assert policy.disable_mcp is True
     assert policy.block_all_tool_calls is True
-    for tool in ("bash", "python", "web_search", "read_file"):
+    for tool in ("web_search", "read_email", "manage_documents", "read_upload"):
         assert tool in policy.disabled_tools
         assert tool in policy.hidden_tools
         assert policy.blocks(tool)
@@ -212,10 +212,10 @@ def test_agent_loop_blocks_guide_only_fenced_tool_before_start(monkeypatch):
     async def _fake_exec(*args, **kwargs):
         nonlocal called
         called = True
-        return ("bash", {"output": "ran", "exit_code": 0})
+        return ("create_document", {"output": "ran", "exit_code": 0})
 
     async def _fake_stream(_candidates, messages, **kwargs):
-        yield _delta_chunk("```bash\necho should-not-run\n```")
+        yield _delta_chunk("```create_document\nTitle\nmd\nBody\n```")
         yield "data: [DONE]\n\n"
 
     monkeypatch.setattr(al, "execute_tool_block", _fake_exec, raising=False)
@@ -228,7 +228,7 @@ def test_agent_loop_blocks_guide_only_fenced_tool_before_start(monkeypatch):
             "local-model",
             [{"role": "user", "content": "GUIDE-ONLY MODE. DO NOT USE TOOLS."}],
             max_rounds=1,
-            relevant_tools={"bash"},
+            relevant_tools={"create_document"},
             tool_policy=policy,
         )
     )
@@ -237,7 +237,7 @@ def test_agent_loop_blocks_guide_only_fenced_tool_before_start(monkeypatch):
     assert not any(event.get("type") == "tool_start" for event in events)
     blocked = [event for event in events if event.get("type") == "tool_output"]
     assert blocked
-    assert blocked[0]["tool"] == "bash"
+    assert blocked[0]["tool"] == "create_document"
     assert blocked[0]["exit_code"] == 1
 
 
@@ -333,10 +333,7 @@ def test_guide_only_blocks_later_round_document_streaming(monkeypatch):
     async def _fake_stream(_candidates, messages, **kwargs):
         nonlocal calls
         calls += 1
-        if calls == 1:
-            yield _delta_chunk("```bash\necho blocked\n```")
-        else:
-            yield _delta_chunk("```create_document\nTitle\nmd\nBody\n```")
+        yield _delta_chunk("```create_document\nTitle\nmd\nBody\n```")
         yield "data: [DONE]\n\n"
 
     monkeypatch.setattr(al, "stream_llm_with_fallback", _fake_stream, raising=False)
@@ -347,7 +344,7 @@ def test_guide_only_blocks_later_round_document_streaming(monkeypatch):
             "local-model",
             [{"role": "user", "content": "Do not use tools."}],
             max_rounds=2,
-            relevant_tools={"bash", "create_document"},
+            relevant_tools={"create_document"},
             tool_policy=policy,
         )
     )
@@ -372,7 +369,7 @@ def test_guide_only_skips_intent_without_action_nudge(monkeypatch):
             "local-model",
             [{"role": "user", "content": "Do not use tools."}],
             max_rounds=2,
-            relevant_tools={"bash"},
+            relevant_tools={"create_document"},
             tool_policy=policy,
         )
     )
@@ -471,7 +468,7 @@ def test_guide_only_skips_teacher_escalation(monkeypatch):
             "local-model",
             [{"role": "user", "content": "Do not use tools."}],
             max_rounds=1,
-            relevant_tools={"bash"},
+            relevant_tools={"create_document"},
             tool_policy=policy,
         )
     )

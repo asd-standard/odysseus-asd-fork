@@ -125,30 +125,7 @@ def test_search_root_defaults_to_agent_workspace():
 # ── end-to-end through execute_tool_block ───────────────────────────────
 
 @pytest.mark.asyncio
-async def test_read_write_edit_confined_e2e(admin):
-    inside = os.path.join(_AGENT_WORKDIR, "confine-e2e.txt")
-    _, r = await execute_tool_block(_block("write_file", json.dumps({"path": inside, "content": "hi"})), owner="a")
-    assert r.get("exit_code") in (0, None), r
-    _, r = await execute_tool_block(_block("read_file", json.dumps({"path": inside})), owner="a")
-    assert "hi" in r.get("output", "")
-    try:
-        os.unlink(inside)
-    except OSError:
-        pass
-
-    _, r = await execute_tool_block(_block("read_file", json.dumps({"path": "/etc/hosts"})), owner="a")
-    assert r.get("exit_code") == 1 or "error" in r
-
-
 @pytest.mark.asyncio
-async def test_subprocess_cwd_is_agent_workdir(admin):
-    _, r = await execute_tool_block(_block("python", "import os; print(os.getcwd())"), owner="a")
-    assert r["exit_code"] == 0
-    assert os.path.realpath(r["output"].strip()) == os.path.realpath(_AGENT_WORKDIR)
-
-
-# ── get_workspace is gone ───────────────────────────────────────────────
-
 def test_get_workspace_tool_is_removed():
     from src.agent_tools import TOOL_HANDLERS
     import src.agent_tools

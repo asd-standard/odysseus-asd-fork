@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-ADMIN_ONLY_TASK_ACTIONS = frozenset({
-    "run_local",
-    "run_script",
-    "ssh_command",
-    "cookbook_serve",
-})
+ADMIN_ONLY_TASK_ACTIONS = frozenset()
 
 
 def is_admin_only_task_action(task_type: str | None, action: str | None) -> bool:

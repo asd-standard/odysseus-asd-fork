@@ -57,12 +57,8 @@ def main():
                 json.dump(entries, f, ensure_ascii=False, indent=2)
         print(f"  {label}: claimed {count} entries")
 
-    # 2. Database tables (sessions, gallery, comparisons, documents)
+    # 2. Database tables (sessions, comparisons, documents)
     from core.database import SessionLocal, Session, Document
-    try:
-        from core.database import GalleryImage
-    except ImportError:
-        GalleryImage = None
     try:
         from core.database import Comparison
     except ImportError:
@@ -75,16 +71,11 @@ def main():
         print(f"  sessions: claimed {count}")
 
         # Documents (have their own owner column; claim the ownerless ones,
-        # mirroring the sessions/gallery/comparisons blocks). The old query set
+        # mirroring the sessions/comparisons blocks). The old query set
         # session_id to itself — a no-op — and never set owner, so ownerless
         # documents stayed ownerless and invisible in the user's Library.
         count = db.query(Document).filter(Document.owner == None).update({"owner": owner})
         print(f"  documents: claimed {count}")
-
-        # Gallery
-        if GalleryImage:
-            count = db.query(GalleryImage).filter(GalleryImage.owner == None).update({"owner": owner})
-            print(f"  gallery: claimed {count}")
 
         # Comparisons
         if Comparison:

@@ -66,7 +66,6 @@ from routes.chat_helpers import (
     _enforce_chat_privileges,
 )
 from src.action_intents import ToolIntent, classify_tool_intent as _classify_tool_intent
-from src.image_model_ids import looks_like_image_generation_model
 from src.tool_policy import (
     WEB_TOOL_NAMES,
     build_effective_tool_policy,
@@ -412,87 +411,6 @@ def _clear_orphaned_session_endpoint(sess, owner: str | None = None) -> bool:
         return False
     finally:
         db.close()
-
-
-def _endpoint_cache_contains_model(endpoint, model: str) -> bool:
-    """Return True when a populated endpoint model cache includes ``model``.
-
-    Empty/malformed caches are treated as unknown rather than a negative match
-    so older image endpoints without cached models still work.
-    """
-    raw = getattr(endpoint, "cached_models", None)
-    if not raw:
-        return True
-    try:
-        models = json.loads(raw) if isinstance(raw, str) else raw
-    except Exception as e:
-        logger.warning("Failed to parse cached models list, treating as containing model", exc_info=e)
-        return True
-    if not isinstance(models, list) or not models:
-        return True
-    wanted = (model or "").strip()
-    return wanted in {str(item).strip() for item in models}
-
-
-def _is_image_generation_session(sess, owner: str | None = None) -> bool:
-    """Whether this chat session should bypass text chat and generate images.
-
-    Model-name prefixes are explicit image models. Endpoint type is only used
-    when the current session endpoint actually matches that image endpoint, and
-    when a populated endpoint model cache includes the selected model. This
-    prevents an image endpoint on the same host from misrouting ordinary text
-    models into the image-generation path.
-    """
-    model = (getattr(sess, "model", "") or "").strip()
-    if looks_like_image_generation_model(model):
-        return True
-
-    endpoint_url = (getattr(sess, "endpoint_url", "") or "").strip()
-    if not endpoint_url:
-        return False
-
-    db = SessionLocal()
-    try:
-        q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
-        if owner:
-            from src.auth_helpers import owner_filter
-            q = owner_filter(q, ModelEndpoint, owner)
-        endpoints = q.all()
-        for endpoint in endpoints:
-            if (getattr(endpoint, "model_type", None) or "llm") != "image":
-                continue
-            if not _session_url_matches_endpoint(endpoint_url, getattr(endpoint, "base_url", "") or ""):
-                continue
-            if _endpoint_cache_contains_model(endpoint, model):
-                return True
-    except Exception:
-        return False
-    finally:
-        db.close()
-    return False
-
-
-def _first_image_attachment(chat_handler, att_ids: List[str], owner: str | None = None) -> Optional[Dict[str, Any]]:
-    """Return the first attached image file that this owner can read."""
-    upload_handler = getattr(chat_handler, "upload_handler", None)
-    if not upload_handler:
-        return None
-    for att_id in att_ids or []:
-        try:
-            info = upload_handler.resolve_upload(att_id, owner=owner)
-        except Exception as e:
-            logger.warning("Failed to resolve image edit upload %s", att_id, exc_info=e)
-            continue
-        if not info:
-            continue
-        name = info.get("name") or info.get("original_name") or info.get("id") or ""
-        mime = info.get("mime", "")
-        try:
-            if upload_handler.is_image_file(name, mime):
-                return info
-        except Exception:
-            continue
-    return None
 
 
 def _recover_empty_session_model(sess, session_id: str, owner: str | None = None) -> bool:
@@ -946,10 +864,8 @@ def setup_chat_routes(
             or (body or {}).get("selected_endpoint_id")
             or ""
         ).strip()
-        # Issue #3229: API callers send JSON, not FormData.  Read from the
-        # JSON body as fallback so callers who send {"allow_bash": true}
-        # actually get bash enabled.
-        allow_bash = form_data.get("allow_bash") or (body or {}).get("allow_bash")
+        # Issue #3229: API callers send JSON, not FormData. Read from the
+        # JSON body as fallback for boolean toggles.
         allow_web_search = form_data.get("allow_web_search") or (body or {}).get("allow_web_search")
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
@@ -1012,10 +928,8 @@ def setup_chat_routes(
         # Intent auto-escalation: if the user is clearly asking the assistant
         # to create a todo, reminder, or calendar event, promote chat → agent
         # for this turn so the LLM has access to manage_notes / manage_calendar.
-        # This is a LIGHT promotion — see the disabled_tools block below, which
-        # withholds shell/code/file tools so the model doesn't try to `bash`
-        # its way through a plain chat request (and fail, especially with the
-        # shell disabled).
+        # This is a LIGHT promotion: it grants the relevant managers without
+        # enabling unrelated domains.
         auto_escalated = False
         _tool_intent = _classify_tool_intent(message) if isinstance(message, str) else None
         _workspace_agent_intent = False
@@ -1023,8 +937,6 @@ def setup_chat_routes(
             chat_mode = "agent"
             auto_escalated = True
             _workspace_agent_intent = _tool_intent.category in {"shell", "workspace"}
-            if _workspace_agent_intent:
-                allow_bash = "true"
             logger.info(
                 "chat→agent auto-escalation: category=%s reason=%s",
                 _tool_intent.category,
@@ -1212,8 +1124,6 @@ def setup_chat_routes(
                 # Restore only the coarse request toggle needed by the exact
                 # sealed action. Current privilege, global-disable, incognito,
                 # compare, and tool-policy gates still run.
-                if pending_tool_approval.tool_name == "bash":
-                    allow_bash = "true"
                 if pending_tool_approval.tool_name in WEB_TOOL_NAMES:
                     allow_web_search = "true"
                     _search_enabled = True
@@ -1317,12 +1227,7 @@ def setup_chat_routes(
             except Exception as e:
                 logger.warning("Failed to parse attachments JSON, ignoring attachments", exc_info=e)
 
-        image_generation_session = _is_image_generation_session(sess, owner=effective_user(request))
         no_memory = str(form_data.get("no_memory", "")).lower() == "true"
-        if image_generation_session:
-            no_memory = True
-            use_rag = "false"
-            search_context = None
         pre_context_tool_policy = build_effective_tool_policy(
             last_user_message=message,
         )
@@ -1482,24 +1387,18 @@ def setup_chat_routes(
         _delegated_credential = is_delegated_credential(request)
         if _delegated_credential:
             disabled_tools.update(delegated_credential_blocked_tools())
-        # Only disable bash when the caller *explicitly* set it to a falsy
-        # value. When unset (None), defer to per-user privilege checks below.
         # Web search is per-turn opt-in: either the chat pre-search setting
         # (`use_web=true`) or agent web toggle (`allow_web_search=true`) must
         # explicitly enable it.
-        if allow_bash is not None and str(allow_bash).lower() != "true":
-            disabled_tools.add("bash")
         _explicit_web_intent = _explicit_web_intent or bool(_tool_intent and _tool_intent.category == "web")
         if is_web_search_explicitly_denied(allow_web_search) or not _search_enabled:
             disabled_tools.update(WEB_TOOL_NAMES)
         if _explicit_web_intent:
             # A direct lookup/search request should not drift into personal
-            # tools or shell fallbacks. It can only use web_search/web_fetch
-            # when the request's explicit web setting enabled them.
+            # tools. It can only use web_search/web_fetch when the request's
+            # explicit web setting enabled them.
             disabled_tools.update({
-                "bash", "python",
                 "search_chats", "manage_skills", "manage_memory",
-                "read_file", "write_file", "edit_file",
                 "create_document", "edit_document", "update_document",
                 "send_email", "reply_to_email",
                 "manage_notes", "manage_calendar", "manage_tasks",
@@ -1547,14 +1446,10 @@ def setup_chat_routes(
         if _user and hasattr(request.app.state, 'auth_manager') and request.app.state.auth_manager:
             _privs = request.app.state.auth_manager.get_privileges(_user)
         if _privs:
-            if not _privs.get("can_use_bash", True):
-                disabled_tools.update({"bash", "python", "read_file", "write_file"})
             if not _privs.get("can_use_browser", True):
                 disabled_tools.update(_BROWSER_MCP_TOOLS)
             if not _privs.get("can_use_documents", True):
                 disabled_tools.update({"create_document", "edit_document", "update_document", "suggest_document"})
-            if not _privs.get("can_generate_images", True):
-                disabled_tools.add("generate_image")
             if not _privs.get("can_manage_memory", True):
                 disabled_tools.update({"manage_memory", "manage_skills"})
             if not _privs.get("can_use_research", True):
@@ -1570,13 +1465,8 @@ def setup_chat_routes(
 
         # Light auto-escalation: the user is in chat mode and just expressed a
         # notes/calendar/email intent. Grant the relevant managers but withhold
-        # the heavy "do things on the computer" tools — otherwise the model
-        # tries to shell out for a request that never needed it, then fails
-        # (and looks broken when the shell is disabled).
+        # browser tools when this turn does not need them.
         if auto_escalated and not _workspace_agent_intent:
-            disabled_tools.update({
-                "bash", "python", "read_file", "write_file",
-            })
             if not _allow_browser_for_web_turn:
                 disabled_tools.update(_BROWSER_MCP_TOOLS)
 
@@ -1591,12 +1481,12 @@ def setup_chat_routes(
                 "chat_with_model", "create_session", "list_sessions",
                 "send_to_session",
                 "pipeline", "manage_session", "manage_memory", "list_models",
-                "generate_image", "ui_control",
+                "ui_control",
             }
             disabled_tools.update(_compare_strip)
-            # In chat mode compare, disable ALL agent tools (no bash, python, file ops)
+            # In chat mode compare, disable all agent tools.
             if chat_mode == 'chat':
-                disabled_tools.update({"bash", "python", "read_file", "write_file", "web_search", "web_fetch", "search_chats", "manage_tasks"})
+                disabled_tools.update({"web_search", "web_fetch", "search_chats", "manage_tasks"})
 
         # Plan mode: investigate read-only, propose a plan, don't mutate. Block
         # every tool not on the read-only allowlist. (stream_agent_loop enforces
@@ -1850,105 +1740,7 @@ def setup_chat_routes(
             yield f'data: {json.dumps(_model_info)}\n\n'
 
             _terminal_saved = False
-            if _is_image_generation_session(sess, owner=_user):
-                from src.settings import get_setting
-                if tool_policy.blocks("generate_image"):
-                    _blocked_msg = tool_policy.reason_for("generate_image")
-                    yield f'data: {json.dumps({"delta": _blocked_msg})}\n\n'
-                    yield "data: [DONE]\n\n"
-                    _active_streams.pop(session, None)
-                    return
-                if not get_setting("image_gen_enabled", True):
-                    yield f'data: {json.dumps({"delta": "Image generation is disabled by the administrator."})}\n\n'
-                    yield "data: [DONE]\n\n"
-                    _active_streams.pop(session, None)
-                    return
-                from src.ai_interaction import do_edit_image, do_generate_image
-                _user_msg = message or ""
-                _image_upload = _first_image_attachment(chat_handler, att_ids, owner=_user)
-                _image_tool_name = "edit_image" if _image_upload else "generate_image"
-                yield f'data: {json.dumps({"type": "tool_start", "tool": _image_tool_name, "command": _user_msg[:100]})}\n\n'
-                yield ": heartbeat\n\n"
-                _progress_queue: asyncio.Queue = asyncio.Queue()
-
-                async def _image_progress_callback(progress: Dict[str, Any]):
-                    try:
-                        _progress_queue.put_nowait(progress)
-                    except Exception:
-                        pass
-
-                if _image_upload:
-                    _img_task = asyncio.create_task(do_edit_image(
-                        _user_msg,
-                        _image_upload.get("path", ""),
-                        model_spec=sess.model,
-                        session_id=session,
-                        owner=_user,
-                        size="1024x1024",
-                        progress_callback=_image_progress_callback,
-                    ))
-                else:
-                    _img_task = asyncio.create_task(do_generate_image(f"{_user_msg}\n{sess.model}\n512x512", session, owner=_user))
-                _img_started = time.time()
-                _img_tick = 0
-                while not _img_task.done():
-                    try:
-                        _progress = await asyncio.wait_for(_progress_queue.get(), timeout=2.0)
-                    except asyncio.TimeoutError:
-                        _progress = None
-                    _img_tick += 1
-                    _elapsed = int(time.time() - _img_started)
-                    _label = "Editing image" if _image_upload else "Generating image"
-                    yield ": image generation still running\n\n"
-                    _progress_data = {"type": "tool_progress", "tool": _image_tool_name, "message": f"{_label}… {_elapsed}s", "elapsed": _elapsed, "tick": _img_tick}
-                    if isinstance(_progress, dict) and _progress.get("total"):
-                        _step = int(_progress.get("step") or 0)
-                        _total = int(_progress.get("total") or 0)
-                        _percent = _progress.get("percent")
-                        _progress_data.update({
-                            "step": _step,
-                            "total": _total,
-                            "percent": _percent,
-                            "message": f"{_label}… {_step}/{_total}",
-                        })
-                    yield f'data: {json.dumps(_progress_data)}\n\n'
-                _img_result = await _img_task
-                _img_output = _img_result.get("results", _img_result.get("error", ""))
-                _img_tool_data = {"type": "tool_output", "tool": _image_tool_name, "command": _user_msg[:100], "output": _img_output, "exit_code": 0 if "error" not in _img_result else 1}
-                for _k in ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality"):
-                    if _k in _img_result:
-                        _img_tool_data[_k] = _img_result[_k]
-                if _image_upload:
-                    _img_tool_data["source_image"] = {
-                        "id": _image_upload.get("id"),
-                        "name": _image_upload.get("name") or _image_upload.get("original_name"),
-                    }
-                yield f'data: {json.dumps(_img_tool_data)}\n\n'
-                if _img_result.get("image_url"):
-                    _img_event = {"type": "generated_image", "url": _img_result.get("image_url")}
-                    for _k in ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality"):
-                        if _img_result.get(_k):
-                            _img_event[_k] = _img_result[_k]
-                    yield f'data: {json.dumps(_img_event)}\n\n'
-                _desc = _img_result.get("results", _img_result.get("error", "Image generation complete"))
-                full_response = _desc
-                yield f'data: {json.dumps({"delta": _desc})}\n\n'
-                # Save to session history
-                if not incognito:
-                    _ev = {"round": 1, "tool": _image_tool_name, "command": _user_msg[:100], "output": _img_output, "exit_code": 0 if "error" not in _img_result else 1}
-                    for _ek in ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality"):
-                        if _img_result.get(_ek):
-                            _ev[_ek] = _img_result[_ek]
-                    if _image_upload:
-                        _ev["source_image_id"] = _image_upload.get("id")
-                        _ev["source_image_name"] = _image_upload.get("name") or _image_upload.get("original_name")
-                    sess.add_message(ChatMessage("assistant", full_response, metadata={"tool_events": [_ev], "model": sess.model}))
-                    session_manager.save_sessions()
-                yield f'data: {json.dumps({"type": "metrics", "data": {"total_time": 0}})}\n\n'
-                yield "data: [DONE]\n\n"
-                _active_streams.pop(session, None)
-                return
-            elif chat_mode == "chat":
+            if chat_mode == "chat":
                 _chat_start = time.time()
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model

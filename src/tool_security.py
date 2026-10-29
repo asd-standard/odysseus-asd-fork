@@ -40,16 +40,6 @@ BUILTIN_EMAIL_TOOLS = frozenset({
 # included (SECURITY.md: email/MCP capabilities are privileged admin
 # functionality).
 NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
-    "bash",
-    "python",
-    "manage_bg_jobs",
-    "read_file",
-    "write_file",
-    "edit_file",
-    "apply_patch",
-    "grep",
-    "glob",
-    "ls",
     "search_chats",
     "manage_memory",
     "manage_skills",
@@ -68,12 +58,6 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "vault_search",
     "vault_get",
     "vault_unlock",
-    "download_model",
-    "serve_model",
-    "serve_preset",
-    "stop_served_model",
-    "cancel_download",
-    "adopt_served_model",
 }
 
 
@@ -82,18 +66,12 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
 # manage_*, model serving, MCP, etc.) is blocked. Allowlist rather than blocklist
 # so any newly added tool defaults to BLOCKED in plan mode — fail safe.
 #
-# bash/python are deliberately NOT here: the shell can mutate (write files, hit
-# the network) and can't be constrained to read-only at the tool layer, so plan
-# mode blocks it outright rather than relying on a prompt to keep it well-behaved.
-# Code/file discovery is covered by the dedicated read-only tools below
-# (read_file, grep, glob, ls) instead of freestyle shell.
+# The agent has no shell or filesystem tools, so plan mode only needs to keep
+# the read-only document/library/web/session tools below enabled.
 PLAN_MODE_READONLY_TOOLS = {
-    "read_file",
-    "grep",
-    "glob",
-    "ls",
     "list_library_files",
     "read_library_file",
+    "read_upload",
     "web_search",
     "web_fetch",
     "search_chats",
@@ -114,12 +92,6 @@ PLAN_MODE_READONLY_TOOLS = {
     # tests/test_email_registry_sync.py.
     "search_emails",
     "scan_email_unsubscribes",
-    "list_served_models",
-    "list_downloads",
-    "list_cached_models",
-    "search_hf_models",
-    "list_serve_presets",
-    "list_cookbook_servers",
     "resolve_contact",
     "chat_with_model",
     "ask_teacher",
@@ -132,7 +104,7 @@ PLAN_MODE_READONLY_TOOLS = {
 # returns the inverse: every known tool name minus the allowlist.
 #
 # Known tool names come from FUNCTION_TOOL_SCHEMAS, but that source is imperfect:
-# some tools are only XML-invocable (e.g. manage_notes, generate_image) and never
+# some tools are only XML-invocable (e.g. manage_notes) and never
 # appear there, and the import can fail outright. Either gap would drop a mutating
 # tool from the subtraction and silently leave it enabled. This set is the static
 # backstop for both: union it in so known mutators are always subtracted, and so a
@@ -140,7 +112,6 @@ PLAN_MODE_READONLY_TOOLS = {
 # here — read-only tools are covered by the allowlist. Keep in sync when adding
 # new mutating tools.
 _PLAN_MODE_KNOWN_MUTATORS = {
-    "write_file", "edit_file", "apply_patch", "todowrite",
     "create_document", "edit_document", "update_document",
     "suggest_document", "manage_documents", "create_session", "manage_session",
     "send_to_session", "pipeline", "manage_memory", "manage_skills",
@@ -155,14 +126,7 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     # entirely on the MCP read-only inventory being present and current.
     "draft_email", "draft_email_reply", "ai_draft_email_reply",
     "download_attachment",
-    "download_model", "serve_model",
-    "stop_served_model", "cancel_download", "adopt_served_model", "serve_preset",
-    "generate_image", "edit_image", "trigger_research", "manage_research",
-    # Shell is never read-only-safe; block it explicitly so it stays out of plan
-    # mode even if the schema list fails to load.
-    "bash", "python",
-    # Controls shell processes (kill); plan mode can't run bash anyway.
-    "manage_bg_jobs",
+    "trigger_research", "manage_research",
 }
 
 

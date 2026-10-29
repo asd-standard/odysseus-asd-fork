@@ -54,7 +54,7 @@ def attachment_ref(info: dict[str, Any]) -> dict[str, Any]:
     created_at = info.get("created_at") or info.get("uploaded_at")
     if created_at:
         ref["created_at"] = created_at
-    for key in ("width", "height", "vision", "vision_model", "gallery_id"):
+    for key in ("width", "height"):
         value = info.get(key)
         if value is not None:
             ref[key] = value
@@ -85,10 +85,7 @@ def _ref_line(ref: dict[str, Any]) -> str:
         parts.append(f"size={ref['size']} bytes")
     if ref.get("checksum_sha256"):
         parts.append(f"sha256={ref['checksum_sha256']}")
-    line = "[" + " | ".join(parts) + "]"
-    if ref.get("vision"):
-        line += f"\n[Attachment description: {str(ref['vision']).strip()}]"
-    return line
+    return "[" + " | ".join(parts) + "]"
 
 
 def _text_from_blocks(blocks: Iterable[Any]) -> str:

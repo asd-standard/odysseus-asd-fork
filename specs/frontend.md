@@ -26,7 +26,7 @@ This spec covers the current browser app in:
 
 - `static/index.html` script tags and modulepreloads;
 - `static/sw.js` `PRECACHE`;
-- app-owned SPA deep links for notes, calendar, cookbook, email, memory, gallery, tasks, and library;
+- app-owned SPA deep links for notes, calendar, email, memory, tasks, and library;
 - `/login` and app-owned static/HTML routes;
 - `/api/activity/heartbeat` browser visibility pings used by the foreground activity gate;
 - `static/app.js` route opener/sidebar/tool-window wiring;
@@ -94,8 +94,7 @@ Current major frontend areas include:
 - settings shell modules under `static/js/settings/`: registry metadata, navigation, finder search, lifecycle/docking, DOM helpers, and persisted sidebar collapse/resize behavior;
 - compare modules under `static/js/compare/`, including sanitized popup/search/image handling;
 - document editor/library in `static/js/document.js` and `static/js/documentLibrary.js`;
-- image editor integration in `static/js/galleryEditor.js` plus leaves under `static/js/editor/`;
-- gallery, email inbox/library, calendar, research panel/jobs/synapse, notes/tasks, assistant, memory/skills, Cookbook/HW Fit, workspace picker, provider device flow, composer ArrowUp recall, theme, modal/window utilities, storage, and accessibility helpers.
+- email inbox/library, calendar, research panel/jobs/synapse, notes/tasks, assistant, memory/skills, provider device flow, composer ArrowUp recall, theme, modal/window utilities, storage, and accessibility helpers.
 
 Coordinator ownership:
 

@@ -1,6 +1,14 @@
 # Agent Tools
 
-Last updated: dev@e71f8ce | 2026-08-25
+Last updated: local userspace build | 2026-10-28
+
+> **Local userspace build.** Shell/filesystem tools (`bash`, `python`,
+> `read_file`, `write_file`, `edit_file`, `apply_patch`, `grep`, `glob`, `ls`,
+> `todowrite`, `manage_bg_jobs`), image/gallery/vision support, and the
+> Cookbook/model-serving subsystem and tools are removed. The only disk reader
+> is `read_upload`, which resolves an upload id and accepts only non-image chat
+> attachments. Library, document, chat, web, productivity, email, and admin
+> tools remain.
 
 ## Scope
 
@@ -29,8 +37,7 @@ This spec covers agent/tool behavior in:
 - `src/agent_tools/` modules and compatibility facade;
 - `src/mcp_manager.py`;
 - `src/builtin_mcp.py`;
-- `src/bg_jobs.py` and `src/bg_monitor.py`;
-- `routes/chat_routes.py`, `routes/chat_helpers.py`, `routes/model_routes.py`, `routes/skills_routes.py`, canonical `routes/mcp/mcp_routes.py` plus its shim, and `routes/workspace_routes.py`;
+- `routes/chat_routes.py`, `routes/chat_helpers.py`, `routes/model_routes.py`, `routes/skills_routes.py`, and canonical `routes/mcp/mcp_routes.py` plus its shim;
 - `mcp_servers/*.py`;
 - frontend stream/admin/settings files that display tool events, workspaces, and disabled tools;
 - `tests/test_agent_loop.py`, `tests/test_tool_*`, and focused MCP/public-policy/schema tests.
@@ -47,14 +54,14 @@ Guide-only/no-tools turns are runtime policy, not prompt advice. `src.tool_polic
 
 Plan mode is a read-only investigation path inside the same loop. It adds a denylist for known mutating tools, filters write/unknown MCP tools, prepends plan-mode instructions, and uses the `update_plan` tool only after a plan is approved for execution. The backend path still exists for compatibility, but current browser chat forces incoming `plan_mode` off and the old plan-window UI module is gone.
 
-Workspace mode is request-scoped. Admin chat can send a workspace directory selected through `static/js/workspace.js`; `agent_loop` injects that fact early in the prompt and `tool_execution` confines bash, python, read/write/edit-file, and code-navigation tools to that root. `routes.workspace_routes` owns admin-only browse/vet APIs, skips hidden/symlink directory traversal, caps listings, and rejects sensitive/root paths before a workspace reaches chat.
+There is no workspace or shell mode in this build. Chat attachments are readable only through `read_upload` (upload id, owner-checked, non-image).
 
 ## Tool Registry
 
 Tool registration is split:
 
-- `src.agent_tools` is now a package/facade. `TOOL_HANDLERS` maps native tool names to handler functions across filesystem, subprocess, web, document, interaction, model-interaction, background-job, session, and admin modules, while `TOOL_TAGS` keeps compatibility metadata and the global MCP manager handle;
-- `src.tools` owns domain do_* implementations for calendar, contacts, Cookbook, image, notes, research, search, system, and vault tools. `src.tool_implementations` is now a compatibility facade that re-exports those symbols and lazy-loads admin manage_* symbols to avoid circular imports;
+- `src.agent_tools` is a package/facade. `TOOL_HANDLERS` maps native tool names to handler functions across web, upload, library, document, interaction, model-interaction, session, and admin modules, while `TOOL_TAGS` keeps compatibility metadata and the global MCP manager handle;
+- `src.tools` owns domain do_* implementations for calendar, contacts, notes, research, search, system, and vault tools. `src.tool_implementations` is a compatibility facade that re-exports those symbols and lazy-loads admin manage_* symbols to avoid circular imports;
 - `src.agent_tools.admin_tools` owns admin manage_* tools for endpoints, MCP, webhooks, tokens, and settings, including command validation for `manage_mcp`;
 - `src.tool_parsing._TOOL_NAME_MAP` owns aliases and prompted-block parsing;
 - `src.tool_schemas.FUNCTION_TOOL_SCHEMAS` and `function_call_to_tool_block()` own native schema and native-call conversion;
@@ -74,7 +81,7 @@ When adding, removing, or renaming a tool, update the registry chain, execution 
 
 Tool retrieval has domain-specific hooks beyond generic similarity: contact queries can surface `resolve_contact`/`manage_contact`; matched skills can add `manage_skills` and their required toolsets to the relevant tool set; explicit admin intents can include admin schemas so prompt text and native schema emission match.
 
-Interaction/session/model helper tools are native first-class tools, not prompt-only conventions. `ask_user` and `update_plan` live in `src.agent_tools.interaction_tools`, model delegation/listing helpers live in `model_interaction_tools`, session creation/list/send/manage helpers live in `session_tools`, and `manage_bg_jobs` lives in `bg_job_tools`.
+Interaction/session/model helper tools are native first-class tools, not prompt-only conventions. `ask_user` and `update_plan` live in `src.agent_tools.interaction_tools`, model delegation/listing helpers live in `model_interaction_tools`, session creation/list/send/manage helpers live in `session_tools`, and 
 
 Prompted-tool parsing includes recovery paths for local/provider text leaks: bare JSON after a web-tool mention, OpenAI-style raw `{"function": ...}` payloads, StepFun/Gemma/DSML markup, Hermes/Qwen JSON bodies nested inside `tool_call` wrappers, and `<function_model><function_call>...</function_call><parameters>...</parameters></function_model>` wrappers from local MLX/Exo models. The Qwen bare end marker requires its pipe delimiter so ordinary text cannot terminate a tool block. Non-dict JSON arguments are rejected back to empty args instead of crashing the turn, common `tex` typos normalize to `text`, and delimiter scans are forward-only so unterminated tool markup cannot drive quadratic rescans. Executed raw tool JSON is stripped from assistant text afterward; this is still not a general-purpose JSON-command parser.
 
@@ -90,7 +97,7 @@ Current call sites include:
 
 Agent streaming emits normal content plus tool progress/output, document stream/update, ask-user choices, plan updates, budget, round exhaustion, loop-breaker, intent-nudge exhaustion, metrics, teacher escalation, research anchor, and finish/error events. Frontend chat stream code and detached replay depend on stable event names. If the stream generator closes while awaiting an in-flight tool, the loop cancels and awaits that tool task so subprocess-backed work is not left orphaned.
 
-Long-running bash jobs can be detached with background markers. `src.bg_jobs` owns persistent job state/result files; `src.bg_monitor` owns auto-continuation when jobs finish. Detached chat runs are in-memory and do not survive server restart, while background job state is disk-backed.
+
 
 Loop-breaker final-answer rounds, explicit repeated-tool/intent-nudge guard events, round-cap continuation signals, optional verifier retries, and teacher escalation are recovery behavior owned by `agent_loop` and `src.teacher_escalation`.
 
@@ -120,7 +127,7 @@ Approval replay injects the sealed first tool result before the resumed model ro
 
 ## MCP
 
-`src.mcp_manager` owns configured MCP server lifecycle, discovered tool state, qualified MCP names, OpenAI schema conversion, call routing, generation invalidation, and connect/disconnect status. It supports stdio, SSE, and Streamable HTTP transports; Streamable HTTP can publish a `needs_auth` state and uses `src.mcp_oauth` for OAuth/OIDC-style authorization, token refresh, and encrypted token storage. Arbitrary MCP tools classify fail-high for approvals. `src.builtin_mcp` owns built-in server registration and the native-vs-MCP split. `mcp_servers/` owns server-specific tools for email, image generation, memory, RAG, and optional browser tooling.
+`src.mcp_manager` owns configured MCP server lifecycle, discovered tool state, qualified MCP names, OpenAI schema conversion, call routing, generation invalidation, and connect/disconnect status. It supports stdio, SSE, and Streamable HTTP transports; Streamable HTTP can publish a `needs_auth` state and uses `src.mcp_oauth` for OAuth/OIDC-style authorization, token refresh, and encrypted token storage. Arbitrary MCP tools classify fail-high for approvals. `src.builtin_mcp` owns built-in server registration and the native-vs-MCP split. `mcp_servers/` owns server-specific tools for email, memory, RAG, and optional browser tooling.
 
 Native bash, python, file, web search, and web fetch tools continue through native fallback even when MCP is unavailable. Browser MCP is optional and can be skipped when cached Playwright/NPX packages are missing. Public users get no MCP schemas, and any `mcp__*` execution attempt must be blocked.
 

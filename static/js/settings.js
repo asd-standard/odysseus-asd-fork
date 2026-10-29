@@ -587,145 +587,6 @@ async function initTeacherModel() {
   });
 }
 
-/* ── Image Generation ── */
-async function initImageSettings() {
-  const modelSel = el('set-imgModelSelect');
-  const qualSel = el('set-imgQualitySelect');
-  const msg = el('set-imgSettingsMsg');
-  const enabledToggle = el('set-imgEnabledToggle');
-  const configWrap = modelSel ? modelSel.closest('div[style*="flex-direction"]') : null;
-  try {
-    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
-    const modelsData = await modelsRes.json();
-    // Inpaint-compat allowlist — image gen here is scoped to inpainting only,
-    // so DALL-E / GPT-Image-1 (no inpaint API) are excluded. Currently:
-    //   - any model with 'inpaint' in the id
-    //   - Stable Diffusion 3.5 Medium (inpaint via diffusers pipeline)
-    const _isInpaintModel = (mid) => {
-      const lower = String(mid || '').toLowerCase();
-      return lower.includes('inpaint')
-        || lower.includes('3.5-medium')
-        || lower.includes('3-5-medium')
-        || lower.includes('sd-3.5-med');
-    };
-    const imageModels = [];
-    (modelsData.items || []).forEach(item => {
-      (item.models || []).forEach(mid => {
-        if (_isInpaintModel(mid)) imageModels.push(mid);
-      });
-    });
-    sortModelIds(imageModels).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
-    // Hardcoded fallbacks shown as "(not detected)" so users know what to
-    // download/serve to enable inpaint here.
-    ['stable-diffusion-3.5-medium', 'stable-diffusion-inpainting'].forEach(mid => {
-      if (!imageModels.includes(mid)) { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid + ' (not detected)'; modelSel.appendChild(opt); }
-    });
-  } catch (e) { console.warn('Failed to load models for image settings', e); }
-  try {
-    const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-    const settings = await settingsRes.json();
-    if (settings.image_model) modelSel.value = settings.image_model;
-    if (settings.image_quality) qualSel.value = settings.image_quality;
-    if (enabledToggle) enabledToggle.checked = settings.image_gen_enabled === true;
-  } catch (e) { console.warn('Failed to load settings', e); }
-
-  function syncImgDisabled() {
-    var off = enabledToggle && !enabledToggle.checked;
-    var card = enabledToggle ? enabledToggle.closest('.admin-card') : null;
-    if (card) card.style.opacity = off ? '0.45' : '';
-    if (configWrap) configWrap.style.pointerEvents = off ? 'none' : '';
-  }
-  syncImgDisabled();
-
-  async function saveSettings() {
-    try {
-      const res = await _postSettings({ image_gen_enabled: enabledToggle ? enabledToggle.checked : false, image_model: modelSel.value, image_quality: qualSel.value });
-      if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
-      msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
-    } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
-  }
-  modelSel.addEventListener('change', saveSettings);
-  qualSel.addEventListener('change', saveSettings);
-  if (enabledToggle) enabledToggle.addEventListener('change', function() { syncImgDisabled(); saveSettings(); });
-}
-
-/* ── Vision ── */
-async function initVisionSettings() {
-  const vlSel = el('set-vlModelSelect');
-  const msg = el('set-visionSettingsMsg');
-  const enabledToggle = el('set-visionEnabledToggle');
-  const configWrap = vlSel ? vlSel.closest('div[style*="flex-direction"]') : null;
-  var _visionEndpoints = [];
-  var visionFallbackWidget = null;
-  var _vlExclude = ['audio', 'realtime', 'tts', 'dall-e', 'embedding', 'search', 'whisper'];
-  function _isVisionModel(mid) {
-    var lower = String(mid || '').toLowerCase();
-    return !_vlExclude.some(function(kw) { return lower.includes(kw); });
-  }
-  try {
-    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
-    const modelsData = await modelsRes.json();
-    const visionModels = [];
-    (modelsData.items || []).forEach(item => {
-      if (item.offline) return;
-      (item.models || []).forEach(mid => {
-        if (_isVisionModel(mid)) {
-          visionModels.push(mid);
-        }
-      });
-    });
-    sortModelIds(visionModels).forEach(mid => {
-      var opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; vlSel.appendChild(opt);
-    });
-  } catch (e) { console.warn('Failed to load models for vision settings', e); }
-  // Also pull the raw endpoint list so the fallback widget can resolve
-  // endpoint-id → models the same way the other cards do.
-  try {
-    _visionEndpoints = await _fetchModelEndpoints();
-  } catch (e) { console.warn('Failed to load endpoints for vision fallback', e); }
-  try {
-    const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-    const settings = await settingsRes.json();
-    if (settings.vision_model) vlSel.value = settings.vision_model;
-    _syncModelLogo(vlSel);
-    if (enabledToggle) enabledToggle.checked = settings.vision_enabled !== false;
-    visionFallbackWidget = _bindFallbackWidget({
-      containerId: 'set-visionFallbacks',
-      addBtnId: 'set-visionAddFallback',
-      endpoints: function() { return _visionEndpoints; },
-      // Vision fallback list filters to vision-capable models (same heuristic
-      // as the primary select above — exclude audio/tts/embedding/etc.).
-      modelsFilter: function(mid) { return _isVisionModel(mid); },
-      settingKey: 'vision_model_fallbacks',
-      initial: Array.isArray(settings.vision_model_fallbacks)
-        ? settings.vision_model_fallbacks.map(function(f) { return { endpoint_id: (f && f.endpoint_id) || '', model: (f && f.model) || '' }; })
-        : [],
-    });
-  } catch (e) { console.warn('Failed to load vision settings', e); }
-
-  function syncVisionDisabled() {
-    var off = enabledToggle && !enabledToggle.checked;
-    var card = enabledToggle ? enabledToggle.closest('.admin-card') : null;
-    if (card) card.style.opacity = off ? '0.45' : '';
-    if (configWrap) configWrap.style.pointerEvents = off ? 'none' : '';
-  }
-  syncVisionDisabled();
-
-  async function saveSettings() {
-    try {
-      await _postSettings({ vision_enabled: enabledToggle ? enabledToggle.checked : true, vision_model: vlSel.value });
-      msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
-    } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
-  }
-  vlSel.addEventListener('change', saveSettings);
-  if (enabledToggle) enabledToggle.addEventListener('change', function() { syncVisionDisabled(); saveSettings(); });
-
-  _registerAiEndpointRefresh(function(endpoints) {
-    _visionEndpoints = endpoints;
-    if (visionFallbackWidget && visionFallbackWidget.refresh) visionFallbackWidget.refresh();
-  });
-}
-
 /* ── Face Recognition ── */
 
 /* ── Text to Speech ── */
@@ -1689,9 +1550,7 @@ const SHORTCUT_DEFAULTS = {
   // unbound (empty) so the user can assign their own in the panel.
   open_calendar:  'ctrl+alt+c',
   open_compare:   '',
-  open_cookbook:  '',
   open_research:  '',
-  open_gallery:   '',
   open_library:   '',
   open_memory:    '',
   open_notes:     '',
@@ -1712,9 +1571,7 @@ const SHORTCUT_ICONS = {
   focus_input:    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   open_calendar:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
   open_compare:   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/><path d="M10 8h4"/><path d="M10 16h4"/></svg>',
-  open_cookbook:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
   open_research:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
-  open_gallery:   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
   open_library:   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
   open_memory:    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.5-3 5.7V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.3C6.2 13.5 5 11.4 5 9a7 7 0 0 1 7-7z"/><line x1="10" y1="22" x2="14" y2="22"/></svg>',
   open_notes:     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>',
@@ -1735,9 +1592,7 @@ const SHORTCUT_LABELS = {
   focus_input:    'Focus chat input',
   open_calendar:  'Open Calendar',
   open_compare:   'Open Compare',
-  open_cookbook:  'Open Cookbook',
   open_research:  'Open Deep Research',
-  open_gallery:   'Open Gallery',
   open_library:   'Open Library',
   open_memory:    'Open Memory',
   open_notes:     'Open Notes',
@@ -1749,7 +1604,7 @@ const SHORTCUT_CATEGORIES = [
   { name: 'Navigation', keys: ['search', 'toggle_sidebar', 'focus_input', 'settings'] },
   { name: 'Sessions', keys: ['new_session', 'fav_session', 'delete_session'] },
   { name: 'Tools', keys: ['incognito', 'tts', 'cancel'] },
-  { name: 'Open Tools', keys: ['open_calendar', 'open_compare', 'open_cookbook', 'open_research', 'open_gallery', 'open_library', 'open_memory', 'open_notes', 'open_tasks', 'open_theme'] },
+  { name: 'Open Tools', keys: ['open_calendar', 'open_compare', 'open_research', 'open_library', 'open_memory', 'open_notes', 'open_tasks', 'open_theme'] },
 ];
 
 function _formatKeyCaps(combo) {
@@ -2202,8 +2057,6 @@ function initAll() {
   initDefaultChat();
   initTeacherModel();
   initUtilityModel();
-  initImageSettings();
-  initVisionSettings();
   initTtsSettings();
   initSttSettings();
   initSearchSettings();
@@ -5110,8 +4963,6 @@ async function initUnifiedIntegrations() {
       { key: 'calendar:write', label: 'Calendar write', detail: 'Create and update calendar events' },
       { key: 'memory:read', label: 'Memory', detail: 'Read memory when enabled' },
       { key: 'memory:write', label: 'Memory write', detail: 'Write memory when enabled' },
-      { key: 'cookbook:read', label: 'Cookbook', detail: 'List cookbook tasks + tail their tmux output (debug a model serve from outside the UI)' },
-      { key: 'cookbook:launch', label: 'Cookbook launch', detail: 'Launch and stop cookbook serve tasks. Powerful: runs SSH commands on your configured servers, bounded by the same allowlist the UI uses (vllm/python3/sglang/llama-server/...)' },
     ];
     // Strict name-prefix match keeps Codex and Claude tokens in their own forms.
     const agentTokens = (Array.isArray(tokens) ? tokens : []).filter(tok =>
@@ -5124,7 +4975,6 @@ async function initUnifiedIntegrations() {
       email: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 6 12 13 22 6"/></svg>',
       calendar: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
       memory: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-2.5 2.5A2.5 2.5 0 0 0 2 9.5v3A2.5 2.5 0 0 0 4.5 15a2.5 2.5 0 0 0 2.5 2.5A2.5 2.5 0 0 0 9.5 20H10V2z"/><path d="M14.5 2a2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1 2.5 2.5A2.5 2.5 0 0 1 22 9.5v3A2.5 2.5 0 0 1 19.5 15a2.5 2.5 0 0 1-2.5 2.5A2.5 2.5 0 0 1 14.5 20H14V2z"/></svg>',
-      cookbook: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
     };
     const _scopeNiceLabel = (label) => label.replace(/\s+(write|drafts?|send)$/i, '');
     const _scopeAction = (key) => (key.split(':')[1] || '').toLowerCase();

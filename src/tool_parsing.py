@@ -230,14 +230,6 @@ def _normalize_dsml(text: str) -> str:
 
 # Map model tool names to our tool types
 _TOOL_NAME_MAP = {
-    "shell": "bash",
-    "bash": "bash",
-    "terminal": "bash",
-    "command": "bash",
-    "execute": "bash",
-    "run": "bash",
-    "python": "python",
-    "code": "python",
     "search": "web_search",
     "web_search": "web_search",
     "websearch": "web_search",
@@ -248,17 +240,6 @@ _TOOL_NAME_MAP = {
     "webfetch": "web_fetch",
     "fetch_url": "web_fetch",
     "fetch": "web_fetch",
-    "read": "read_file",
-    "read_file": "read_file",
-    "cat": "read_file",
-    "write": "write_file",
-    "write_file": "write_file",
-    "save": "write_file",
-    "apply_patch": "apply_patch",
-    "patch": "apply_patch",
-    "todowrite": "todowrite",
-    "todo_write": "todowrite",
-    "todo_update": "todowrite",
     "document": "update_document",
     "update_document": "update_document",
     "create_document": "create_document",
@@ -323,9 +304,6 @@ _TOOL_NAME_MAP = {
     "notes": "manage_notes",
     "todo": "manage_notes",
     "todos": "manage_notes",
-    "manage_bg_jobs": "manage_bg_jobs",
-    "bg_jobs": "manage_bg_jobs",
-    "background_jobs": "manage_bg_jobs",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {
@@ -734,7 +712,7 @@ def _raw_openai_tool_call_to_block(value) -> Optional[ToolBlock]:
     elif tool_type in ("manage_tasks", "manage_skills", "api_call", "manage_endpoints",
                        "manage_mcp", "manage_webhooks", "manage_tokens",
                        "manage_documents", "manage_settings", "manage_notes",
-                       "manage_research", "manage_bg_jobs"):
+                       "manage_research"):
         content = json.dumps(args)
     elif tool_type in ("list_models",):
         content = args.get("filter", "") if tool_type == "list_models" else ""

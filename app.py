@@ -83,7 +83,6 @@ from core.exceptions import (
 import bcrypt as _bcrypt
 
 from src.app_helpers import abs_join, serve_html_with_nonce
-from src.generated_images import GENERATED_IMAGE_HEADERS, resolve_generated_image_path
 from src.owner_identity import auth_disabled
 from starlette.responses import RedirectResponse
 
@@ -179,14 +178,11 @@ from starlette.responses import JSONResponse as _JSONResponse
 REQUEST_HARD_TIMEOUT = float(os.getenv("REQUEST_HARD_TIMEOUT", "45"))
 _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/chat",            # streaming
-    "/api/shell/stream",    # SSE
     "/api/research",        # multi-minute jobs
     "/api/model/download",  # tmux setup may run pip installs
     "/api/model/probe",     # SSE; iterates models with up to 8s timeout each
     "/api/model-endpoints", # /probe sub-route also iterates models
-    "/api/cookbook/setup",  # remote pacman/apt installs
     "/api/upload",          # large files
-    "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
     "/api/memory/audit",    # retains own 120s LLM inactivity timeout
 )
 
@@ -508,49 +504,6 @@ class _RevalidatingStatic(StaticFiles):
 
 app.mount("/static", _RevalidatingStatic(directory=STATIC_DIR), name="static")
 
-# ========= GENERATED IMAGES =========
-@app.get("/api/generated-image/{filename}")
-async def serve_generated_image(filename: str, request: Request):
-    """Serve generated images from the data directory."""
-    img_path = resolve_generated_image_path(filename)
-    # SECURITY: filename is the only key, so anyone who knows / guesses a
-    # 12-hex content hash could pull another user's image bytes. Require
-    # auth and verify ownership via the gallery row (when one exists).
-    try:
-        from src.auth_helpers import get_current_user
-        from core.database import SessionLocal as _SL, GalleryImage as _GI
-        _user = get_current_user(request)
-        if _user:
-            _db = _SL()
-            try:
-                _row = _db.query(_GI).filter(_GI.filename == filename).first()
-                # Generated-but-not-yet-imported images have no row → allow.
-                # Row exists with a different owner → 404 (don't confirm existence).
-                if _row is not None and _row.owner and _row.owner != _user:
-                    raise HTTPException(status_code=404, detail="Image not found")
-            finally:
-                _db.close()
-    except HTTPException:
-        raise
-    except Exception as _e:
-        logger.warning("Image ownership verification failed for %r", filename, exc_info=_e)
-    ext = filename.rsplit('.', 1)[-1].lower()
-    mime = {
-        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-        "webp": "image/webp", "gif": "image/gif",
-        "mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
-        "mkv": "video/x-matroska", "m4v": "video/mp4",
-    }.get(ext, "application/octet-stream")
-    # Generated-image filenames are content hashes → the bytes for a given
-    # filename never change. Cache them hard so the gallery doesn't
-    # re-download every full-size image each time it's opened. `immutable`
-    # tells the browser it never needs to revalidate within the max-age.
-    return FileResponse(
-        str(img_path),
-        media_type=mime,
-        headers=GENERATED_IMAGE_HEADERS,
-    )
-
 # ========= YOUTUBE INIT =========
 from services.youtube import init_youtube
 init_youtube()
@@ -775,14 +728,6 @@ app.include_router(setup_folder_routes())
 from routes.signature_routes import setup_signature_routes
 app.include_router(setup_signature_routes())
 
-# Gallery (image library)
-from routes.gallery.gallery_routes import setup_gallery_routes
-app.include_router(setup_gallery_routes())
-
-# Persisted image-editor drafts (server-backed projects)
-from routes.editor_draft_routes import setup_editor_draft_routes
-app.include_router(setup_editor_draft_routes())
-
 # Scheduled tasks + event bus
 from src.task_scheduler import TaskScheduler
 task_scheduler = TaskScheduler(session_manager)
@@ -798,19 +743,6 @@ app.include_router(setup_assistant_routes(task_scheduler))
 from routes.calendar_routes import setup_calendar_routes
 calendar_router = setup_calendar_routes(upload_handler=upload_handler)
 app.include_router(calendar_router)
-
-# Shell (user-facing command execution)
-from routes.shell_routes import setup_shell_routes
-app.include_router(setup_shell_routes())
-
-# Cookbook (model download/serve/cache, cookbook state sync)
-from routes.cookbook_routes import setup_cookbook_routes
-app.include_router(setup_cookbook_routes())
-
-
-# Hardware model fitting (cookbook "What Fits?" tab)
-from routes.hwfit_routes import setup_hwfit_routes
-app.include_router(setup_hwfit_routes())
 
 # Model A/B Comparison
 from routes.compare.compare_routes import setup_compare_routes
@@ -914,20 +846,12 @@ async def serve_calendar(request: Request):
 # the matching modal based on window.location.pathname. Each route also
 # gets a unique favicon + page title via inline script in index.html so
 # bookmarks render with tool-specific icons.
-@app.get("/cookbook")
-async def serve_cookbook(request: Request):
-    return await serve_index(request)
-
 @app.get("/email")
 async def serve_email(request: Request):
     return await serve_index(request)
 
 @app.get("/memory")
 async def serve_memory(request: Request):
-    return await serve_index(request)
-
-@app.get("/gallery")
-async def serve_gallery(request: Request):
     return await serve_index(request)
 
 @app.get("/tasks")
@@ -1065,13 +989,6 @@ async def _startup_event():
         await asyncio.to_thread(purge_all_expired)
     except Exception as _trash_err:
         logger.debug(f"Startup trash purge skipped: {_trash_err}")
-    # Always-on monitor that auto-continues the agent when a background bash
-    # job (#!bg) finishes — re-invokes the turn with the job output.
-    try:
-        from src.bg_monitor import start_bg_monitor
-        _startup_tasks.append(start_bg_monitor())
-    except Exception as _e:
-        logger.warning("Failed to start background-job monitor: %s", _e)
     # MCP servers can be slow or blocked by local tooling. Connect them after
     # the web server is accepting traffic instead of delaying the whole UI.
     async def _startup_mcp_connections():
@@ -1281,15 +1198,6 @@ async def _startup_event():
                 logger.warning(f"Nightly skill audit failed: {e}")
 
     _startup_tasks.append(asyncio.create_task(_skill_audit_nightly_loop()))
-
-    # Cookbook serve lifecycle — kills scheduler-launched serves whose
-    # window-end has passed. Paired with the cookbook_serve builtin
-    # action; both are no-ops unless a scheduled task actually launches
-    # something with end_after_min set. Removing this line + the
-    # cookbook_serve entry in BUILTIN_ACTIONS + src/cookbook_serve_lifecycle.py
-    # removes the feature.
-    from src.cookbook_serve_lifecycle import cookbook_serve_lifecycle_loop
-    _startup_tasks.append(asyncio.create_task(cookbook_serve_lifecycle_loop()))
 
     logger.info("Application startup complete")
 

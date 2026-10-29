@@ -16,8 +16,8 @@ used to have no try/finally around it. If the generator is closed while
 suspended on `await _progress_q.get()` (which is exactly what Starlette does
 via `aclose()` when an SSE client disconnects), GeneratorExit is thrown at
 that point and `_tool_task` is abandoned mid-flight — never awaited, never
-cancelled. For a long-running `bash`/`python` tool this orphans the
-subprocess server-side with nothing left to reap it.
+cancelled. For a long-running tool this orphans the execution task server-side
+with nothing left to reap it.
 
 The fix wraps the drain loop in try/finally and cancels+awaits `_tool_task`
 on early exit. This test drives the real stream_agent_loop with a fake tool
@@ -42,7 +42,7 @@ def test_tool_task_cancelled_on_generator_close(monkeypatch):
         except asyncio.CancelledError:
             cancelled["v"] = True
             raise
-        return ("bash", {"output": "ok", "exit_code": 0})
+        return ("web_search", {"output": "ok", "exit_code": 0})
 
     monkeypatch.setattr(al, "get_setting", lambda key, default=None: default, raising=False)
     monkeypatch.setattr(al, "get_mcp_manager", lambda: None, raising=False)
@@ -51,7 +51,7 @@ def test_tool_task_cancelled_on_generator_close(monkeypatch):
     monkeypatch.setattr(al, "blocked_tools_for_owner", lambda owner: set(), raising=False)
     monkeypatch.setattr(al, "execute_tool_block", _slow_exec, raising=False)
 
-    native_calls = [{"name": "bash", "arguments": json.dumps({"command": "sleep 60"})}]
+    native_calls = [{"name": "web_search", "arguments": json.dumps({"query": "sleep 60"})}]
 
     async def _fake_stream(_candidates, messages, **kwargs):
         yield f'data: {json.dumps({"delta": "Running it now."})}\n\n'
@@ -65,7 +65,7 @@ def test_tool_task_cancelled_on_generator_close(monkeypatch):
             "https://api.openai.com/v1", "gpt-4o",
             [{"role": "user", "content": "run sleep 60"}],
             max_rounds=2,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
         )
         saw_tool_start = False
         saw_tool_progress = False

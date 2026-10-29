@@ -49,8 +49,6 @@ Calendar credentials are encrypted at rest and are not returned to clients. CalD
 
 `src.task_scheduler.TaskScheduler` owns scheduled task execution, next-run computation, strict single-slot execution, queued/running cleanup at startup, overdue next-run advancement, webhook-triggered tasks, notifications, run records, chained tasks, and event-triggered actions.
 
-Cookbook serve scheduling crosses this domain. The Cookbook UI creates `cookbook_serve` scheduled tasks, can mirror them as Cookbook calendar events with `cookbook_event_uid`, and task deletion cleans up the linked event when present, falling back to exact-summary matching for legacy events without a stored UID. Cookbook command execution/lifecycle details stay in `cookbook-hwfit.md`.
-
 `routes.task.task_routes` owns task CRUD, status, manual run/stop/cancel, pause/resume, owner-scoped run/activity history, metadata, onboarding defaults, cache clearing, parse endpoints, and webhook-token regeneration. `app.py` imports the canonical package path; `routes/task_routes.py` replaces its module entry with the canonical module for legacy import and monkeypatch compatibility. Chained-task `then_task_id` values are validated as same-owner relationships on create/update, and scheduler execution also rejects cross-owner or cyclic chains.
 
 Task webhook paths are auth-exempt at the app middleware layer only for `/api/tasks/{task_id}/webhook/{token}`. The route still validates active task state plus task-specific webhook token before dispatch.
@@ -65,7 +63,7 @@ Task runtime behavior:
 - event-bus triggers persist counters and `next_run` before scheduler handoff;
 - the in-process scheduler is gated by `ODYSSEUS_INPROCESS_TASKS`, and multiple enabled app processes can double-run work.
 - action tasks with `run_local`, `run_script`, `ssh_command`, or
-  `cookbook_serve` are admin-only. `routes.task_routes` enforces this on
+  shell/SSH/script actions are removed in this build. `routes.task_routes` enforces this on
   create/update/manual run and hides those actions from `/meta/actions` for
   non-admin owners; webhook and scheduler execution pause the task and clear
   `next_run` if an admin-only action belongs to a non-admin owner.

@@ -10,10 +10,9 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import emojiPicker from './emojiPicker.js';
 import markdownModule from './markdown.js';
-import codeRunnerModule from './codeRunner.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261027worddiff1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261028windowing1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -204,6 +203,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   export function init(apiBase) {
     API_BASE = apiBase;
+    // The doc panel is not a modal element, so ModalManager cannot hide it.
+    // Tell it how "collapse this window" works; the foreground stack uses this
+    // when another window opens over the editor.
+    try {
+      Modals.registerMinimizeHook('doc-panel', () => closePanel('down'));
+    } catch (e) { console.debug('doc-panel minimize hook not registered:', e); }
     initLibrary({
       apiBase,
       esc: _esc,
@@ -4860,6 +4865,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (!container) return;
 
     isOpen = true;
+    // Register the chip hooks BEFORE announcing the foreground: another window
+    // opening over the editor must be able to collapse it, and that requires a
+    // registered state entry.
+    _ensureDocChipRegistered();
+    // Take the foreground: any window it covers collapses to a chip.
+    try { Modals.notifyOpened('doc-panel'); } catch (_) {}
     // Doc was opened last → it goes in front of the email windows (clears the
     // email-front flag; the doc/email z-index alternation lives in CSS).
     document.body.classList.remove('email-front');
@@ -6986,10 +6997,18 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         _minimizedDocId = null;
         _markDocVisibleState(_lastSessionId, 'closed');
         Modals.unregister('doc-panel');
+        // Real close: the editor can never come back, so drop its restoration
+        // chain (a minimized window closed from its chip must not resurrect the
+        // thing it displaced).
+        try { Modals.forgetForeground('doc-panel'); } catch (_) {}
       }
       return;
     }
     isOpen = false;
+    // Leaving the foreground: hand the screen back to whatever this window
+    // displaced (a minimize hands it back; a close restores it too, unless the
+    // panel was itself only a chip — handled above).
+    try { Modals.notifyLeft('doc-panel'); } catch (_) {}
     // On touch, closing the doc should leave the keyboard DOWN. The tap blurs
     // the textarea (keyboard starts down), but a stray refocus during teardown
     // (the view behind regaining focus, etc.) was bouncing it back up. Blur any
@@ -7019,6 +7038,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _minimizedDocId = null;
       _markDocVisibleState(_lastSessionId, 'closed');
       Modals.unregister('doc-panel');
+      // Destroyed, not displaced: nothing may restore it later.
+      try { Modals.forgetForeground('doc-panel'); } catch (_) {}
     } else {
       _markDocVisibleState(_lastSessionId, 'closed');
     }
@@ -9781,28 +9802,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       return;
     }
 
-    if (!codeRunnerModule) {
-      outputPanel.innerHTML = '<pre class="doc-run-error">Code runner not loaded</pre>';
-      setTimeout(() => { if (outputPanel) outputPanel.style.display = 'none'; }, 5000);
-      return;
-    }
-
-    if (lang === 'bash' || lang === 'sh' || lang === 'shell' || lang === 'zsh') {
-      codeRunnerModule.runServer(code, outputPanel, 'bash');
-      return;
-    }
-
-    if (lang === 'python' || lang === 'py') {
-      codeRunnerModule.runServer(code, outputPanel, 'python');
-      return;
-    }
-
-    if (lang === 'javascript' || lang === 'js') {
-      codeRunnerModule.runJavaScript(code, outputPanel);
-      return;
-    }
-
-    outputPanel.innerHTML = '<pre class="doc-run-error">Unsupported language. Supported: bash, python, javascript, html</pre>';
+    outputPanel.innerHTML = '<pre class="doc-run-error">Server-side execution is disabled. HTML/SVG previews are available.</pre>';
     setTimeout(() => { if (outputPanel) outputPanel.style.display = 'none'; }, 5000);
   }
 

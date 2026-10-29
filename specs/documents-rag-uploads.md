@@ -31,14 +31,13 @@ This spec covers file/document context, document storage, and vector retrieval i
 
 Upload-index reads track the live and `.bak` files by device, inode, size, nanosecond mtime, and ctime, then verify the combined signature after parsing. This catches same-timestamp corruption/replacement and prevents stale parsed data from being cached under a newer file identity. Non-destructive reads can recover from the backup; destructive cleanup requires a valid live index and never treats an older backup as deletion authority. Lifecycle writes can synchronize the backup so intentionally removed metadata is not resurrected.
 
-`src.upload_limits` owns central upload-size caps and environment overrides for chat attachments, gallery, transforms, memory import, personal uploads, email compose, STT audio, and ICS imports. Invalid configured limits fail fast at import so routes do not silently accept unsafe sizes. Docker installs `libmagic1` plus `python-magic` so `UploadHandler.detect_content_type()` can sniff bytes in the official image; native installs can fall back to extension/MIME guesses when `python-magic` is unavailable.
+`src.upload_limits` owns central upload-size caps and environment overrides for chat attachments, memory import, personal uploads, email compose, STT audio, and ICS imports. Invalid configured limits fail fast at import so routes do not silently accept unsafe sizes. Docker installs `libmagic1` plus `python-magic` so `UploadHandler.detect_content_type()` can sniff bytes in the official image; native installs can fall back to extension/MIME guesses when `python-magic` is unavailable.
 
 `routes/upload_routes.py` owns:
 
 - `POST /api/upload`, returning uploaded file metadata;
 - reference-aware admin upload cleanup and stats;
 - `GET /api/upload/{file_id}`;
-- `GET/PUT /api/upload/{file_id}/vision` for editable OCR/vision cache;
 - thumbnail and masked owner/admin access behavior.
 
 It does not currently expose a general upload list/delete route. Download/preview responses that serve uploaded content should include `X-Content-Type-Options: nosniff` where route code owns the response so browser MIME sniffing does not widen accepted upload types.
@@ -49,7 +48,6 @@ Chat does not own attachment extraction. Runtime flow:
 
 - the frontend uploads files and submits attachment IDs;
 - `ChatHandler.preprocess_message()` resolves IDs with the session owner through `UploadHandler.resolve_upload()`, which enforces owner/admin access and no longer treats missing owner context as permission to read owned uploads;
-- vision/OCR cache and attachment metadata are prepared before model calls;
 - text-only models receive stripped multimodal blocks;
 - `src.document_processor.build_user_content()` produces model-ready text, PDF text, Office/EPUB text when MarkItDown or the DOCX fallback is available, image/multimodal blocks, truncation, and PDF/Office auto-document updates;
 - chat streams attachment, PDF-created `doc_update`, and `rag_sources` events where applicable.
@@ -63,7 +61,7 @@ has no extension.
 
 `src.attachment_refs` owns the stable `attachment_ref` shape used outside raw
 upload storage: attachment id, name, MIME type, size, and optional checksum,
-creation time, dimensions, vision text/model, and gallery id. Live provider
+creation time, dimensions, and checksum. Live provider
 calls may still receive multimodal data URLs for the current turn, but durable
 chat content is normalized to readable text plus compact reference lines.
 Structured references remain in message attachment metadata, and chat FTS
@@ -85,7 +83,7 @@ replacement and surfaces a route conflict or tool error. Reservations serialize
 with cleanup through the upload-index lock and refresh access time.
 
 Admin cleanup first scans chat content and attachment metadata, current and
-versioned documents including PDF markers, gallery filenames/hashes, note
+versioned documents including PDF markers, upload checksums, note
 image/color/content/checklist fields, and calendar color/description/location
 fields. Reference discovery or index-integrity failure aborts cleanup; the
 lower-level API removes nothing without both completed id and hash snapshots.
@@ -176,7 +174,7 @@ Some non-route tool/script paths can index ownerless or arbitrary directories an
 
 ## Security And Provenance
 
-Uploaded files, documents, RAG chunks, extracted attachment text, OCR/vision text, PDF marker content, and source-email metadata are untrusted external or user-provided context when sent to an LLM.
+Uploaded files, documents, RAG chunks, extracted attachment text, PDF marker content, and source-email metadata are untrusted external or user-provided context when sent to an LLM.
 
 Concrete enforcement points include:
 

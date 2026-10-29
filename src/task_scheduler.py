@@ -1249,19 +1249,12 @@ class TaskScheduler:
 
         from src.builtin_actions import TaskNoop
         try:
-            # Pass task prompt as script/command for ssh_command/run_script actions.
             def _progress(message: str):
                 self._set_run_progress(run_id, message)
 
             kwargs = {"owner": task.owner, "task_name": task.name, "progress_cb": _progress}
             if task.prompt:
                 kwargs["prompt"] = task.prompt
-            if task.action in ("run_script", "run_local", "ssh_command") and task.prompt:
-                kwargs["script" if task.action in ("run_script", "run_local") else "command"] = task.prompt
-            # cookbook_serve carries its JSON config in task.prompt — feed it
-            # through as `command` so action_cookbook_serve can json.loads it.
-            elif task.action == "cookbook_serve" and task.prompt:
-                kwargs["command"] = task.prompt
             result, success = await action_fn(**kwargs)
             return result, success
         except TaskNoop:
@@ -2640,11 +2633,9 @@ class TaskScheduler:
                     "manage_calendar", "manage_notes", "manage_tasks", "manage_memory",
                     "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "archive_email",
                     "mark_email_read", "delete_email", "resolve_contact",
-                    "search_chats", "web_search", "web_fetch", "read_file",
+                    "search_chats", "web_search", "web_fetch",
                     "create_document", "update_document", "edit_document",
-                    "generate_image", "trigger_research",
-                    "download_model", "serve_model", "list_served_models", "stop_served_model",
-                    "edit_image",
+                    "trigger_research",
                 ]),
                 session_id=session_id,
                 is_active=True,

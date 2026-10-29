@@ -5,7 +5,7 @@ Last updated: dev@e57f60b | 2026-07-20
 ## Scope
 
 Canonical placeholder vendor ID `huggingface`; download/fit metadata in
-`services/hwfit/`; OpenAI-compatible inference providers/TGI handled as their
+OpenAI-compatible inference providers/TGI handled as their
 serving dialect. There is no dedicated Hugging Face canonical reader on
 current `dev`.
 
@@ -16,7 +16,7 @@ card metadata. Current canonical normalization does not map `pipeline_tag`,
 `config.model_type`, or Hub task/modality fields. An explicitly selected
 Hugging Face vendor uses generic identity-only normalization.
 
-This source is `cookbook_hf`/registry confidence, not live endpoint truth.
+This source is registry confidence, not live endpoint truth.
 Free-form tags, README/card prose, repository names, and architecture names do
 not automatically claim capability. A serving engine can load a model with
 missing projection, different template, or disabled parser.

@@ -9,16 +9,15 @@ import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js?v=20260819approvalcontrol1';
-import chatStream from './chatStream.js?v=20261027worddiff1';
+import chatStream from './chatStream.js?v=20261028windowing1';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
-import documentModule from './document.js?v=20261027worddiff1';
+import documentModule from './document.js?v=20261028windowing1';
 import * as emailInbox from './emailInbox.js?v=20260815approvalsave1';
-import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js?v=20260815approvalsave1';
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
@@ -754,7 +753,6 @@ import { loadPanel } from './panels.js';
     bubble.dataset.imageUrl = imageUrl;
     chatBox.appendChild(bubble);
     uiModule.scrollHistory();
-    window.dispatchEvent(new CustomEvent('gallery-refresh'));
     return true;
   }
 
@@ -1975,7 +1973,6 @@ import { loadPanel } from './panels.js';
 	        fd.set('mode', 'chat');
 	        fd.set('plan_mode', 'false');
 	      }
-      fd.append('allow_bash', el('bash-toggle').checked ? 'true' : 'false');
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');
@@ -5386,14 +5383,6 @@ import { loadPanel } from './panels.js';
       }
     });
 
-    // Run code button delegation
-    document.addEventListener('click', (e) => {
-      const btn = e.target.closest('.run-code');
-      if (!btn) return;
-      e.stopPropagation();
-      if (codeRunnerModule) codeRunnerModule.run(btn);
-    });
-
     // Edit code button delegation — toggle contentEditable on the code element
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.edit-code');
@@ -6659,15 +6648,8 @@ import { loadPanel } from './panels.js';
     const id = att.id, name = att.name || '', mime = att.mime || '';
     const url = `${API_BASE}/api/upload/${id}`;
 
-    // Images → Gallery editor.
-    if (isImage) {
-      try {
-        const gx = await loadPanel('editor');
-        if (gx.openEditor) { gx.openEditor(url, id, null, name); return; }
-      } catch (e) { console.warn('gallery open failed', e); }
-      window.open(url, '_blank');
-      return;
-    }
+    // Image attachments are not supported on this deployment.
+    if (isImage) return;
 
     const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(name);
     const TEXT_EXT = /\.(txt|md|markdown|js|ts|jsx|tsx|py|rb|go|rs|java|c|cpp|h|hpp|cs|php|html?|css|scss|sass|less|json|ya?ml|toml|ini|conf|env|sh|bash|sql|csv|tsv|xml|log|vue|svelte)$/i;

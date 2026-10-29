@@ -40,11 +40,6 @@ def test_next_line_content_still_parses():
     assert [(b.tool_type, b.content) for b in blocks] == [("manage_memory", "add\nsome text")]
 
 
-def test_plain_bash_fence_still_parses():
-    blocks = parse_tool_blocks('```bash\necho hello\n```')
-    assert [(b.tool_type, b.content) for b in blocks] == [("bash", "echo hello")]
-
-
 def test_python3_language_hint_is_not_a_python_tool_call():
     # ```python3 must not prefix-match the "python" fence tag — without the
     # (?![\w-]) boundary it parsed as tool "python" with content "3\nprint(...)"

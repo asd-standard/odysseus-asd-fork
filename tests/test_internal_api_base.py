@@ -39,7 +39,6 @@ def test_no_hardcoded_loopback_left_in_call_sites():
     root = pathlib.Path(__file__).resolve().parent.parent
     for rel in (
         "src/tools/_common.py",
-        "src/cookbook_serve_lifecycle.py",
         "src/builtin_actions.py",
         "routes/task/task_routes.py",
     ):

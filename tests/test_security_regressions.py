@@ -137,18 +137,6 @@ def test_readme_warns_auth_enabled_for_network_access():
     assert "Keep `LOCALHOST_BYPASS=false` outside local development." in readme
 
 
-def test_ollama_cookbook_runner_does_not_force_public_bind():
-    route = Path("routes/cookbook_routes.py").read_text(encoding="utf-8")
-    cookbook_js = Path("static/js/cookbook.js").read_text(encoding="utf-8")
-    assert 'OLLAMA_HOST="0.0.0.0:${ODYSSEUS_OLLAMA_PORT}" ollama serve' not in route
-    assert 'OLLAMA_HOST="${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}" ollama serve' in route
-    assert '_ollama_default_host = "0.0.0.0" if remote else "127.0.0.1"' in route
-    assert "WARNING: remote Ollama will bind" in route
-    assert "OLLAMA_HOST=0.0.0.0:${ollamaPort}" not in cookbook_js
-    assert "const bindHost = _envState.remoteHost ? '0.0.0.0' : '127.0.0.1';" in cookbook_js
-    assert "OLLAMA_HOST=${bindHost}:${ollamaPort}" in cookbook_js
-
-
 def _import_integrations(tmp_path, monkeypatch):
     """Import src.integrations with data + encryption key redirected to tmp."""
     _import_secret_storage(tmp_path, monkeypatch)
@@ -353,7 +341,7 @@ def _stub_core_database_for_route_imports(monkeypatch):
         "ChatMessage",
         "Document",
         "DocumentVersion",
-        "GalleryImage",
+        "Folder",
         "ModelEndpoint",
     ):
         setattr(db, name, MagicMock())
@@ -1170,22 +1158,6 @@ def test_export_filename_sanitizer_preserves_safe_names():
     assert mod._sanitize_export_filename("conversation_20260602.md") == "conversation_20260602.md"
     assert mod._sanitize_export_filename("") == ""
 
-
-def test_gallery_replace_filename_sanitizer_uses_basename():
-    mod = _import_gallery_routes_for_filename()
-
-    out = mod._sanitize_gallery_filename("../../etc/cron.d/evil image.png")
-
-    assert out == "evil_image.png"
-    assert "/" not in out
-    assert "\\" not in out
-
-
-def test_gallery_replace_filename_sanitizer_falls_back_when_empty(monkeypatch):
-    mod = _import_gallery_routes_for_filename()
-    monkeypatch.setattr(mod.uuid, "uuid4", lambda: types.SimpleNamespace(hex="abcdef1234567890"))
-
-    assert mod._sanitize_gallery_filename("../") == "abcdef123456"
 
 def test_chat_active_document_lookup_is_owner_scoped():
     """The explicit `active_doc_id` path in /api/chat_stream must scope the

@@ -38,8 +38,8 @@ def _node_eval(source: str):
 
 def test_portal_z_clears_dock_chip_floor_when_no_modal_is_open():
     # No tool window raised → topToolWindowZ floors at 250, but a portaled
-    # dropdown must still clear the dock chips pinned up to 10030, so it lands
-    # just above that floor.
+    # dropdown must still clear a dragged chip (10060), so it lands just above
+    # that floor.
     values = _node_eval(
         textwrap.dedent(
             f"""
@@ -50,7 +50,7 @@ def test_portal_z_clears_dock_chip_floor_when_no_modal_is_open():
         )
     )
 
-    assert values == {"z": 10031}
+    assert values == {"z": 10061}
 
 
 def test_portal_z_sits_above_a_modal_whose_counter_has_climbed_past_10001():
@@ -73,21 +73,21 @@ def test_portal_z_sits_above_a_modal_whose_counter_has_climbed_past_10001():
 
 
 def test_portal_z_uses_chip_floor_when_the_open_modal_sits_below_it():
-    # A modal raised to 5000 is still below the dock-chip floor, so the floor
-    # (10030) wins and the dropdown lands at 10031 — never below a pinned chip.
+    # A modal raised to 5000 is still below the chip tiers, so the chip drag
+    # floor (10060) wins and the dropdown lands at 10061 — never below a chip.
     values = _node_eval(
         textwrap.dedent(
             f"""
             import {{ topPortalZ }} from '{HELPER.as_uri()}';
             const cls = (...names) => ({{ contains: (name) => names.includes(name) }});
-            const modal = {{ id: 'cookbook-modal', classList: cls(), style: {{ zIndex: '5000' }} }};
+            const modal = {{ id: 'memory-modal', classList: cls(), style: {{ zIndex: '5000' }} }};
             const root = {{ querySelectorAll() {{ return [modal]; }} }};
             console.log(JSON.stringify({{ z: topPortalZ({{ root, getStyle: (el) => el.style }}) }}));
             """
         )
     )
 
-    assert values == {"z": 10031}
+    assert values == {"z": 10061}
 
 
 # tasks.js and skills.js were not in #4724's batch; #4767 routes their portaled

@@ -56,19 +56,6 @@ def test_thought_prefix_tags_not_overmatched():
         assert normalize_thinking_markup(text) == text
 
 
-def test_tool_call_blocks_still_parsed():
-    blocks = parse_tool_blocks('[TOOL_CALL]{tool: "shell", command: "ls"}[/TOOL_CALL]')
-    assert blocks, "well-formed [TOOL_CALL] block should still parse"
-    assert "[TOOL_CALL]" not in strip_tool_blocks('before [TOOL_CALL]{tool: "shell", command: "ls"}[/TOOL_CALL] after')
-
-
-def test_xml_tool_call_blocks_still_parsed():
-    xml = '<tool_call><invoke name="bash"><parameter name="command">ls</parameter></invoke></tool_call>'
-    blocks = parse_tool_blocks(xml)
-    assert blocks, "well-formed <tool_call> block should still parse"
-    assert "tool_call" not in strip_tool_blocks(xml)
-
-
 def test_tool_code_blocks_still_parsed():
     assert "<tool_code>" not in strip_tool_blocks('<tool_code>{"tool": "shell"}</tool_code>')
 

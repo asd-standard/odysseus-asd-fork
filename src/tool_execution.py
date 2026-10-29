@@ -549,11 +549,6 @@ _ADMIN_TOOLS = {
     "manage_webhooks",
     "manage_tokens",
     "manage_settings",
-    "download_model",
-    "serve_model",
-    "serve_preset",
-    "stop_served_model",
-    "cancel_download",
 }
 
 
@@ -567,13 +562,8 @@ def _owner_is_admin(owner: Optional[str]) -> bool:
 
 # Map legacy tool names -> (MCP server_id, MCP tool_name)
 _MCP_TOOL_MAP = {
-    "bash":           ("bash",       "bash"),
-    "python":         ("python",     "python"),
-    "read_file":      ("filesystem", "read_file"),
-    "write_file":     ("filesystem", "write_file"),
     "web_search":     ("web_search", "web_search"),
     "web_fetch":      ("web_fetch",  "web_fetch"),
-    "generate_image": ("image_gen",  "generate_image"),
 }
 _EMAIL_MCP_OWNER_ARG = "_odysseus_owner"
 
@@ -593,15 +583,6 @@ def _parse_qualified_mcp_args(tool: str, content: str) -> tuple[Dict, Optional[s
             return {}, "Email MCP tool arguments must be a JSON object."
         return {}, None
     return parsed, None
-
-
-def _parse_generate_image(content: str) -> Dict:
-    lines = content.strip().split("\n")
-    args = {"prompt": lines[0].strip() if lines else ""}
-    for i, key in enumerate(["model", "size", "quality"], 1):
-        if len(lines) > i and lines[i].strip():
-            args[key] = lines[i].strip()
-    return args
 
 
 def _parse_manage_memory(content: str) -> Dict:
@@ -625,19 +606,9 @@ def _parse_manage_memory(content: str) -> Dict:
     return args
 
 
-def _parse_write_file(content: str) -> Dict:
-    lines = content.split("\n", 1)
-    return {"path": lines[0].strip(), "content": lines[1] if len(lines) > 1 else ""}
-
-
 _MCP_ARG_PARSERS: Dict[str, Callable[[str], Dict[str, str]]] = {
-    "bash":           lambda c: {"command": c},
-    "python":         lambda c: {"code": c},
     "web_search":     lambda c: {"query": c.split("\n")[0].strip()},
     "web_fetch":      lambda c: {"url": c.split("\n")[0].strip()},
-    "read_file":      lambda c: {"path": c.split("\n")[0].strip()},
-    "write_file":     _parse_write_file,
-    "generate_image": _parse_generate_image,
     "manage_memory":  _parse_manage_memory,
 }
 
@@ -651,20 +622,12 @@ _MCP_ARG_PARSERS: Dict[str, Callable[[str], Dict[str, str]]] = {
 # safely falls through to the line-based parser, i.e. the previous behavior.
 #
 # IMPORTANT — this only covers the MCP path. _build_mcp_args is reached via
-# _call_mcp_tool only for _MCP_TOOL_MAP tools (so an entry outside that map is
-# dead, as manage_memory was). And of these, only generate_image has a live MCP
-# server today; web_search/web_fetch/read_file/write_file have none, so they run
-# via _direct_fallback -> TOOL_HANDLERS, whose handlers decode JSON themselves
-# (see ReadFileTool/WriteFileTool/WebSearchTool/WebFetchTool). The entries here
-# are kept as defense-in-depth for if/when those servers are added. The live
-# fix for each server-less tool lives in its handler. test_write_file_inline_
-# json_args and test_mcp_json_primary_keys_are_all_live pin both halves.
+# _call_mcp_tool only for _MCP_TOOL_MAP tools. web_search/web_fetch have no live
+# MCP server, so they run via _direct_fallback -> TOOL_HANDLERS, whose handlers
+# decode JSON themselves. The entries here are defense-in-depth.
 _MCP_JSON_PRIMARY_KEYS: Dict[str, tuple] = {
     "web_search":     ("query", "queries"),
     "web_fetch":      ("url",),
-    "read_file":      ("path",),
-    "write_file":     ("path",),
-    "generate_image": ("prompt",),
 }
 
 
@@ -703,54 +666,7 @@ async def _call_mcp_tool(
         if fallback:
             return fallback
 
-    # generate_image runs as a text-only MCP tool, so the saved image URL never
-    # reaches the agent loop's structured forwarding (which renders the image via
-    # buildImageBubble on result["image_url"]). Lift it out of the tool's stdout so
-    # the image renders deterministically — no dependence on the model echoing the
-    # URL into its prose (which it mangles/hallucinates).
-    if tool == "generate_image":
-        _promote_image_fields(result)
-
     return result
-
-
-def _promote_image_fields(result: Dict) -> None:
-    """Lift the image URL (+ prompt/model/size) from a successful generate_image MCP
-    text result into structured fields the agent loop already forwards to
-    buildImageBubble. Only acts on a dict result with exit_code 0; matches the
-    generated-image URL by pattern (absolute or relative) so it's robust to the
-    result's wording."""
-    if not isinstance(result, dict) or result.get("exit_code") != 0:
-        return
-    out = result.get("stdout") or ""
-    m = re.search(r'(?:https?://[^\s)\]]+)?/api/generated-image/[A-Za-z0-9._-]+', out)
-    if not m:
-        return
-    result["image_url"] = m.group(0).strip()
-    for field, pat in (
-        ("image_prompt", r'^Generated image for:\s*(.+)$'),
-        ("image_model", r'^model:\s*(.+)$'),
-        ("image_size", r'^size:\s*(.+)$'),
-    ):
-        fm = re.search(pat, out, re.M)
-        if fm:
-            result[field] = fm.group(1).strip()
-
-
-_BG_MARKERS = {"#!bg", "#bg", "# bg", "#background", "# background", "@background", "# @background"}
-
-
-def _split_bg_marker(content: str):
-    """If the bash content's first non-empty line is a background marker
-    (e.g. `#!bg`), return (True, command_without_marker); else (False, content)."""
-    lines = content.split("\n")
-    i = 0
-    while i < len(lines) and not lines[i].strip():
-        i += 1
-    if i < len(lines) and lines[i].strip().lower() in _BG_MARKERS:
-        del lines[i]
-        return True, "\n".join(lines).strip()
-    return False, content
 
 
 async def _direct_fallback(
@@ -1005,12 +921,7 @@ async def _execute_tool_block_impl(
         do_search_chats, do_manage_tasks,
         do_manage_skills, do_api_call, do_manage_notes,
         do_manage_calendar,
-        do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
-        do_tail_serve_output,
-        do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
-        do_list_serve_presets, do_serve_preset, do_adopt_served_model,
-        do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research, do_resolve_contact,
+        do_trigger_research, do_manage_research, do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
@@ -1040,32 +951,6 @@ async def _execute_tool_block_impl(
     # form — see email_tool_policy_names), not just the spelling the model
     # happened to emit.
     policy_names = email_tool_policy_names(tool)
-
-    # Misformatted tool call detection: model put JSON inside ```python``` (or
-    # similar) without naming the tool. Common with MiniMax-style outputs.
-    # Return a helpful error so the model retries with the correct format.
-    if tool in ("python", "json", "xml") and content.strip().startswith("{") and content.strip().endswith("}"):
-        try:
-            parsed = json.loads(content.strip())
-            if isinstance(parsed, dict):
-                desc = f"{tool}: misformatted tool call"
-                result = {
-                    "error": (
-                        f"You wrote a JSON object inside a ```{tool}``` block, but that's not a tool call.\n"
-                        "To call a tool, use the tool name as the fence tag, e.g.\n"
-                        "```resolve_contact\n"
-                        "{\"name\": \"...\"}\n"
-                        "```\n"
-                        "or\n"
-                        "```send_email\n"
-                        "{\"to\": \"...\", \"subject\": \"...\", \"body\": \"...\"}\n"
-                        "```"
-                    ),
-                    "exit_code": 1,
-                }
-                return desc, result
-        except (ValueError, TypeError):
-            pass
 
     # Reject tools that the user has disabled for this request
     if disabled_tools and not policy_names.isdisjoint(disabled_tools):
@@ -1102,56 +987,16 @@ async def _execute_tool_block_impl(
         return desc, result
 
 
-    # Background execution: a `bash` block whose first line is the `#!bg`
-    # marker runs DETACHED — returns a job id immediately so the chat stream
-    # isn't held open for a multi-minute install/ffmpeg/download. The always-on
-    # monitor re-invokes the agent with the full output when the job finishes.
-    if tool == "bash" and session_id:
-        _is_bg, _bg_cmd = _split_bg_marker(content)
-        if _is_bg and _bg_cmd:
-            from src import bg_jobs
-            rec = bg_jobs.launch(_bg_cmd, session_id=session_id, cwd=agent_cwd())
-            short = _bg_cmd.strip().split(chr(10))[0][:80]
-            desc = f"bash (background): {short}"
-            result = {
-                "output": (
-                    f"Started background job `{rec['id']}`. It is running detached; "
-                    f"do NOT wait for it or poll it. You will be automatically re-invoked "
-                    f"with its full output when it finishes. Continue with other work, or "
-                    f"end your turn now and resume when the result arrives. If the user "
-                    f"later asks to check progress or stop it, call the manage_bg_jobs "
-                    f"tool yourself (output or kill); do not tell them to run a tool "
-                    f"command, and do not surface raw tool syntax in your reply."
-                ),
-                "exit_code": 0,
-                "bg_job_id": rec["id"],
-            }
-            logger.info(f"Tool executed: {desc} -> bg job {rec['id']}")
-            return desc, result
-
-    # Route MCP-extracted tools through the MCP manager. Forward
-    # the progress callback so long-running subprocess tools
-    # (bash, python) can stream `tool_progress` events to the UI.
+    # Route MCP-extracted tools through the MCP manager.
     if tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)
-    elif tool in ("grep", "glob", "ls", "list_library_files", "read_library_file", "make_library_file"):
-        # Code-navigation and library tools — no MCP server; run the direct implementation.
+    elif tool in ("list_library_files", "read_library_file", "make_library_file", "read_upload"):
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb, session_id=session_id, owner=owner) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
-    elif tool in ("apply_patch", "todowrite"):
-        first_line = content.split(chr(10))[0][:80]
-        desc = f"{tool}: {first_line}" if first_line else tool
-        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
-            or {"error": f"{tool}: execution failed", "exit_code": 1}
-    elif tool == "manage_bg_jobs":
-        # Inspect/kill detached `bash` jobs; needs session_id to scope to chat.
-        desc = f"manage_bg_jobs: {content.split(chr(10))[0][:80]}"
-        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
-            or {"error": "manage_bg_jobs: execution failed", "exit_code": 1}
     elif tool in ("create_document", "update_document", "edit_document",
                   "suggest_document", "manage_documents"):
         desc = f"{tool}: {content.split(chr(10))[0][:80]}"
@@ -1215,54 +1060,9 @@ async def _execute_tool_block_impl(
     elif tool == "manage_calendar":
         desc = "manage_calendar"
         result = await do_manage_calendar(content, owner=owner)
-    elif tool == "download_model":
-        desc = "download_model"
-        result = await do_download_model(content, owner=owner)
-    elif tool == "serve_model":
-        desc = "serve_model"
-        result = await do_serve_model(content, owner=owner)
-    elif tool == "list_served_models":
-        desc = "list_served_models"
-        result = await do_list_served_models(content, owner=owner)
-    elif tool == "stop_served_model":
-        desc = "stop_served_model"
-        result = await do_stop_served_model(content, owner=owner)
-    elif tool == "tail_serve_output":
-        desc = "tail_serve_output"
-        result = await do_tail_serve_output(content, owner=owner)
-    elif tool == "list_downloads":
-        desc = "list_downloads"
-        result = await do_list_downloads(content, owner=owner)
-    elif tool == "cancel_download":
-        desc = "cancel_download"
-        result = await do_cancel_download(content, owner=owner)
-    elif tool == "search_hf_models":
-        desc = "search_hf_models"
-        result = await do_search_hf_models(content, owner=owner)
-    elif tool == "list_cached_models":
-        desc = "list_cached_models"
-        result = await do_list_cached_models(content, owner=owner)
     elif tool == "app_api":
         desc = "app_api"
         result = await do_app_api(content, owner=owner)
-    elif tool == "list_serve_presets":
-        desc = "list_serve_presets"
-        result = await do_list_serve_presets(content, owner=owner)
-    elif tool == "serve_preset":
-        desc = "serve_preset"
-        result = await do_serve_preset(content, owner=owner)
-    elif tool == "adopt_served_model":
-        desc = "adopt_served_model"
-        result = await do_adopt_served_model(content, owner=owner)
-    elif tool == "list_cookbook_servers":
-        desc = "list_cookbook_servers"
-        result = await do_list_cookbook_servers(content, owner=owner)
-    elif tool == "edit_image":
-        desc = "edit_image"
-        result = await do_edit_image(content, owner=owner)
-    elif tool == "edit_file":
-        result = await _direct_fallback(tool, content) or {"error": "edit failed", "exit_code": 1}
-        desc = result.get("output") or result.get("error") or "edit_file"
     elif tool == "trigger_research":
         desc = "trigger_research"
         result = await do_trigger_research(content, owner=owner)

@@ -126,7 +126,7 @@ HTTP import is best-effort and section-based. It rejects invalid top-level JSON,
 
 `routes.cleanup_routes` is owner-scoped, not admin-only. It previews and applies session cleanup for the current user through `src.cleanup_service`; when auth is disabled, cleanup can operate as a single-user unscoped flow.
 
-`routes.admin_wipe_routes` owns global per-domain destructive wipe actions. Current kinds include chats, memory, skills, notes, tasks, documents, gallery, and calendar. Server enforcement is admin gate plus kind allowlist. Frontend double confirmation in `static/js/admin.js` is user-interface protection, not server authorization.
+`routes.admin_wipe_routes` owns global per-domain destructive wipe actions. Current kinds include chats, memory, skills, notes, tasks, documents, and calendar. Server enforcement is admin gate plus kind allowlist. Frontend double confirmation in `static/js/admin.js` is user-interface protection, not server authorization.
 
 ## Vault
 
@@ -173,7 +173,7 @@ Vault tool paths duplicate some route behavior and can return vault item secrets
 
 ## Testing Notes
 
-Current targeted coverage includes settings store fallback/error paths, settings scrub, shared frontend config caching/invalidation/prefetch behavior, prefs no-clobber behavior, atomic preset store/migration/CLI/localStorage helpers, backup import cross-user dedup, backup CLI restore/list-race safety, cleanup owner scope, diagnostics admin-gate/source/service-health/log-tail checks, admin promote/demote, admin wipe gallery, font family derivation, theme helper behavior, vault password-not-in-argv checks, setup/auth regressions, reserved usernames, Google email OAuth route/helper behavior, and a token-budget `manage_settings` path.
+Current targeted coverage includes settings store fallback/error paths, settings scrub, shared frontend config caching/invalidation/prefetch behavior, prefs no-clobber behavior, atomic preset store/migration/CLI/localStorage helpers, backup import cross-user dedup, backup CLI restore/list-race safety, cleanup owner scope, diagnostics admin-gate/source/service-health/log-tail checks, admin promote/demote, font family derivation, theme helper behavior, vault password-not-in-argv checks, setup/auth regressions, reserved usernames, Google email OAuth route/helper behavior, and a token-budget `manage_settings` path.
 
 ## Current Gaps
 

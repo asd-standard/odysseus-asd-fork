@@ -118,7 +118,7 @@ List/read route caches are owner/account-aware. Helper-side summary, AI-reply, t
 
 Compose uploads live under `ODYSSEUS_MAIL_ATTACHMENTS_DIR`; missing staged files are skipped with warnings. Attachment-to-document supports PDF, DOCX, TXT, and MD. DOCX depends on `python-docx`; PDF form/open-in-doc flows can depend on optional PyMuPDF.
 
-Email attachment-as-document flows stamp `Document.source_email_*` provenance. `GET /api/email/attachments-download/{uid}` builds an owner-scoped ZIP of visible non-signature attachments using safe names. `compose-from-odysseus` and `compose-from-odysseus-zip` can stage owner-visible documents and gallery images as compose uploads, preserving legacy session fallback only where the source object remains visible to the owner. `prepare-signed-reply` verifies document ownership, reconstructs reply headers, flattens/stages signed PDFs as compose uploads, and leaves final send/draft review to the compose flow.
+Email attachment-as-document flows stamp `Document.source_email_*` provenance. `GET /api/email/attachments-download/{uid}` builds an owner-scoped ZIP of visible non-signature attachments using safe names. `compose-from-odysseus` and `compose-from-odysseus-zip` can stage owner-visible documents as compose uploads, preserving legacy session fallback only where the source object remains visible to the owner. `prepare-signed-reply` verifies document ownership, reconstructs reply headers, flattens/stages signed PDFs as compose uploads, and leaves final send/draft review to the compose flow.
 
 Email bodies and attachments are untrusted model context.
 

@@ -9,9 +9,9 @@ import modelsModule from './js/models.js?v=20260715startupcalm2';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=20261027worddiff1';
+import chatModule from './js/chat.js?v=20261028windowing1';
 import compareModule from './js/compare/index.js?v=20260819approvalcontrol1';
-import documentModule from './js/document.js?v=20261027worddiff1';
+import documentModule from './js/document.js?v=20261028windowing1';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import {
@@ -26,7 +26,6 @@ import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js?v=20260722memoryloading1';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
-import galleryModule from './js/gallery.js';
 import { UI_VIS_DEFAULT_OFF, resolveVisibility } from './js/ui_visibility.js';
 import tasksModule from './js/tasks.js?v=20260723tasksbulkfeedback1';
 import calendarModule from './js/calendar.js';
@@ -34,16 +33,10 @@ import notesModule from './js/notes.js';
 import adminModule from './js/admin.js?v=20260716openrouter3';
 import settingsModule from './js/settings.js?v=20260815approvalsave1';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
-import './js/modalManager.js?v=20260723compareicon2';
+import * as Modals from './js/modalManager.js?v=20260723compareicon2';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
 import './js/tileManager.js';
 import themeModule from './js/theme.js';
-// IMPORTANT: import cookbook.js with NO ?v= query — the same plain specifier
-// every other importer (cookbook-hwfit.js / cookbook-diagnosis.js) uses. A query
-// mismatch makes the browser load cookbook.js twice as separate modules (two
-// _envState objects), which broke server selection. Keep all cookbook imports
-// unversioned so this can't recur.
-import cookbookModule from './js/cookbook.js';
 import groupModule from './js/group.js';
 import * as researchPanelModule from './js/research/panel.js?v=20260630researchthumb';
 import ttsModule from './js/tts-ai.js';
@@ -58,7 +51,6 @@ window.themeModule = themeModule;
 window.sessionModule = sessionModule;
 window.uiModule = uiModule;
 window.adminModule = adminModule;
-window.cookbookModule = cookbookModule;
 
 function _isMobileChatInput() {
   return window.innerWidth <= 768;
@@ -170,10 +162,8 @@ function initRailHoverLabels() {
     'rail-documents': 'Docs',
     'rail-calendar': 'Calendar',
     'rail-compare': 'Compare',
-    'rail-cookbook': 'Cookbook',
     'rail-research': 'Research',
     'rail-email': 'Email',
-    'rail-gallery': 'Gallery',
     'rail-archive': 'Library',
     'rail-memory': 'Brain',
     'rail-notes': 'Notes',
@@ -723,7 +713,6 @@ function initializeEventListeners() {
       // Close one modal at a time (last in DOM = topmost)
       // Map modal id → sidebar list-item id to clear active state
       const modalItemMap = {
-        'cookbook-modal': null,
         'rename-session-modal': null,
         'rename-ai-modal': null,
         'custom-preset-modal': null,
@@ -731,22 +720,9 @@ function initializeEventListeners() {
       };
 
       // Dynamic modals (removed from DOM on close)
-      const dynamicModals = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal', 'email-lib-modal'];
+      const dynamicModals = ['doclib-modal', 'tasks-modal', 'email-lib-modal'];
       for (const id of dynamicModals) {
         const m = document.getElementById(id);
-        if (id === 'gallery-modal') {
-          const editor = document.getElementById('gallery-editor-container');
-          const editing = !!window.__galleryEditLive || !!(
-            editor &&
-            getComputedStyle(editor).display !== 'none' &&
-            editor.querySelector('.gallery-editor')
-          );
-          if (editing) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            return;
-          }
-        }
         if (m) { dismissModal(m); return; }
       }
 
@@ -779,18 +755,14 @@ function initializeEventListeners() {
     'memory-modal': null,
     'theme-modal': null,
   };
-  const _dynamicModalIds = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal'];
+  const _dynamicModalIds = ['doclib-modal', 'tasks-modal'];
   function dismissModal(modal) {
     if (!modal || modal.classList.contains('hidden')) return;
-    if (modal.id === 'gallery-modal') {
-      const editor = document.getElementById('gallery-editor-container');
-      const editing = !!window.__galleryEditLive || !!(
-        editor &&
-        getComputedStyle(editor).display !== 'none' &&
-        editor.querySelector('.gallery-editor')
-      );
-      if (editing) return;
-    }
+    // Close paths that REMOVE the element (doclib/tasks) never produce a
+    // visibility transition, so report them here, before the close animation.
+    // Hide-based modals also report here; the later observer call is a no-op.
+    const _isDynamicWindow = _dynamicModalIds.includes(modal.id);
+    try { Modals.notifyClosed(modal.id, { destroyed: _isDynamicWindow }); } catch (_) {}
     const content = modal.querySelector('.modal-content') || modal.querySelector('#theme-popup');
     if (content && !content.classList.contains('modal-closing')) {
       content.classList.remove('sheet-ready');
@@ -1011,20 +983,6 @@ function initializeEventListeners() {
     });
   }
 
-  // ── Cookbook modal toggle ──
-  const toolCookbookBtn = el('tool-cookbook-btn');
-  if (toolCookbookBtn) {
-    toolCookbookBtn.addEventListener('click', async () => {
-      if (!cookbookModule) return;
-      // Try minimized→restore or open→minimize via the manager first
-      const Modals = await import('./js/modalManager.js');
-      if (!Modals.toggle('cookbook-modal')) {
-        // Not registered yet → fresh open
-        cookbookModule.open();
-      }
-    });
-  }
-
   // Document library tool button
   const toolDoclibBtn = el('tool-doclib-btn');
   if (toolDoclibBtn) {
@@ -1036,19 +994,6 @@ function initializeEventListeners() {
         } else {
           documentModule.openLibrary();
         }
-      }
-    });
-  }
-
-  // Gallery tool button
-  const toolGalleryBtn = el('tool-gallery-btn');
-  if (toolGalleryBtn) {
-    toolGalleryBtn.addEventListener('click', async () => {
-      if (!galleryModule) return;
-      const Modals = await import('./js/modalManager.js');
-      if (!Modals.toggle('gallery-modal')) {
-        if (galleryModule.isGalleryOpen()) galleryModule.closeGallery();
-        else galleryModule.openGallery();
       }
     });
   }
@@ -1184,7 +1129,6 @@ function initializeEventListeners() {
       }
     },
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
-    '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/email':    () => {
       // Collapse the wide sidebar → icon rail (48px) so the user keeps
       // navigation visible alongside the fullscreen email view.
@@ -1219,7 +1163,6 @@ function initializeEventListeners() {
       setTimeout(_goFullscreen, 200);
     },
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
-    '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
     '/library':  () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary(),
   };
@@ -1334,13 +1277,6 @@ function initializeEventListeners() {
         if (!p.can_use_agent) {
           const modeToggle = document.getElementById('mode-toggle');
           if (modeToggle) modeToggle.closest('.chat-input-toggle')?.style.setProperty('display', 'none');
-        }
-        // Hide bash toggle
-        if (!p.can_use_bash) {
-          const bashToggle = document.getElementById('bash-toggle');
-          if (bashToggle) bashToggle.closest('.chat-input-toggle')?.style.setProperty('display', 'none');
-          const bashBtn = document.getElementById('bash-toggle-btn');
-          if (bashBtn) bashBtn.style.display = 'none';
         }
         // Hide document button
         if (!p.can_use_documents) {
@@ -1501,7 +1437,6 @@ function initializeEventListeners() {
         web_search:      ['web-toggle-btn'],
         deep_research:   ['research-toggle-btn', 'tool-research-btn', 'overflow-research-btn', 'rail-research'],
         document_editor: ['overflow-doc-btn', 'rail-documents'],
-        gallery:         ['tool-gallery-btn', 'rail-gallery'],
       };
       Object.entries(map).forEach(([key, ids]) => {
         if (features[key] === false) {
@@ -1962,7 +1897,6 @@ function initializeEventListeners() {
     });
   }
   setupToggle('web-toggle-btn', 'web-toggle', 'web');
-  setupToggle('bash-toggle-btn', 'bash-toggle', 'bash');
 
   // Document editor toggle (special: uses module panel, not a checkbox)
   function bringOpenDocumentToFrontOnMobile() {
@@ -3022,176 +2956,6 @@ function initializeEventListeners() {
     } catch (e) { console.error('Dialog drag init error:', e); }
   })();
 
-  // ── Modal minimize → dock ──
-  // Adds a "_" button next to every modal's close button. Clicking it hides
-  // the modal and adds an entry to a fixed bottom dock; clicking the dock
-  // entry restores the modal. Works for hand-rolled and dynamically-created
-  // modals via a MutationObserver on document.body.
-  (function initModalMinimize() {
-    // custom-preset-modal (the Prompt window) is handled by the new
-    // modalManager dock (registered in _AUTO_WIRE), so the legacy dock must
-    // not also inject a `_`/chip for it.
-    const SKIP_IDS = new Set(['styled-confirm-overlay', 'custom-preset-modal']);
-    const dockEntries = new Map(); // modal element -> dock entry element
-
-    let dock = document.getElementById('modal-dock');
-    if (!dock) {
-      dock = document.createElement('div');
-      dock.id = 'modal-dock';
-      document.body.appendChild(dock);
-    }
-
-    // Keep the dock clear of the sidebar (which can be collapsed, resized,
-    // hidden, or flipped to the right side).
-    function updateDockOffset() {
-      const sidebar = document.getElementById('sidebar');
-      const iconRail = document.getElementById('icon-rail');
-      let leftPx = 0;
-      let rightPx = 0;
-      const sidebarRight = sidebar && sidebar.classList.contains('right-side');
-      const sidebarVisible = sidebar &&
-        !sidebar.classList.contains('hidden') &&
-        sidebar.offsetWidth > 0;
-      const railVisible = iconRail && iconRail.offsetWidth > 0;
-      const sidebarW = sidebarVisible ? sidebar.offsetWidth : 0;
-      const railW = railVisible ? iconRail.offsetWidth : 0;
-      if (sidebarRight) {
-        rightPx = sidebarW + railW;
-      } else {
-        leftPx = sidebarW + railW;
-      }
-      dock.style.left = leftPx + 'px';
-      dock.style.right = rightPx + 'px';
-    }
-    updateDockOffset();
-    // Recompute when sidebar resizes, collapses, or moves sides
-    if (window.ResizeObserver) {
-      const ro = new ResizeObserver(updateDockOffset);
-      const sb = document.getElementById('sidebar');
-      const ir = document.getElementById('icon-rail');
-      if (sb) ro.observe(sb);
-      if (ir) ro.observe(ir);
-    }
-    window.addEventListener('resize', updateDockOffset);
-    // Side-flip / collapse toggles class names on body or sidebar
-    new MutationObserver(updateDockOffset).observe(document.body, {
-      attributes: true, attributeFilter: ['class'],
-    });
-    const sbEl = document.getElementById('sidebar');
-    if (sbEl) {
-      new MutationObserver(updateDockOffset).observe(sbEl, {
-        attributes: true, attributeFilter: ['class', 'style'],
-      });
-    }
-
-    function modalTitle(modal) {
-      const h = modal.querySelector('.modal-header h4, .modal-header h3, .modal-header h2');
-      if (h && h.textContent.trim()) return h.textContent.trim();
-      if (modal.id) return modal.id.replace(/-modal$|-overlay$|-popup$/, '').replace(/-/g, ' ');
-      return 'Window';
-    }
-
-    function removeDockEntry(modal) {
-      const entry = dockEntries.get(modal);
-      if (entry) {
-        entry.remove();
-        dockEntries.delete(modal);
-      }
-    }
-
-    function restoreModal(modal) {
-      modal.classList.remove('minimized');
-      modal.classList.remove('hidden');
-      removeDockEntry(modal);
-      // Bring to front (matches existing focus-on-click behavior)
-      modal.style.zIndex = '';
-    }
-
-    function minimizeModal(modal) {
-      if (modal.classList.contains('hidden')) return;
-      modal.classList.add('minimized');
-      if (dockEntries.has(modal)) return;
-
-      const entry = document.createElement('div');
-      entry.className = 'modal-dock-item';
-      entry.title = `Restore ${modalTitle(modal)}`;
-
-      const label = document.createElement('span');
-      label.className = 'modal-dock-label';
-      label.textContent = modalTitle(modal);
-
-      const closeX = document.createElement('button');
-      closeX.className = 'modal-dock-close';
-      closeX.textContent = '×';
-      closeX.title = 'Close';
-      closeX.addEventListener('click', (e) => {
-        e.stopPropagation();
-        modal.classList.remove('minimized');
-        modal.classList.add('hidden');
-        modal.style.display = '';
-        removeDockEntry(modal);
-      });
-
-      entry.appendChild(label);
-      entry.appendChild(closeX);
-      entry.addEventListener('click', () => restoreModal(modal));
-      dock.appendChild(entry);
-      dockEntries.set(modal, entry);
-    }
-
-    function injectMinimizeButton(modal) {
-      if (!modal || !modal.classList || !modal.classList.contains('modal')) return;
-      if (modal.id && SKIP_IDS.has(modal.id)) return;
-      // Modals managed by the new modalManager (Modals.register) get their own
-      // .modal-minimize-btn and chips via the .minimized-dock-chip system.
-      // Skip them entirely so we don't double-up minimize buttons or chips.
-      if (modal.id && /^email-reader-/.test(modal.id)) return;
-      if (modal.id && window.Modals && window.Modals.isRegistered && window.Modals.isRegistered(modal.id)) return;
-      const header = modal.querySelector('.modal-header');
-      if (!header) return;
-      if (header.querySelector('.minimize-btn, .modal-minimize-btn')) return;
-      const closeBtn = header.querySelector('.close-btn, .modal-close');
-      if (!closeBtn) return;
-
-      const minBtn = document.createElement('button');
-      minBtn.className = 'minimize-btn';
-      minBtn.type = 'button';
-      minBtn.title = 'Minimize';
-      minBtn.textContent = '_';
-      minBtn.addEventListener('mousedown', (e) => e.stopPropagation()); // don't start drag
-      minBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        minimizeModal(modal);
-      });
-      closeBtn.parentElement.insertBefore(minBtn, closeBtn);
-
-      // Watch this modal's class so close-from-elsewhere clears the dock entry
-      new MutationObserver(() => {
-        if (modal.classList.contains('hidden') && !modal.classList.contains('minimized')) {
-          removeDockEntry(modal);
-        }
-      }).observe(modal, { attributes: true, attributeFilter: ['class'] });
-    }
-
-    // Initial pass over existing modals
-    document.querySelectorAll('.modal').forEach(injectMinimizeButton);
-
-    // Watch for dynamically-created modals
-    new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const n of m.addedNodes) {
-          if (n.nodeType !== 1) continue;
-          if (n.classList && n.classList.contains('modal')) {
-            injectMinimizeButton(n);
-          }
-          if (n.querySelectorAll) {
-            n.querySelectorAll('.modal').forEach(injectMinimizeButton);
-          }
-        }
-      }
-    }).observe(document.body, { childList: true, subtree: true });
-  })();
-
   // Preset button (in overflow menu)
   const overflowPresetBtn = el('overflow-preset-btn');
   if (overflowPresetBtn) {
@@ -3735,9 +3499,7 @@ function startOdysseusApp() {
   const _railToolMap = {
     'rail-compare':   'tool-compare-btn',
     'rail-research':  'tool-research-btn',
-    'rail-cookbook':   'tool-cookbook-btn',
     'rail-archive':   'tool-library-btn',
-    'rail-gallery':   'tool-gallery-btn',
     'rail-tasks':     'tool-tasks-btn',
     'rail-calendar':  'tool-calendar-btn',
     'rail-notes':     'tool-notes-btn',

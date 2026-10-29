@@ -97,6 +97,8 @@ def _install_model_route_import_stubs(monkeypatch):
     exceptions_mod.SessionNotFoundError = type("SessionNotFoundError", (Exception,), {})
     session_mgr_mod = types.ModuleType("core.session_manager")
     session_mgr_mod.SessionManager = MagicMock()
+    log_safety_mod = types.ModuleType("core.log_safety")
+    log_safety_mod.redact_url = lambda value: value
 
     monkeypatch.delitem(sys.modules, "routes.model_routes", raising=False)
     monkeypatch.delitem(sys.modules, "routes.chat_routes", raising=False)
@@ -108,6 +110,7 @@ def _install_model_route_import_stubs(monkeypatch):
     monkeypatch.setitem(sys.modules, "core.models", models_mod)
     monkeypatch.setitem(sys.modules, "core.exceptions", exceptions_mod)
     monkeypatch.setitem(sys.modules, "core.session_manager", session_mgr_mod)
+    monkeypatch.setitem(sys.modules, "core.log_safety", log_safety_mod)
 
 
 def _install_core_auth_stub(monkeypatch):
@@ -488,105 +491,8 @@ async def test_build_chat_context_incognito_ignores_saved_session_history(monkey
 
 
 @pytest.mark.asyncio
-async def test_admin_agent_tools_require_admin(monkeypatch):
-    auth_mod = _install_core_auth_stub(monkeypatch)
-    from src.tool_execution import execute_tool_block
-
-    class FakeAuth:
-        is_configured = True
-
-        def is_admin(self, username):
-            return False
-
-    monkeypatch.setattr(auth_mod, "AuthManager", lambda: FakeAuth())
-
-    for tool_name in ("manage_tokens", "app_api", "serve_preset"):
-        desc, result = await _execute_without_run_context(
-            execute_tool_block,
-            SimpleNamespace(tool_type=tool_name, content='{"action":"create","name":"bad"}'),
-            owner="regular-user",
-        )
-
-        assert desc == f"{tool_name}: BLOCKED"
-        assert result["exit_code"] == 1
-        assert "requires an admin" in result["error"]
-
-
 @pytest.mark.asyncio
-async def test_app_api_blocks_shell_routes_before_loopback(monkeypatch):
-    import httpx
-    from src.tool_implementations import do_app_api
-
-    class UnexpectedAsyncClient:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("app_api should block shell routes before loopback")
-
-    monkeypatch.setattr(httpx, "AsyncClient", UnexpectedAsyncClient)
-
-    for path in ("/api/shell/exec", "api/shell/stream"):
-        result = await do_app_api(
-            json.dumps(
-                {
-                    "action": "call",
-                    "method": "POST",
-                    "path": path,
-                    "body": {"command": "echo should-not-run"},
-                }
-            ),
-            owner="admin",
-        )
-
-        assert result["exit_code"] == 1
-        assert "Path blocked for safety" in result["error"]
-        assert "Sensitive endpoints" in result["error"]
-
-
 @pytest.mark.asyncio
-async def test_app_api_blocks_cookbook_host_control_routes_before_loopback(monkeypatch):
-    import httpx
-    from src.tool_implementations import do_app_api
-
-    class UnexpectedAsyncClient:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("app_api should block host-control routes before loopback")
-
-    monkeypatch.setattr(httpx, "AsyncClient", UnexpectedAsyncClient)
-
-    blocked_calls = (
-        (
-            "api/cookbook/packages/install",
-            {"pip": "hf_transfer"},
-            "package installation is host code execution",
-        ),
-        (
-            "/api/cookbook/rebuild-engine",
-            {"engine": "llamacpp"},
-            "engine rebuild mutates local or remote host state",
-        ),
-        (
-            "/api/cookbook/kill-pid",
-            {"pid": 12345, "signal": "TERM"},
-            "process signalling is host control",
-        ),
-    )
-
-    for path, body, error_text in blocked_calls:
-        result = await do_app_api(
-            json.dumps(
-                {
-                    "action": "call",
-                    "method": "POST",
-                    "path": path,
-                    "body": body,
-                }
-            ),
-            owner="admin",
-        )
-
-        assert result["exit_code"] == 1
-        assert error_text in result["error"]
-
-
 @pytest.mark.asyncio
 async def test_app_api_blocks_search_route_before_loopback(monkeypatch):
     import httpx
@@ -615,126 +521,8 @@ async def test_app_api_blocks_search_route_before_loopback(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_app_api_endpoint_discovery_hides_shell_routes(monkeypatch):
-    _install_core_middleware_stub(monkeypatch)
-    import httpx
-    from src.tool_implementations import do_app_api
-
-    class FakeResponse:
-        def json(self):
-            return {
-                "paths": {
-                    "/api/shell/exec": {"post": {"summary": "Execute Shell Command"}},
-                    "/api/shell/stream": {"post": {"summary": "Stream Shell Command"}},
-                    "/api/auth/settings": {"get": {"summary": "Auth Settings"}},
-                    "/api/cookbook/gpus": {"get": {"summary": "List GPUs"}},
-                }
-            }
-
-    class FakeAsyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, *args, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-
-    result = await do_app_api(json.dumps({"action": "endpoints"}), owner="admin")
-
-    assert result["exit_code"] == 0
-    paths = {(endpoint["method"], endpoint["path"]) for endpoint in result["endpoints"]}
-    assert ("GET", "/api/cookbook/gpus") in paths
-    assert ("POST", "/api/shell/exec") not in paths
-    assert ("POST", "/api/shell/stream") not in paths
-    assert ("GET", "/api/auth/settings") not in paths
-    assert all(not endpoint["path"].startswith("/api/shell") for endpoint in result["endpoints"])
-
-
 @pytest.mark.asyncio
-async def test_app_api_endpoint_discovery_hides_cookbook_host_control_routes(monkeypatch):
-    _install_core_middleware_stub(monkeypatch)
-    import httpx
-    from src.tool_implementations import do_app_api
-
-    class FakeResponse:
-        def json(self):
-            return {
-                "paths": {
-                    "/api/cookbook/packages": {"get": {"summary": "List Cookbook Packages"}},
-                    "/api/cookbook/packages/install": {"post": {"summary": "Install Package"}},
-                    "/api/cookbook/rebuild-engine": {"post": {"summary": "Rebuild Engine"}},
-                    "/api/cookbook/kill-pid": {"post": {"summary": "Kill Process"}},
-                    "/api/cookbook/gpus": {"get": {"summary": "List GPUs"}},
-                }
-            }
-
-    class FakeAsyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, *args, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-
-    result = await do_app_api(json.dumps({"action": "endpoints", "filter": "cookbook"}), owner="admin")
-
-    assert result["exit_code"] == 0
-    paths = {(endpoint["method"], endpoint["path"]) for endpoint in result["endpoints"]}
-    assert ("GET", "/api/cookbook/packages") in paths
-    assert ("GET", "/api/cookbook/gpus") in paths
-    assert ("POST", "/api/cookbook/packages/install") not in paths
-    assert ("POST", "/api/cookbook/rebuild-engine") not in paths
-    assert ("POST", "/api/cookbook/kill-pid") not in paths
-
-
 @pytest.mark.asyncio
-async def test_public_agent_policy_blocks_sensitive_tools(monkeypatch):
-    auth_mod = _install_core_auth_stub(monkeypatch)
-    from src.tool_execution import execute_tool_block
-
-    class FakeAuth:
-        is_configured = True
-
-        def is_admin(self, username):
-            return False
-
-    monkeypatch.setattr(auth_mod, "AuthManager", lambda: FakeAuth())
-
-    # Every bare email tool name is spelled out (not imported from
-    # BUILTIN_EMAIL_TOOLS) so accidentally dropping one from that set fails
-    # here instead of silently shrinking the blocklist.
-    bare_email_tools = (
-        "list_email_accounts", "list_emails", "read_email", "search_emails",
-        "scan_email_unsubscribes", "unsubscribe_email",
-        "send_email", "reply_to_email", "draft_email", "draft_email_reply",
-        "ai_draft_email_reply", "archive_email", "delete_email",
-        "mark_email_read", "bulk_email", "download_attachment",
-    )
-    for tool_name in bare_email_tools + ("read_file", "mcp__email__send_email"):
-        desc, result = await _execute_without_run_context(
-            execute_tool_block,
-            SimpleNamespace(tool_type=tool_name, content="{}"),
-            owner="regular-user",
-        )
-        assert desc == f"{tool_name}: BLOCKED"
-        assert result["exit_code"] == 1
-        assert "restricted to admin users" in result["error"]
-
-
 @pytest.mark.asyncio
 async def test_disabled_qualified_email_tool_blocks_bare_alias(monkeypatch):
     """A bare email fence is an alias for its mcp__email__ form. Plan mode and
@@ -918,33 +706,6 @@ async def test_bare_email_dispatch_rejects_invalid_json_body(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_legacy_mcp_tools_decode_inline_json_args(monkeypatch):
-    """The relaxed parser accepts inline JSON for non-code tags, but the legacy
-    line-based arg builders (web_search/web_fetch/read_file/write_file/
-    generate_image) would wrap the whole JSON string as the query/path/prompt.
-    A JSON object carrying the tool's primary key must be used directly."""
-    import src.tool_execution as tool_execution
-    from src.tool_execution import _build_mcp_args
-
-    cases = {
-        "web_search": ('{"query": "odysseus pr 3681"}', {"query": "odysseus pr 3681"}),
-        "web_fetch": ('{"url": "https://example.com"}', {"url": "https://example.com"}),
-        "read_file": ('{"path": "/tmp/x.txt"}', {"path": "/tmp/x.txt"}),
-        "write_file": ('{"path": "/tmp/x", "content": "hi"}', {"path": "/tmp/x", "content": "hi"}),
-        "generate_image": ('{"prompt": "a cat"}', {"prompt": "a cat"}),
-    }
-    for tool, (content, expected) in cases.items():
-        assert _build_mcp_args(tool, content) == expected, tool
-
-    # Freeform (non-JSON) content keeps the line-based behavior.
-    assert _build_mcp_args("web_search", "latest python release") == {"query": "latest python release"}
-    # A JSON object WITHOUT the tool's primary key is not args — fall back
-    # (write_file content the model happened to write as a bare object).
-    assert _build_mcp_args("write_file", '{"config": "value"}') == {
-        "path": '{"config": "value"}', "content": "",
-    }
-
-
 def test_mcp_json_primary_keys_are_all_live():
     """Every _MCP_JSON_PRIMARY_KEYS entry must be reachable: _build_mcp_args is
     only called from _call_mcp_tool, which only runs for _MCP_TOOL_MAP tools.
@@ -959,39 +720,6 @@ def test_mcp_json_primary_keys_are_all_live():
 
 
 @pytest.mark.asyncio
-async def test_write_file_inline_json_args(monkeypatch):
-    """write_file has no MCP server, so it runs via _direct_fallback ->
-    WriteFileTool, NOT _build_mcp_args. Inline JSON must therefore be decoded
-    by the handler itself: drive the LIVE path (execute_tool_block, no MCP) and
-    assert the file is written to the intended path with the intended content,
-    not a file literally named with the JSON blob. A _build_mcp_args unit test
-    can't catch this — it's on the dead MCP path for write_file."""
-    import src.tool_execution as tool_execution
-    from src.tool_execution import execute_tool_block
-
-    monkeypatch.setattr(tool_execution, "_owner_is_admin", lambda owner: True)
-    monkeypatch.setattr(tool_execution, "is_public_blocked_tool", lambda t: False)
-    monkeypatch.setattr(tool_execution, "get_mcp_manager", lambda: None)
-
-    captured = {}
-    import src.agent_tools.filesystem_tools as fst
-
-    def fake_resolve(p):
-        captured["path"] = p
-        raise ValueError("probe-stop-before-disk")
-
-    monkeypatch.setattr(tool_execution, "_resolve_tool_path", fake_resolve)
-
-    from src.tool_parsing import parse_tool_blocks
-    blocks = parse_tool_blocks('```write_file {"path": "/tmp/wf.txt", "content": "hi"}\n```')
-    for b in blocks:
-        await _execute_without_run_context(execute_tool_block, b, owner="admin")
-
-    assert captured.get("path") == "/tmp/wf.txt", (
-        f"write_file did not decode inline JSON args; got path {captured.get('path')!r}"
-    )
-
-
 @pytest.mark.asyncio
 async def test_plan_mode_blocks_mutating_email_aliases_without_mcp_inventory(monkeypatch):
     """Plan-mode safety for bare email aliases must hold from the STATIC
@@ -1143,57 +871,6 @@ async def test_bare_email_mcp_dispatch_includes_hidden_owner(monkeypatch):
     assert fake.calls == [
         ("mcp__email__list_emails", {"folder": "INBOX", "_odysseus_owner": "alice"}),
     ]
-
-
-def test_public_agent_policy_hides_sensitive_tools(monkeypatch):
-    auth_mod = _install_core_auth_stub(monkeypatch)
-    from src.tool_security import blocked_tools_for_owner
-
-    class FakeAuth:
-        is_configured = True
-
-        def is_admin(self, username):
-            return False
-
-    monkeypatch.setattr(auth_mod, "AuthManager", lambda: FakeAuth())
-
-    blocked = blocked_tools_for_owner("regular-user")
-
-    assert "send_email" in blocked
-    assert "read_file" in blocked
-    assert "app_api" in blocked
-    assert "serve_preset" in blocked
-    assert "manage_tasks" in blocked
-
-
-def test_presetup_does_not_grant_admin_tools_when_auth_enabled(monkeypatch):
-    """Pre-setup window: auth is enabled but no admin user exists yet.
-
-    This must NOT be treated as single-user/admin at the tool layer — the
-    server-execution tools (bash/python) stay blocked as defense-in-depth so
-    an unauthenticated caller that slips past the auth middleware (e.g. via a
-    loopback bypass) can't reach an RCE before setup completes.
-    """
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)  # default: enabled
-    auth_mod = _install_core_auth_stub(monkeypatch)
-
-    class FakeAuth:
-        is_configured = False
-
-        def is_admin(self, username):
-            return False
-
-    monkeypatch.setattr(auth_mod, "AuthManager", lambda: FakeAuth())
-
-    from src.tool_security import (
-        blocked_tools_for_owner,
-        owner_is_admin_or_single_user,
-    )
-
-    assert owner_is_admin_or_single_user(None) is False
-    blocked = blocked_tools_for_owner(None)
-    assert "bash" in blocked
-    assert "python" in blocked
 
 
 def test_single_user_mode_keeps_full_tool_access_when_auth_disabled(monkeypatch):

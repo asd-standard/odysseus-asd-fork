@@ -38,23 +38,10 @@ def test_substring_inside_word_does_not_force_document_tools():
         assert "update_document" not in tools, q
 
 
-def test_substring_inside_word_does_not_force_serve_tools():
-    ti = _index()
-    # "observe"/"reserve" contain "serve". serve_model/serve_preset are also in
-    # ALWAYS_AVAILABLE, so pass a non-serve base to isolate the keyword loop (an
-    # empty set falls back to ALWAYS_AVAILABLE). The "serve" hint must NOT fire.
-    tools = ti.get_tools_for_query(
-        "please observe the reserve levels", always_include={"__base__"}
-    )
-    assert "serve_model" not in tools
-    assert "serve_preset" not in tools
-
-
 def test_genuine_keywords_still_force_include():
     ti = _index()
     assert "reply_to_email" in ti.get_tools_for_query("reply to this email")
     assert "edit_document" in ti.get_tools_for_query("edit the document")
-    assert "serve_model" in ti.get_tools_for_query("serve the model")
 
 
 def test_find_info_online_forces_web_search_tools():

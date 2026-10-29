@@ -95,46 +95,6 @@ def test_all_native_schema_tools_have_explicit_capabilities():
     assert schema_names <= KNOWN_CAPABILITY_TOOLS
 
 
-def test_external_web_result_blocks_later_code_execution():
-    context = ToolRunSecurityContext()
-
-    context.observe_tool_result("web_search", {"output": "untrusted page", "exit_code": 0})
-
-    decision = context.decision_for("bash")
-    assert context.external_untrusted_context_seen is True
-    assert decision.allowed is False
-    assert "execute_code" in decision.reason
-
-
-@pytest.mark.parametrize(
-    "tool_name",
-    [
-        "read_file",
-        "grep",
-        "bash",
-        "python",
-        "manage_bg_jobs",
-        "apply_patch",
-        "edit_file",
-        "write_file",
-    ],
-)
-def test_workspace_and_process_results_taint_run(tool_name):
-    context = ToolRunSecurityContext()
-
-    context.observe_tool_result(
-        tool_name,
-        {"output": "untrusted content", "exit_code": 0},
-    )
-
-    assert (
-        capabilities_for_tool(tool_name).result_integrity
-        is ResultIntegrity.WORKSPACE_UNTRUSTED
-    )
-    assert context.external_untrusted_context_seen is True
-    assert context.decision_for("write_file").allowed is False
-
-
 def test_workspace_write_diff_taints_before_later_host_action():
     from src.tool_execution import format_tool_result
 
@@ -329,7 +289,7 @@ def test_external_context_blocks_high_impact_capabilities(tool_name, effect):
 
 @pytest.mark.parametrize(
     "tool_name",
-    ["read_file", "grep", "web_search", "ask_user", "update_plan"],
+    ["web_search", "ask_user", "update_plan"],
 )
 def test_external_context_keeps_explicit_low_impact_tools_available(tool_name):
     context = ToolRunSecurityContext(external_untrusted_context_seen=True)
@@ -628,7 +588,6 @@ def test_multiplexed_destructive_actions_disclose_destructive_effect(
 @pytest.mark.parametrize(
     "tool_name,content",
     [
-        ("manage_bg_jobs", '{"action":"output","job_id":"job-1"}'),
         ("manage_endpoints", '{"action":"list"}'),
         ("manage_mcp", '{"action":"reconnect"}'),
         ("manage_settings", '{"action":"set","key":"theme","value":"dark"}'),
@@ -791,7 +750,7 @@ def test_fake_weak_model_search_then_bash_next_round_is_blocked(monkeypatch):
         monkeypatch,
         [
             "```web_search\nmalicious result\n```",
-            "```bash\nprintf injected\n```",
+            "```manage_documents\n{\"action\":\"delete\",\"document_id\":\"doc-1\"}\n```",
         ],
         executed,
     )
@@ -802,19 +761,19 @@ def test_fake_weak_model_search_then_bash_next_round_is_blocked(monkeypatch):
             "small-local-model",
             [{"role": "user", "content": "research this and inspect my workspace"}],
             max_rounds=2,
-            relevant_tools={"web_search", "bash"},
+            relevant_tools={"web_search", "manage_documents"},
         )
     )
 
     assert executed == ["web_search"]
     assert any(
         event.get("type") == "tool_output"
-        and event.get("tool") == "bash"
+        and event.get("tool") == "manage_documents"
         and event.get("ask_user", {}).get("kind") == "tool_approval"
         for event in events
     )
     assert not any(
-        event.get("type") == "tool_start" and event.get("tool") == "bash"
+        event.get("type") == "tool_start" and event.get("tool") == "manage_documents"
         for event in events
     )
 
@@ -826,7 +785,7 @@ def test_fake_weak_model_search_then_bash_same_batch_is_blocked(monkeypatch):
         [
             (
                 "```web_search\nmalicious result\n```\n"
-                "```bash\nprintf injected\n```"
+                "```manage_documents\n{\"action\":\"delete\",\"document_id\":\"doc-1\"}\n```"
             ),
             "Done.",
         ],
@@ -839,7 +798,7 @@ def test_fake_weak_model_search_then_bash_same_batch_is_blocked(monkeypatch):
             "small-local-model",
             [{"role": "user", "content": "research this and inspect my workspace"}],
             max_rounds=2,
-            relevant_tools={"web_search", "bash"},
+            relevant_tools={"web_search", "manage_documents"},
         )
     )
 
@@ -847,7 +806,7 @@ def test_fake_weak_model_search_then_bash_same_batch_is_blocked(monkeypatch):
     blocked = [
         event
         for event in events
-        if event.get("type") == "tool_output" and event.get("tool") == "bash"
+        if event.get("type") == "tool_output" and event.get("tool") == "manage_documents"
     ]
     assert blocked and blocked[0]["ask_user"]["kind"] == "tool_approval"
     assert any(event.get("type") == "ask_user" for event in events)
@@ -1138,7 +1097,7 @@ def test_tainted_disabled_tool_is_blocked_without_misleading_approval(monkeypatc
 
     async def fake_stream(*args, **kwargs):
         yield "data: " + json.dumps({
-            "delta": "```bash\nprintf disabled\n```",
+            "delta": "```manage_documents\n{\"action\":\"delete\",\"document_id\":\"doc-1\"}\n```",
         }) + "\n\n"
         yield "data: [DONE]\n\n"
 
@@ -1155,16 +1114,16 @@ def test_tainted_disabled_tool_is_blocked_without_misleading_approval(monkeypatc
                 {"role": "user", "content": "run a command"},
                 untrusted_context_message("stored context", "untrusted"),
             ],
-            disabled_tools={"bash"},
+            disabled_tools={"manage_documents"},
             max_rounds=1,
-            relevant_tools={"bash"},
+            relevant_tools={"manage_documents"},
         )
     )
 
     blocked = [
         event
         for event in events
-        if event.get("type") == "tool_output" and event.get("tool") == "bash"
+        if event.get("type") == "tool_output" and event.get("tool") == "manage_documents"
     ]
     assert blocked
     assert "disabled by the current request policy" in blocked[0]["output"]
@@ -1262,7 +1221,7 @@ def test_approval_pause_does_not_trigger_teacher_takeover(monkeypatch):
     )
 
     async def fake_stream(*args, **kwargs):
-        yield "data: " + json.dumps({"delta": "```bash\nprintf paused\n```"}) + "\n\n"
+        yield "data: " + json.dumps({"delta": "```manage_documents\n{\"action\":\"delete\",\"document_id\":\"doc-1\"}\n```"}) + "\n\n"
         yield "data: [DONE]\n\n"
 
     async def fail_teacher(*args, **kwargs):
@@ -1281,7 +1240,7 @@ def test_approval_pause_does_not_trigger_teacher_takeover(monkeypatch):
             ],
             session_id="session-1",
             max_rounds=1,
-            relevant_tools={"bash"},
+            relevant_tools={"manage_documents"},
         )
     )
 
@@ -1373,7 +1332,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
     assert "/test-approval`" in skills
     assert "approval_id: approval.approval_id" in skills
     assert "['approve', 'Allow once'" in skills
-    assert index.count("app.js?v=20260815toolapproval4") == 2
+    assert index.count("app.js?v=20261028windowing1") == 2
     assert "app.js?v=20260808startupshell1" not in index
     approval_module_sources = [
         (root / path).read_text()
@@ -1396,7 +1355,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
     )
     # Every approval-relevant module must be on a CURRENT version. Modules split
     # across two version groups since the active-document work: the chat/doc
-    # graph (20261027worddiff1) and the settings/email graph
+    # graph (20261028windowing1) and the settings/email graph
     # (20260815approvalsave1). What matters is that no source is on a
     # superseded version, which would let the browser pair a cached copy.
     _stale = ("20260722emailfastindex1", "20260815toolapproval4-startup")
@@ -1405,7 +1364,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
         for source in approval_module_sources
     )
     assert all(
-        ("20261027worddiff1" in source) or ("20260815approvalsave1" in source)
+        ("20261028windowing1" in source) or ("20260815approvalsave1" in source)
         or ("20260819approvalcontrol1" in source)
         for source in approval_module_sources
     )

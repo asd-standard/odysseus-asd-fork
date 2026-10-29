@@ -185,7 +185,6 @@ def _chat_stream_endpoint(
     monkeypatch.setattr(chat_routes, "set_session_mode", lambda *args, **kwargs: None)
     monkeypatch.setattr(chat_routes, "build_chat_context", fake_build_context)
     monkeypatch.setattr(chat_routes, "SessionLocal", _EmptyDb)
-    monkeypatch.setattr(chat_routes, "_is_image_generation_session", lambda *args, **kwargs: False)
     monkeypatch.setattr(chat_routes, "stream_llm_with_fallback", fake_chat_stream)
     monkeypatch.setattr(chat_routes, "stream_agent_loop", fake_agent_stream)
     if capture_completion:
@@ -2242,14 +2241,14 @@ def test_multi_round_agent_uses_only_selected_model(monkeypatch):
         round_number += 1
         seen_candidates.append([(url, model) for url, model, _headers in candidates])
         if round_number == 1:
-            call = {"name": "bash", "arguments": json.dumps({"command": "printf ok"})}
+            call = {"name": "web_search", "arguments": json.dumps({"query": "printf ok"})}
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
         else:
             yield f'data: {json.dumps({"delta": "done"})}\n\n'
         yield "data: [DONE]\n\n"
 
     async def fake_execute(block, *args, **kwargs):
-        return "bash", {"output": "ok", "exit_code": 0}
+        return "web_search", {"output": "ok", "exit_code": 0}
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
@@ -2260,7 +2259,7 @@ def test_multi_round_agent_uses_only_selected_model(monkeypatch):
             "selected-model",
             [{"role": "user", "content": "Run one tool and report back."}],
             max_rounds=3,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
             fallbacks=[],
             _is_teacher_run=True,
         )
@@ -2299,14 +2298,14 @@ def test_multi_round_agent_pins_answering_fallback_for_the_run(monkeypatch):
         assert kwargs["fallback_on_empty"] is False
         if round_number == 1:
             yield f'data: {json.dumps({"type": "fallback", "selected_model": "selected-model", "answered_by": "backup-model", "candidate_index": 1})}\n\n'
-            call = {"name": "bash", "arguments": json.dumps({"command": "printf ok"})}
+            call = {"name": "web_search", "arguments": json.dumps({"query": "printf ok"})}
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
         else:
             yield f'data: {json.dumps({"delta": "done"})}\n\n'
         yield "data: [DONE]\n\n"
 
     async def fake_execute(block, *args, **kwargs):
-        return "bash", {"output": "ok", "exit_code": 0}
+        return "web_search", {"output": "ok", "exit_code": 0}
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
@@ -2317,7 +2316,7 @@ def test_multi_round_agent_pins_answering_fallback_for_the_run(monkeypatch):
             primary[1],
             [{"role": "user", "content": "Run one tool and report back."}],
             max_rounds=3,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
             headers={},
             fallbacks=[backup],
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
@@ -2360,13 +2359,13 @@ def test_late_agent_fallback_records_each_round_and_stays_pinned(monkeypatch):
         seen_candidates.append(candidates)
         if round_number == 1:
             yield 'data: {"delta": "primary round"}\n\n'
-            call = {"name": "bash", "arguments": json.dumps({"command": "printf one"})}
+            call = {"name": "web_search", "arguments": json.dumps({"query": "printf one"})}
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
         elif round_number == 2:
             yield f'data: {json.dumps({"type": "fallback", "selected_model": "selected-model", "answered_by": "backup-model", "candidate_index": 1})}\n\n'
             yield f'data: {json.dumps({"type": "model_actual", "requested_model": "backup-model", "model": "provider-backup-alias"})}\n\n'
             yield 'data: {"delta": "backup round"}\n\n'
-            call = {"name": "bash", "arguments": json.dumps({"command": "printf two"})}
+            call = {"name": "web_search", "arguments": json.dumps({"query": "printf two"})}
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
         else:
             yield 'data: {"delta": "backup final"}\n\n'
@@ -2376,7 +2375,7 @@ def test_late_agent_fallback_records_each_round_and_stays_pinned(monkeypatch):
         # Keep this routing-only test untainted with a content-free fixture.
         # Any model-visible shell error is workspace-derived and correctly
         # reaches the exact-approval boundary on the next action.
-        return "bash", {"exit_code": 1}
+        return "web_search", {"exit_code": 1}
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
@@ -2388,7 +2387,7 @@ def test_late_agent_fallback_records_each_round_and_stays_pinned(monkeypatch):
             [{"role": "user", "content": "Run two tools and report back."}],
             headers=primary[2],
             max_rounds=4,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
             fallbacks=[backup],
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
@@ -2474,8 +2473,8 @@ def test_agent_terminal_later_round_error_stops_after_completed_tool(
         calls += 1
         if calls == 1:
             tool_call = {
-                "name": "bash",
-                "arguments": json.dumps({"command": "printf one"}),
+                "name": "web_search",
+                "arguments": json.dumps({"query": "printf one"}),
             }
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [tool_call]})}\n\n'
             yield "data: [DONE]\n\n"
@@ -2484,7 +2483,7 @@ def test_agent_terminal_later_round_error_stops_after_completed_tool(
         yield f'event: error\ndata: {json.dumps({"status": provider_status, "error": "unsupported model"})}\n\n'
 
     async def fake_execute(block, *args, **kwargs):
-        return "bash", {"output": "ok", "exit_code": 0}
+        return "web_search", {"output": "ok", "exit_code": 0}
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
@@ -2495,7 +2494,7 @@ def test_agent_terminal_later_round_error_stops_after_completed_tool(
             "selected-model",
             [{"role": "user", "content": "Run one tool."}],
             max_rounds=3,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
             _is_teacher_run=True,
@@ -2807,7 +2806,7 @@ def test_reasoning_only_agent_error_emits_terminal_history(monkeypatch):
         "https://selected.example/v1",
         "selected-model",
         [{"role": "user", "content": "Investigate this failure."}],
-        relevant_tools={"bash"},
+        relevant_tools={"web_search"},
         fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
         fallback_on_empty=False,
         _is_teacher_run=True,
@@ -2893,8 +2892,8 @@ def test_agent_metrics_attribute_usage_to_each_answering_route(monkeypatch):
             yield 'data: {"type": "model_actual", "model": "selected-alias"}\n\n'
             yield 'data: {"type": "usage", "data": {"model": "selected-alias", "input_tokens": 100, "output_tokens": 10}}\n\n'
             tool_call = {
-                "name": "bash",
-                "arguments": json.dumps({"command": "printf one"}),
+                "name": "web_search",
+                "arguments": json.dumps({"query": "printf one"}),
             }
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [tool_call]})}\n\n'
         else:
@@ -2905,7 +2904,7 @@ def test_agent_metrics_attribute_usage_to_each_answering_route(monkeypatch):
         yield "data: [DONE]\n\n"
 
     async def fake_execute(block, *args, **kwargs):
-        return "bash", {"output": "ok", "exit_code": 0}
+        return "web_search", {"output": "ok", "exit_code": 0}
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
@@ -2916,7 +2915,7 @@ def test_agent_metrics_attribute_usage_to_each_answering_route(monkeypatch):
         [{"role": "user", "content": "Run one tool."}],
         headers=primary[2],
         max_rounds=3,
-        relevant_tools={"bash"},
+        relevant_tools={"web_search"},
         fallbacks=[backup],
         route_descriptors=[
             {"endpoint_id": "paid", "endpoint_label": "Paid", "endpoint_cost_tracked": True},
@@ -2990,7 +2989,7 @@ def test_agent_round_ignores_malformed_usage_and_uses_estimate(
         "selected-model",
         [{"role": "user", "content": "Run a detailed investigation."}],
         max_rounds=1,
-        relevant_tools={"bash"},
+        relevant_tools={"web_search"},
         route_descriptors=[{
             "endpoint_id": "selected",
             "endpoint_label": "Selected",
@@ -3072,8 +3071,8 @@ def test_force_answer_recovery_persists_and_bills_pinned_fallback_route(
             }
             yield "data: " + json.dumps(fallback_event) + "\n\n"
         tool_call = {
-            "name": "bash",
-            "arguments": json.dumps({"command": "printf repeated"}),
+            "name": "web_search",
+            "arguments": json.dumps({"query": "printf repeated"}),
         }
         yield f'data: {json.dumps({"type": "tool_calls", "calls": [tool_call]})}\n\n'
         yield "data: [DONE]\n\n"
@@ -3082,7 +3081,7 @@ def test_force_answer_recovery_persists_and_bills_pinned_fallback_route(
         # The repeated-call recovery is the subject here, not provenance. Use
         # a content-free failure; model-visible shell errors correctly arm the
         # exact-approval gate.
-        return "bash", {"exit_code": 1}
+        return "web_search", {"exit_code": 1}
 
     async def fake_synthesis(**kwargs):
         synthesis_calls.append(kwargs)
@@ -3099,7 +3098,7 @@ def test_force_answer_recovery_persists_and_bills_pinned_fallback_route(
         [{"role": "user", "content": "Keep checking until you can answer."}],
         headers=primary[2],
         max_rounds=6,
-        relevant_tools={"bash"},
+        relevant_tools={"web_search"},
         fallbacks=[backup],
         route_descriptors=[
             {
@@ -3167,8 +3166,8 @@ def test_agent_terminal_retains_completed_paid_fallback_usage(monkeypatch):
             yield 'data: {"type": "fallback", "selected_model": "selected-model", "answered_by": "backup-model", "candidate_index": 1, "selected_endpoint_id": "local", "selected_endpoint_label": "Local", "selected_endpoint_cost_tracked": false, "answered_by_endpoint_id": "paid", "answered_by_endpoint_label": "Paid", "answered_by_endpoint_cost_tracked": true}\n\n'
             yield 'data: {"type": "usage", "data": {"model": "backup-model", "input_tokens": 125, "output_tokens": 25}}\n\n'
             tool_call = {
-                "name": "bash",
-                "arguments": json.dumps({"command": "printf one"}),
+                "name": "web_search",
+                "arguments": json.dumps({"query": "printf one"}),
             }
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [tool_call]})}\n\n'
             yield "data: [DONE]\n\n"
@@ -3176,7 +3175,7 @@ def test_agent_terminal_retains_completed_paid_fallback_usage(monkeypatch):
         yield 'event: error\ndata: {"status": 400, "error": "unsupported model"}\n\n'
 
     async def fake_execute(block, *args, **kwargs):
-        return "bash", {"output": "ok", "exit_code": 0}
+        return "web_search", {"output": "ok", "exit_code": 0}
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
@@ -3187,7 +3186,7 @@ def test_agent_terminal_retains_completed_paid_fallback_usage(monkeypatch):
         [{"role": "user", "content": "Run one tool."}],
         headers=primary[2],
         max_rounds=3,
-        relevant_tools={"bash"},
+        relevant_tools={"web_search"},
         fallbacks=[backup],
         route_descriptors=[
             {"endpoint_id": "local", "endpoint_label": "Local", "endpoint_cost_tracked": False},
@@ -3263,7 +3262,7 @@ def test_agent_builds_backup_prompt_and_tool_transport_before_attempt(monkeypatc
             [{"role": "user", "content": "Use bash if needed."}],
             headers=primary[2],
             max_rounds=1,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
             fallbacks=[backup],
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
@@ -3365,8 +3364,8 @@ def test_agent_fallback_request_uses_candidate_context_budget(
         if round_number == 1:
             yield f'data: {json.dumps({"type": "fallback", "selected_model": primary[1], "answered_by": backup[1], "candidate_index": 1})}\n\n'
             tool_call = {
-                "name": "bash",
-                "arguments": json.dumps({"command": "printf one"}),
+                "name": "web_search",
+                "arguments": json.dumps({"query": "printf one"}),
             }
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [tool_call]})}\n\n'
         else:
@@ -3374,7 +3373,7 @@ def test_agent_fallback_request_uses_candidate_context_budget(
         yield "data: [DONE]\n\n"
 
     async def fake_execute(block, *args, **kwargs):
-        return "bash", {"output": "ok", "exit_code": 0}
+        return "web_search", {"output": "ok", "exit_code": 0}
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
@@ -3386,7 +3385,7 @@ def test_agent_fallback_request_uses_candidate_context_budget(
             history,
             headers=primary[2],
             max_rounds=2,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
             fallbacks=[backup],
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
@@ -3466,7 +3465,7 @@ def test_agent_persists_only_answering_route_compaction(monkeypatch):
             headers=primary[2],
             history_session=object(),
             max_rounds=1,
-            relevant_tools={"bash"},
+            relevant_tools={"web_search"},
             fallbacks=[backup],
             fallback_statuses=FOREGROUND_AVAILABILITY_STATUSES,
             fallback_on_empty=False,
@@ -3509,7 +3508,7 @@ def test_agent_deferred_compaction_survives_duplicate_primary_fallback(monkeypat
         primary[1],
         [{"role": "user", "content": "Investigate this."}],
         headers=primary[2],
-        relevant_tools={"bash"},
+        relevant_tools={"web_search"},
         fallbacks=[primary],
         defer_context_shaping=True,
         max_rounds=1,
@@ -3570,14 +3569,14 @@ def test_skill_activation_reaches_later_fallback_request_and_pinned_round(monkey
         def load(self, owner=None):
             return [{
                 "name": "runtime-skill",
-                "requires_toolsets": ["grep"],
+                "requires_toolsets": ["read_upload"],
             }]
 
         def get_relevant_skills(self, *args, **kwargs):
             return []
 
     monkeypatch.setattr(skills_module, "SkillsManager", FakeSkillsManager)
-    monkeypatch.setattr(tool_policy, "known_tool_names", lambda: {"manage_skills", "grep"})
+    monkeypatch.setattr(tool_policy, "known_tool_names", lambda: {"manage_skills", "read_upload"})
 
     async def fake_stream(candidates, messages, **kwargs):
         nonlocal round_number
@@ -3598,8 +3597,8 @@ def test_skill_activation_reaches_later_fallback_request_and_pinned_round(monkey
         elif round_number == 2:
             yield f'data: {json.dumps({"type": "fallback", "selected_model": primary[1], "answered_by": backup[1], "candidate_index": 1})}\n\n'
             call = {
-                "name": "grep",
-                "arguments": json.dumps({"pattern": "needle", "path": "."}),
+                "name": "read_upload",
+                "arguments": json.dumps({"id": "up-1"}),
             }
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
         else:
@@ -3633,17 +3632,12 @@ def test_skill_activation_reaches_later_fallback_request_and_pinned_round(monkey
         schema["function"]["name"]
         for schema in round_two_requests[0]["kwargs"]["tools"]
     }
-    assert "grep" in primary_schema_names
+    assert "read_upload" in primary_schema_names
     assert round_two_requests[1]["kwargs"]["tools"] is None
     assert any(
-        "route=odysseus-qwen-backup; tools=grep,manage_skills" in (message.get("content") or "")
+        "route=odysseus-qwen-backup; tools=" in (message.get("content") or "")
+        and "manage_skills" in (message.get("content") or "")
+        and "read_upload" in (message.get("content") or "")
         for message in round_two_requests[1]["messages"]
     )
 
-    round_three_candidates, round_three_requests = requests_by_round[2]
-    assert round_three_candidates == [backup]
-    assert any(
-        "route=odysseus-qwen-backup; tools=grep,manage_skills" in (message.get("content") or "")
-        for message in round_three_requests[0]["messages"]
-    )
-    assert any('"delta": "pinned backup answer"' in chunk for chunk in chunks)

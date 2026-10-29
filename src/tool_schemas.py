@@ -22,44 +22,12 @@ logger = logging.getLogger(__name__)
 _REQUIRED_NATIVE_TOOL_ARGS = {
     "web_search": ("query", "queries"),
     "web_fetch": ("url",),
-    "read_file": ("path",),
-    "write_file": ("path",),
-    "edit_file": ("path",),
-    "apply_patch": ("patch_text", "patchText", "patch"),
 }
 
 # ---------------------------------------------------------------------------
 # OpenAI-compatible function tool schemas
 # ---------------------------------------------------------------------------
 FUNCTION_TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "bash",
-            "description": "Run a shell command (full access). Prefer a dedicated tool whenever one fits the job (reading, writing, editing, searching, or listing files); use bash only for what no dedicated tool covers (installs, git, builds, running programs, system info). Do NOT create or edit files via bash redirects/heredocs/sed -- use the dedicated file tools.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "The shell command to execute"}
-                },
-                "required": ["command"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "python",
-            "description": "Execute Python code to compute a result or test something. Prefer a dedicated tool whenever one fits the job (reading, writing, or searching files); use python only for computation, data processing, or scripting no dedicated tool covers.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "code": {"type": "string", "description": "Python code to execute"}
-                },
-                "required": ["code"]
-            }
-        }
-    },
     {
         "type": "function",
         "function": {
@@ -87,69 +55,6 @@ FUNCTION_TOOL_SCHEMAS = [
                     "full": {"type": "boolean", "description": "Raise the download budget to the hard cap for large pages/files. Use only after a result reported partial content."}
                 },
                 "required": ["url"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read a file from disk. Optionally read a line range with offset/limit for large files.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path to read"},
-                    "offset": {"type": "integer", "description": "1-based line to start reading from (optional)"},
-                    "limit": {"type": "integer", "description": "Max number of lines to read from offset (optional)"}
-                },
-                "required": ["path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "grep",
-            "description": "Search file contents for a regular expression across a directory tree (uses ripgrep when available, respecting .gitignore). Returns file:line:match. PREFER this over `bash grep/rg` for code search — confined to the allowed roots, structured output.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pattern": {"type": "string", "description": "Regular expression to search for"},
-                    "path": {"type": "string", "description": "Directory or file to search (optional; defaults to the project root)"},
-                    "glob": {"type": "string", "description": "Only search files matching this glob, e.g. '*.py' (optional)"},
-                    "ignore_case": {"type": "boolean", "description": "Case-insensitive match (optional)"},
-                    "max_results": {"type": "integer", "description": "Max matches to return (optional)"}
-                },
-                "required": ["pattern"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "glob",
-            "description": "Find files by glob pattern (recursive), newest first. e.g. '**/*.py'. PREFER this over `bash find/ls` for locating files — confined to the allowed roots.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern, e.g. '**/*.ts' or 'src/**/test_*.py'"},
-                    "path": {"type": "string", "description": "Base directory (optional; defaults to the project root)"}
-                },
-                "required": ["pattern"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ls",
-            "description": "List the entries of a directory (folders first, then files with sizes). PREFER this over `bash ls` — confined to the allowed roots.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Directory to list (optional; defaults to the project root)"}
-                },
-                "required": []
             }
         }
     },
@@ -197,81 +102,6 @@ FUNCTION_TOOL_SCHEMAS = [
                     "content": {"type": "string", "description": "Full text content of the file"}
                 },
                 "required": ["name", "content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_file",
-            "description": "Write/save a file to disk",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path to write to"},
-                    "content": {"type": "string", "description": "File content to write"}
-                },
-                "required": ["path", "content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_file",
-            "description": "Edit a file ON DISK by exact string replacement (home folder, project files, any real path like ~/sweden.txt or /path/to/file). This is the right tool for files on disk — NOT edit_document (that's for editor-panel documents). PREFER this over bash (sed/echo) — it shows a diff. old_string must match the file exactly and be unique (or set replace_all). Use write_file to create a new file.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path to edit"},
-                    "old_string": {"type": "string", "description": "Exact text to replace (must match the file, including indentation)"},
-                    "new_string": {"type": "string", "description": "Replacement text"},
-                    "replace_all": {"type": "boolean", "description": "Replace all occurrences instead of requiring a unique match"}
-                },
-                "required": ["path", "old_string", "new_string"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "apply_patch",
-            "description": "Apply a multi-file source-code patch to disk. Use for real project files in the workspace when several edits belong together. Patch must use *** Begin Patch / *** End Patch with Add File, Update File, or Delete File sections. Prefer this over bash redirects/heredocs/sed.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "patch_text": {
-                        "type": "string",
-                        "description": "Patch text beginning with *** Begin Patch and ending with *** End Patch"
-                    }
-                },
-                "required": ["patch_text"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "todowrite",
-            "description": "Create and maintain a structured task list for the current coding session. Use during multi-step implementation/debug/refactor work and keep statuses current.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "todos": {
-                        "type": "array",
-                        "description": "Current task list. Only one item should be in_progress.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "content": {"type": "string", "description": "Task description"},
-                                "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
-                                "priority": {"type": "string", "enum": ["low", "medium", "high"]}
-                            },
-                            "required": ["content", "status"]
-                        }
-                    }
-                },
-                "required": ["todos"]
             }
         }
     },
@@ -511,13 +341,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ui_control",
-            "description": "Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), open_email_reply (open an email reply draft document; DOES NOT send. For 'write/draft a reply saying X', include body with the drafted reply), set_mode, switch_model, set_theme (built-in presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the built-in preset list, ALWAYS use create_theme.",
+            "description": "Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, email, sessions, notes, memories/brain, skills, settings), open_email_reply (open an email reply draft document; DOES NOT send. For 'write/draft a reply saying X', include body with the drafted reply), set_mode, switch_model, set_theme (built-in presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the built-in preset list, ALWAYS use create_theme.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["toggle", "open_panel", "open_email_reply", "set_mode", "switch_model", "set_theme", "create_theme", "get_toggles"],
                                "description": "The UI action. Use set_theme for presets, create_theme to build a custom theme with any hex colors"},
-                    "name": {"type": "string", "description": "For toggle: web, bash, research, incognito, document_editor (aliases: shell, search, deepresearch, documents). For open_panel: documents, gallery, email, sessions, notes, brain/memories, skills, settings, cookbook. For open_email_reply: email UID. For set_theme: a preset theme name. For create_theme: the custom theme name."},
+                    "name": {"type": "string", "description": "For toggle: web, research, incognito, document_editor (aliases: search, deepresearch, documents). For open_panel: documents, email, sessions, notes, brain/memories, skills, settings. For open_email_reply: email UID. For set_theme: a preset theme name. For create_theme: the custom theme name."},
                     "value": {"type": "string", "description": "Value: on/off for toggle, agent/chat for set_mode, model name for switch_model, theme name for set_theme, or folder for open_email_reply"},
                     "uid": {"type": "string", "description": "Email UID for open_email_reply"},
                     "folder": {"type": "string", "description": "Email folder for open_email_reply (default INBOX)"},
@@ -884,210 +714,19 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "download_model",
-            "description": "Download a HuggingFace model to a server. If `host` is omitted, defaults to the cookbook's currently-selected server (NOT localhost) — call list_cookbook_servers first if you're unsure where it should go.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "repo_id": {"type": "string", "description": "HuggingFace repo (e.g. 'Qwen/Qwen3-8B')"},
-                    "host": {"type": "string", "description": "Target server — use the friendly NAME from list_cookbook_servers (e.g. 'gpu-box', 'workstation') or a raw user@host. Omit to use the cookbook's selected default server."},
-                    "local": {"type": "boolean", "description": "Force download to THIS machine (localhost) instead of the default remote server."},
-                    "include": {"type": "string", "description": "Glob filter for specific files (e.g. '*Q4_K_M*')"},
-                },
-                "required": ["repo_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "serve_model",
-            "description": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, MLX Image, or Diffusers. If `host` is omitted, defaults to the cookbook's selected server (not localhost). For MLX image models on Apple Silicon use `python3 scripts/mlx_image_server.py --model <repo> --port 8100`; for non-MLX image/inpainting/diffusion models use `python3 scripts/diffusion_server.py --model <repo> --port 8100`. Never serve image models with `mlx_lm.server`; that is only for text/chat MLX models. After launching, call list_served_models to check readiness/errors; if it reports a diagnosis with retry suggestions, retry via serve_model using the suggested adjusted cmd.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "repo_id": {"type": "string", "description": "Model repo (e.g. 'Qwen/Qwen3-8B')"},
-                    "cmd": {"type": "string", "description": "Full serve command (e.g. 'vllm serve <repo> --port 8000 --tp 2', 'python3 -m sglang.launch_server --model-path <repo> --port 30000', for MLX image models: 'python3 scripts/mlx_image_server.py --model <repo> --port 8100', or for non-MLX image models: 'python3 scripts/diffusion_server.py --model <repo> --port 8100')"},
-                    "host": {"type": "string", "description": "Target server — friendly NAME from list_cookbook_servers (e.g. 'gpu-box', 'workstation') or raw user@host. Omit to use the cookbook's selected default."},
-                    "local": {"type": "boolean", "description": "Force serve on THIS machine instead of the default remote server."},
-                },
-                "required": ["repo_id", "cmd"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_served_models",
-            "description": "List currently running model servers with status, model name, port, throughput, and structured Cookbook diagnoses. If a serve failed, this includes recent logs plus retry suggestions/adjusted commands the agent can use with serve_model.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "stop_served_model",
-            "description": "Stop a running model server.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string", "description": "Tmux session ID of the server to stop"},
-                },
-                "required": ["session_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "tail_serve_output",
-            "description": "Read the last N lines of a cookbook serve/download task's tmux pane. Use ONLY in this exact sequence: (1) the user asked to serve a model, (2) you launched it via serve_model, (3) list_served_models reports the NEW task as crashed/error, (4) call tail_serve_output on the new sessionId to find the root cause, (5) call serve_model again with adjusted flags. DO NOT call this on old stopped/completed download tasks — they are historical and won't tell you anything about the current attempt. DO NOT investigate past failures before launching; the environment may have changed since.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string", "description": "Tmux session id from list_served_models (e.g. 'serve-abc12345', 'cookbook-a1b2c3d4')."},
-                    "tail": {"type": "integer", "description": "How many lines of pane scrollback to fetch (default 300, max 4000). Bump this if the error in the visible tail references an earlier line ('see root cause above')."},
-                },
-                "required": ["session_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_downloads",
-            "description": "List in-progress model downloads in the Cookbook. Shows each download's model name, phase, percent (if available), session ID, and remote host.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "cancel_download",
-            "description": "Cancel an in-progress model download by killing its tmux session. Use list_downloads first to get the session_id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string", "description": "Tmux session ID from list_downloads (e.g. 'cookbook-a1b2c3d4')"},
-                },
-                "required": ["session_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_hf_models",
-            "description": "Search HuggingFace for models matching a query. Returns a ranked list of repo IDs, sizes (when available), and download counts. Use this when the user wants to find a model to download.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search terms (e.g. 'Qwen 8B', 'flux', 'llama-3 instruct')"},
-                    "limit": {"type": "integer", "description": "Max results (default 10)"},
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_cookbook_servers",
-            "description": "List the cookbook's configured servers (remote GPU boxes + local) and the current default host. Call this before download_model/serve_model when the user didn't specify a host, so models go to the right machine (where the GPUs and model cache are) instead of localhost. If multiple servers and intent is ambiguous, show them and ask the user which.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_serve_presets",
-            "description": "List saved Cookbook serve presets. Each preset is a launch template (name, model, host, port, tmux cmd) the user previously saved from the UI. Call this BEFORE raw serve_model when the user asks to launch a model by name manually.",
-            "parameters": {"type": "object", "properties": {}}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "adopt_served_model",
-            "description": "Register an existing tmux model server (started manually or outside the cookbook flow) into Cookbook tracking, AND add it as a chat endpoint. Use when the user (or you) launched something via ssh+tmux and now want it visible in the UI / stoppable via stop_served_model / usable in the model picker. Verifies the tmux session + port respond before adding.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "host": {"type": "string", "description": "Remote host in user@host form (e.g. 'user@192.0.2.10'). Omit for localhost."},
-                    "tmux_session": {"type": "string", "description": "Existing tmux session name (e.g. 'minimax-m27')"},
-                    "model": {"type": "string", "description": "Model repo_id or display name (e.g. 'cyankiwi/MiniMax-M2.7-AWQ-4bit')"},
-                    "port": {"type": "integer", "description": "Port the server is listening on (default 8000)"},
-                    "name": {"type": "string", "description": "Optional display name (defaults to model basename)"},
-                    "add_endpoint": {"type": "boolean", "description": "Also register as a chat endpoint (default true)"}
-                },
-                "required": ["tmux_session", "model"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "serve_preset",
-            "description": "Launch a saved Cookbook serve preset by name. Reuses the exact tmux command + host the user saved before. This is the preferred way to start a known model (SD3.5, vLLM presets, etc.) — don't fabricate launch commands when a preset exists.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Preset name (exact or case-insensitive substring of one returned by list_serve_presets)"},
-                },
-                "required": ["name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_cached_models",
-            "description": "List models already cached on disk locally or on a remote server. `host` accepts friendly Cookbook server names from list_cookbook_servers (for example workstation) or raw user@host. Also reports completed Cookbook download tasks when the filesystem cache scan cannot locate the HF cache path.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "host": {"type": "string", "description": "Friendly Cookbook server name (e.g. 'workstation', 'gpu-box') or raw remote host (e.g. 'user@gpu-box'). Omit for local."},
-                    "model_dir": {"type": "string", "description": "Comma-separated additional model directories to scan beyond ~/.cache/huggingface/hub"},
-                    "ssh_port": {"type": "string", "description": "SSH port for remote host (default 22)"},
-                    "platform": {"type": "string", "enum": ["linux", "windows"], "description": "Remote platform"}
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "app_api",
-            "description": "Generic loopback to allowed internal Odysseus endpoints. Use this when there's no named tool for what the user wants. Hits the same routes the UI buttons hit (cookbook, gallery, library/documents, memory, notes, calendar, tasks, settings, themes, research, compare, etc.). action='endpoints' returns the OpenAPI surface (use `filter` to narrow). action='call' (default) takes method+path+body. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked for safety. Do not use for shell commands; use named command tooling instead. Do not use for package installs, engine rebuilds, PID signalling, or email account discovery; use list_email_accounts for email accounts because /api/email/accounts is owner-filtered in tool context.",
+            "description": "Generic loopback to allowed internal Odysseus endpoints. Use this when there's no named tool for what the user wants. Hits the same routes the UI buttons hit (library/documents, memory, notes, calendar, tasks, settings, themes, research, compare, etc.). action='endpoints' returns the OpenAPI surface (use `filter` to narrow). action='call' (default) takes method+path+body. Sensitive auth/user/admin paths are blocked for safety. Do not use for shell commands. Do not use for package installs, engine rebuilds, PID signalling, or email account discovery; use list_email_accounts for email accounts because /api/email/accounts is owner-filtered in tool context.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["call", "endpoints"], "description": "'call' to hit an endpoint, 'endpoints' to list what's available"},
-                    "path": {"type": "string", "description": "Endpoint path starting with /api/ (e.g. '/api/cookbook/gpus', '/api/gallery/list', '/api/calendar/events')"},
+                    "path": {"type": "string", "description": "Endpoint path starting with /api/ (e.g. '/api/documents/list', '/api/calendar/events')"},
                     "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"], "description": "HTTP method (default GET)"},
                     "body": {"type": "object", "description": "JSON request body for POST/PUT/PATCH"},
                     "query": {"type": "object", "description": "Querystring params as a key-value object"},
-                    "filter": {"type": "string", "description": "For action=endpoints: substring to filter paths/summaries (e.g. 'cookbook', 'gallery')"}
+                    "filter": {"type": "string", "description": "For action=endpoints: substring to filter paths/summaries (e.g. 'documents', 'calendar')"}
                 },
                 "required": ["action"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_image",
-            "description": "Edit a gallery image: upscale, remove background, inpaint, or harmonize.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "image_id": {"type": "string", "description": "Gallery image ID"},
-                    "action": {"type": "string", "enum": ["upscale", "rembg", "inpaint", "harmonize"], "description": "Edit action"},
-                    "prompt": {"type": "string", "description": "For inpaint: what to fill the masked area with"},
-                    "scale": {"type": "number", "description": "For upscale: scale factor (default 2)"},
-                },
-                "required": ["image_id", "action"]
             }
         }
     },
@@ -1341,15 +980,16 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "manage_bg_jobs",
-            "description": "Inspect and control detached background `bash` jobs (started with the `#!bg` marker). action='list' shows this chat's jobs with id/status/age/command; action='output' returns a job's captured output so far (use for a still-running job, or to re-read a finished one); action='kill' terminates a runaway job's process tree instead of waiting out its max-runtime. output and kill need job_id from list.",
+            "name": "read_upload",
+            "description": "Read a file attached to this chat by its upload id. Use when the inline attachment text was truncated or omitted. Image attachments are not supported. Supports text files and PDFs, with offset/limit paging.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "output", "kill"], "description": "list | output | kill (default: list)"},
-                    "job_id": {"type": "string", "description": "Background job id (required for output/kill; from action='list')"},
+                    "id": {"type": "string", "description": "Upload id from the attachment manifest"},
+                    "offset": {"type": "integer", "description": "Character offset to start from (default 0)"},
+                    "limit": {"type": "integer", "description": "Maximum characters to return (default 20000)"},
                 },
-                "required": ["action"]
+                "required": ["id"]
             }
         }
     },
@@ -1473,11 +1113,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         return None
 
     # Convert structured args back to the text format each tool expects
-    if tool_type == "bash":
-        content = args.get("command", "")
-    elif tool_type == "python":
-        content = args.get("code", "")
-    elif tool_type == "web_search":
+    if tool_type == "web_search":
         queries = args.get("queries")
         if isinstance(queries, list) and queries:
             content = str(queries[0])
@@ -1491,14 +1127,12 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         tf = args.get("time_filter")
         if content and isinstance(tf, str) and tf in ("day", "week", "month", "year"):
             content = json.dumps({"query": content, "time_filter": tf})
-    elif tool_type == "read_file":
-        # Plain path (back-compat) unless a line range is requested → JSON.
-        if args.get("offset") or args.get("limit"):
-            content = json.dumps(args)
-        else:
-            content = args.get("path", "")
-    elif tool_type in ("grep", "glob", "ls"):
-        content = json.dumps(args) if args else "{}"
+    elif tool_type == "read_upload":
+        content = json.dumps({
+            "id": args.get("id", ""),
+            "offset": args.get("offset"),
+            "limit": args.get("limit"),
+        })
     elif tool_type == "list_library_files":
         content = json.dumps({"filter": args.get("filter", ""), "folder": args.get("folder", "")})
     elif tool_type == "read_library_file":
@@ -1510,14 +1144,6 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         })
     elif tool_type == "make_library_file":
         content = json.dumps({"name": args.get("name", ""), "content": args.get("content", "")})
-    elif tool_type == "write_file":
-        content = args.get("path", "") + "\n" + args.get("content", "")
-    elif tool_type == "edit_file":
-        content = json.dumps(args)
-    elif tool_type == "apply_patch":
-        content = args.get("patch_text") or args.get("patchText") or args.get("patch") or ""
-    elif tool_type == "todowrite":
-        content = json.dumps(args)
     elif tool_type == "create_document":
         parts = [args.get("title", "Untitled")]
         if args.get("language"):

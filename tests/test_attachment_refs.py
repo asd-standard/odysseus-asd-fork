@@ -17,7 +17,6 @@ def test_persistable_message_content_replaces_inline_media_with_attachment_ref()
                 "size": 42,
                 "checksum_sha256": "sha256-digest",
                 "created_at": "2026-07-09T12:00:00",
-                "vision": "A small architecture diagram.",
             }
         ]
     }
@@ -37,7 +36,6 @@ def test_persistable_message_content_replaces_inline_media_with_attachment_ref()
     assert "Attachment: diagram.png" in stored
     assert "id=abc123.png" in stored
     assert "sha256=sha256-digest" in stored
-    assert "A small architecture diagram." in stored
 
 
 def test_search_index_text_strips_legacy_serialized_data_url_blocks():

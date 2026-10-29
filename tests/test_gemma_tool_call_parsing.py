@@ -22,16 +22,6 @@ def test_gemma_tool_call_unquoted_args_parse():
     assert blocks[0].content == "hello world"
 
 
-def test_gemma_tool_call_normalizes_dash_tool_name():
-    raw = '<|tool_call|>call:read-file{"path":"README.md"}<|tool_call|>'
-
-    blocks = parse_tool_blocks(raw)
-
-    assert len(blocks) == 1
-    assert blocks[0].tool_type == "read_file"
-    assert blocks[0].content == "README.md"
-
-
 def test_gemma_parser_does_not_strip_non_tool_fenced_metadata():
     raw = '```python id="abc"\nprint("hello")\n```'
 

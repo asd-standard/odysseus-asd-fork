@@ -102,7 +102,6 @@ def test_endpoint_cleanup_preserves_legacy_default_fallback_data():
             {"endpoint_id": "dead", "model": "foreground"},
         ],
         "utility_model_fallbacks": [{"endpoint_id": "dead", "model": "utility"}],
-        "vision_model_fallbacks": [{"endpoint_id": "dead", "model": "vision"}],
         "stt_provider": "endpoint:dead",
         "stt_model": "whisper",
     }
@@ -111,14 +110,12 @@ def test_endpoint_cleanup_preserves_legacy_default_fallback_data():
         "Default Model",
         "Foreground Model Fallbacks",
         "Utility Model Fallbacks",
-        "Vision Model Fallbacks",
         "Speech to Text",
     ]
     assert _clear_endpoint_settings_for_endpoint(settings, "dead", include_speech=True) == [
         "Default Model",
         "Foreground Model Fallbacks",
         "Utility Model Fallbacks",
-        "Vision Model Fallbacks",
         "Speech to Text",
     ]
     assert settings["default_endpoint_id"] == ""
@@ -129,7 +126,6 @@ def test_endpoint_cleanup_preserves_legacy_default_fallback_data():
     ]
     assert settings["foreground_model_fallbacks"] == []
     assert settings["utility_model_fallbacks"] == []
-    assert settings["vision_model_fallbacks"] == []
     assert settings["stt_provider"] == "disabled"
     assert settings["stt_model"] == "base"
 
@@ -149,8 +145,7 @@ def test_endpoint_cleanup_updates_active_scoped_prefs_but_preserves_legacy_data(
                 "foreground_model_fallbacks": [
                     {"endpoint_id": "dead", "model": "foreground"},
                 ],
-                "vision_model_fallbacks": [{"endpoint_id": "dead", "model": "vision"}],
-            },
+                    },
             "bob": {
                 "default_endpoint_id": "keep",
                 "default_model": "chat",
@@ -166,7 +161,6 @@ def test_endpoint_cleanup_updates_active_scoped_prefs_but_preserves_legacy_data(
         "utility_endpoint_id": "",
         "utility_model": "",
         "foreground_model_fallbacks": [],
-        "vision_model_fallbacks": [],
     }
     assert scoped["_users"]["bob"]["default_endpoint_id"] == "keep"
 

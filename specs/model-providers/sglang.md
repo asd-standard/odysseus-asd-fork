@@ -5,7 +5,7 @@ Last updated: dev@e57f60b | 2026-07-20
 ## Scope
 
 Canonical provider ID `sglang`; OpenAI Chat/Responses plus native generation;
-Cookbook launch behavior in `routes/cookbook_routes.py` and serving UI modules.
+Model serving is removed in this build; this spec covers endpoint/model compatibility only.
 There is no dedicated SGLang canonical reader on current `dev`.
 
 ## Metadata Shapes

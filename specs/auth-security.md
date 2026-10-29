@@ -27,8 +27,6 @@ This spec covers current security and trust-boundary behavior in:
 - `src/integrations.py`;
 - `src/webhook_manager.py`;
 - `src/generated_images.py`;
-- `scripts/diffusion_server.py`;
-- `scripts/mlx_image_server.py`;
 - `companion/routes.py` and `companion/pairing.py`;
 - `routes/auth_routes.py`, `routes/api_token_routes.py`, and canonical `routes/vault/vault_routes.py` plus its top-level compatibility shim;
 - admin-gated call sites in route files;
@@ -104,7 +102,7 @@ Agent tools call admin-gated HTTP routes through an in-process loopback. `core.m
 
 `src.tool_security.owner_is_admin_or_single_user()` treats explicit `AUTH_ENABLED=false` as intentional single-user mode even when an auth store already exists, while keeping pre-setup auth-enabled callers non-admin.
 
-Current admin gates include `require_admin()` call sites across admin wipe, backup, contacts, Cookbook, diagnostics, embeddings, MCP, model, personal docs, presets, skills, uploads, vault, webhook, and companion routes. Local wrappers also exist in auth routes, shell routes, and task action policy; changes to those wrappers need the same trust-boundary review as `require_admin()`. Scheduled task action policy treats `run_local`, `run_script`, `ssh_command`, and `cookbook_serve` as admin-only action tasks across create/update/manual-run/webhook/scheduler execution.
+Current admin gates include `require_admin()` call sites across admin wipe, backup, contacts, Cookbook, diagnostics, embeddings, MCP, model, personal docs, presets, skills, uploads, vault, webhook, and companion routes. Local wrappers also exist in auth routes, shell routes, and task action policy; changes to those wrappers need the same trust-boundary review as `require_admin()`. Shell/SSH/script task actions are removed in this build.
 
 `tidy_research` can remove only empty or unparseable research JSON. Because a broken file has no trustworthy owner stamp, the action checks `owner_is_admin_or_single_user()` before enumerating files; regular users and the pre-setup window cannot run that global unattributable-file sweep.
 
@@ -132,7 +130,7 @@ Current untrusted surfaces include fetched URLs, web results, emails, memories, 
 - `src.integrations` owns admin-configured integration base URLs and secret
   masking. `api_call` accepts only relative paths, rejects link-local/metadata destinations through `src.url_safety`, can additionally block RFC1918/loopback/private targets with `INTEGRATION_API_BLOCK_PRIVATE_IPS=true`, and pins requests to the IP set that passed SSRF validation while preserving the intended Host/TLS identity.
 - `src.outbound_fetch` owns reusable public-URL classification, validates every redirect hop, rejects private/local resolved addresses, and pins the HTTP connection to the validated public IP while preserving original URL/SNI/Host semantics. `services.search.content` adapts that transport for extraction and caching.
-- Path-based tools, upload/document/gallery/signature/generated-image routes, embedding cache paths, and research JSON helpers must stay confined to allowed roots and owner-scoped files. Native file/code-navigation tools also apply a case-insensitive sensitive-path denylist so `grep`, `glob`, `ls`, direct reads, and writes cannot reveal `.env`, SSH/GPG material, private-key filenames, or similar secret paths.
+- Upload/document/signature routes, embedding cache paths, and research JSON helpers must stay confined to allowed roots and owner-scoped files. Native file/code-navigation tools are removed in this build, so the process has no agent-accessible filesystem surface beyond `read_upload`.
 - Durable upload references are owner-reserved before chat/session, document,
   note, or calendar writes. Cleanup scans every current durable reference
   surface and fails closed on incomplete discovery or inconsistent upload-index
@@ -143,10 +141,6 @@ Current untrusted surfaces include fetched URLs, web results, emails, memories, 
   failed POSIX restriction is logged as a secret-file warning.
 - Secret-like DB columns use `EncryptedText` or `src.secret_storage`. Email passwords and Google OAuth mail tokens are encrypted manually in `EmailAccount` string columns; Google OAuth state is HMAC-signed and callback writes are owner-checked before token storage. `src.api_key_manager` keeps provider API keys encrypted in `data/api_keys.json`, writes by loading the raw encrypted dict so saving one provider does not rewrite other providers' keys as plaintext, and restricts local key-file permissions where the platform supports chmod. Vault state in `data/vault.json` is a chmod-restricted JSON secret store, not Fernet-encrypted DB storage. Do not log or return decrypted secrets except for intentional admin vault retrieval flows with audit/reason checks.
 - `.env` files are secrets-only inputs and should not be read or printed during agent work.
-
-`scripts/diffusion_server.py` is a local model-serving helper with its own web surface. It defaults CORS to deny, installs a trusted-host allowlist for loopback/bind addresses, and only extends Host/CORS through explicit CLI flags.
-
-`scripts/mlx_image_server.py` serves exactly the model selected when the process starts. OpenAI-compatible request `model` fields are accepted but ignored for generation and edits, so an unauthenticated caller cannot select another local directory or Hugging Face repository and drive model-specific script/bridge execution.
 
 Host Docker socket access is a high-trust admin/deployment choice, not a normal container capability. Default Docker Compose does not mount `/var/run/docker.sock`; `src.host_docker_access` only reports local Docker available inside a container when `ODYSSEUS_ENABLE_HOST_DOCKER=true` and the socket exists. Remote SSH Docker/Cookbook workflows remain the safer default.
 

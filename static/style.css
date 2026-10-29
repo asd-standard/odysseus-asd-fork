@@ -66,6 +66,23 @@
   /* Warm accent — used by the Goals/Today UI in Notes. Lives as a token so
      themes can override without touching the goal CSS. */
   --accent-warm: #d19a66;
+
+  /* ── Window stacking scale ──
+     Keep in sync with static/js/zLayers.js (tests assert they match).
+     windows < drag ghost < edge hint < split pane < portal < dock < chips. */
+  --z-window: 250;
+  --z-window-raised: 300;
+  --z-split-underlay: 260;
+  --z-tile-stripe: 261;
+  --z-doc-underlay: 150;
+  --z-drag-ghost: 9000;
+  --z-edge-hint: 9998;
+  --z-split-pane: 10000;
+  --z-split-pane-raised: 10010;
+  --z-portal: 10030;
+  --z-dock: 10040;
+  --z-chip-free: 10050;
+  --z-chip-drag: 10060;
 }
 
 :root.light {
@@ -919,7 +936,7 @@ body.bg-pattern-sparkles {
     .modal.modal-minimized { display: none !important; }
     /* Window tile snap ghost (desktop only) */
     #tile-ghost {
-      position: fixed; pointer-events: none; z-index: 9000;
+      position: fixed; pointer-events: none; z-index: var(--z-drag-ghost);
       background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
       border: 2px solid color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);
       border-radius: 8px;
@@ -933,7 +950,9 @@ body.bg-pattern-sparkles {
       display: flex; gap: 6px; flex-wrap: wrap;
       max-width: calc(100vw - 24px);
       padding: 4px;
-      z-index: 100;
+      /* Above edge-docked tool windows (the split-pane tier), so a chip in
+         the dock never disappears behind the right column. */
+      z-index: var(--z-dock);
       pointer-events: none;
     }
     .minimized-dock-chip {
@@ -1008,7 +1027,7 @@ body.bg-pattern-sparkles {
             color-mix(in srgb, #f0abfc 22%, var(--panel, var(--bg))));
         border-color: color-mix(in srgb, var(--accent, var(--red)) 72%, #fff 12%) !important;
         animation: chip-long-press-pulse 0.82s ease-in-out infinite;
-        z-index: 10030;
+        z-index: var(--z-chip-drag);
       }
       .minimized-dock-chip.chip-long-press::before {
         content: '';
@@ -1166,6 +1185,9 @@ body.bg-pattern-sparkles {
       width: 16px; height: 16px; border-radius: 50%;
       font-size: 14px; line-height: 1; opacity: 0.4;
       margin-left: 3px;
+      /* It is a button, not a drag handle: the chip's `grab` cursor must not
+         bleed onto it. */
+      cursor: pointer;
     }
     .minimized-dock-x:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent); }
     @keyframes dock-chip-in {
@@ -5603,10 +5625,6 @@ body.bg-pattern-sparkles {
       backdrop-filter:none;
       pointer-events:none;
     }
-    /* Cookbook always sits above Gallery so the "Serve a model in
-       Cookbook…" flow (and any other "open Cookbook from inside another
-       modal") is visible no matter which modal was opened first. */
-    #cookbook-modal { z-index: 260; }
     .modal.hidden { display:none; }
 
     /* Tool windows open centered in the CHAT AREA (the space right of the
@@ -5757,96 +5775,6 @@ body.bg-pattern-sparkles {
       border-color:color-mix(in srgb, var(--fg) 12%, transparent);
       color:var(--fg);
     }
-    /* Minimize button — sits beside the close button on every modal */
-    .minimize-btn {
-      background:transparent;
-      color:color-mix(in srgb, var(--fg) 58%, transparent);
-      border:1px solid transparent;
-      font-size:0;
-      font-weight:700;
-      width:24px;
-      height:24px;
-      padding:0;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      line-height:1;
-      cursor:pointer;
-      border-radius:999px;
-      flex-shrink:0;
-      margin-left:auto; /* push to the right so it docks next to .close-btn */
-      margin-right:4px;
-    }
-    .minimize-btn::before {
-      content:"";
-      width:9px;
-      height:2px;
-      border-radius:999px;
-      background:currentColor;
-      display:block;
-      transform:translateY(2px);
-    }
-    .minimize-btn:hover {
-      background:color-mix(in srgb, var(--fg) 10%, transparent);
-      border-color:color-mix(in srgb, var(--fg) 12%, transparent);
-      color:var(--fg);
-    }
-    @media (max-width: 768px) {
-      .minimize-btn { display: none !important; }
-      #modal-dock { display: none !important; }
-    }
-    /* Minimized modals are hidden but stay in the DOM with their state intact */
-    .modal.minimized { display:none !important; }
-    /* Bottom dock for minimized modals */
-    #modal-dock {
-      position:fixed;
-      bottom:var(--composer-clearance, 0px);
-      left:0;
-      right:0;
-      display:flex;
-      flex-wrap:wrap;
-      gap:4px;
-      padding:4px 8px;
-      z-index:240;
-      pointer-events:none;
-      justify-content:flex-start;
-    }
-    #modal-dock:empty { display:none; }
-    .modal-dock-item {
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-bottom:none;
-      border-radius:6px 6px 0 0;
-      padding:4px 4px 4px 10px;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      cursor:pointer;
-      pointer-events:auto;
-      font-size:12px;
-      color:var(--fg);
-      max-width:220px;
-      box-shadow:0 -2px 8px rgba(0,0,0,0.25);
-      transition:background 0.15s;
-    }
-    .modal-dock-item:hover { background:var(--bg); }
-    .modal-dock-label {
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      max-width:180px;
-    }
-    .modal-dock-close {
-      background:transparent;
-      border:none;
-      color:var(--fg);
-      cursor:pointer;
-      font-size:14px;
-      padding:0 4px;
-      line-height:1;
-      opacity:0.6;
-    }
-    .modal-dock-close:hover { color:var(--red); opacity:1; }
     .modal-body { flex:1; overflow-y:auto; }
     .modal-body button { margin-top:6px; }
     /* Styled confirm dialog — keeps backdrop */
@@ -7051,7 +6979,7 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     }
 
     /* ---------- Theme popup (uses .modal > .modal-content frame) ---------- */
-    #theme-modal { z-index: 260; }
+    #theme-modal { z-index: var(--z-split-underlay); }
     #theme-popup .theme-popup-sub { color: color-mix(in srgb, var(--fg) 50%, transparent); font-size: 11px; margin-bottom: 10px; }
     /* `max-height` instead of a fixed height so the popup shrinks to fit its
        content (avoids the leftover whitespace after the time-based switching
@@ -7526,7 +7454,6 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
          chip already represents the minimized state, and the swipe-down
          gesture is the canonical minimize action. */
       .modal-minimize-btn,
-      .minimize-btn,
       [data-minimize] {
         display: none !important;
       }
@@ -14724,12 +14651,12 @@ mark.doc-find-mark.current {
      the email windows jump ABOVE the doc. Covers the email library AND any open
      reader window (email-reader-<uid>); both are .modal at z-250 by default. */
   body.doc-view #email-lib-modal,
-  body.doc-view .modal[id^="email-reader-"] { z-index: 150 !important; }
+  body.doc-view .modal[id^="email-reader-"] { z-index: var(--z-doc-underlay) !important; }
   body.doc-view.email-front #email-lib-modal,
-  body.doc-view.email-front .modal[id^="email-reader-"] { z-index: 300 !important; }
-  body.doc-view:not(.email-front) .doc-editor-pane { z-index: 10010 !important; }
+  body.doc-view.email-front .modal[id^="email-reader-"] { z-index: var(--z-window-raised) !important; }
+  body.doc-view:not(.email-front) .doc-editor-pane { z-index: var(--z-split-pane-raised) !important; }
   body.doc-view:not(.email-front) #email-lib-modal,
-  body.doc-view:not(.email-front) .modal[id^="email-reader-"] { z-index: 10000 !important; }
+  body.doc-view:not(.email-front) .modal[id^="email-reader-"] { z-index: var(--z-split-pane) !important; }
   /* Hide new-session button and hamburger when doc editor is open on mobile */
   body.doc-view .mobile-new-chat-btn,
   /* Hide the global hamburger while Compare Mode is active — the compare
@@ -32761,7 +32688,7 @@ body.doc-find-active mark.doc-find-mark.current {
     0 0 18px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent),
     var(--shadow-lg, 0 18px 50px rgba(0, 0, 0, 0.35));
 }
-#email-lib-modal .email-lib-header-actions .minimize-btn {
+#email-lib-modal .email-lib-header-actions .modal-minimize-btn {
   position: relative;
   left: 6px;
 }

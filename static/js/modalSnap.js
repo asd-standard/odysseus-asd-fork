@@ -17,6 +17,8 @@
 // is harder to hit precisely since most users drag broadly toward the
 // side rather than aiming at a 1px line. 60px feels generous without
 // false-positive triggers from casual repositioning.
+import { Z } from './zLayers.js';
+
 const SNAP_PX = 60;
 const UNSNAP_PX = 80;
 const MIN_CHAT_WIDTH = 380;
@@ -149,7 +151,7 @@ function _showSnapHint(on, side = 'right') {
   const w = _defaultDockWidth();
   const edge = side === 'left' ? 'left:0' : 'right:0';
   const borderSide = side === 'left' ? 'border-right' : 'border-left';
-  hint.style.cssText = `position:fixed;${edge};top:0;bottom:0;width:${w}px;background:color-mix(in srgb, var(--accent-primary, #60a5fa) 12%, transparent);${borderSide}:2px dashed color-mix(in srgb, var(--accent-primary, #60a5fa) 60%, transparent);z-index:9998;pointer-events:none;transition:opacity 0.12s;`;
+  hint.style.cssText = `position:fixed;${edge};top:0;bottom:0;width:${w}px;background:color-mix(in srgb, var(--accent-primary, #60a5fa) 12%, transparent);${borderSide}:2px dashed color-mix(in srgb, var(--accent-primary, #60a5fa) 60%, transparent);z-index:${Z.edgeHint};pointer-events:none;transition:opacity 0.12s;`;
   document.body.appendChild(hint);
 }
 
@@ -241,7 +243,7 @@ function _applyEmailDocSplitGeometry(left, emailWidth) {
   docPane.style.setProperty('width', 'auto', 'important');
   docPane.style.setProperty('max-width', 'none', 'important');
   docPane.style.setProperty('height', '100vh', 'important');
-  docPane.style.setProperty('z-index', '260', 'important');
+  docPane.style.setProperty('z-index', String(Z.splitUnderlay), 'important');
   docPane.style.setProperty('transform', 'none', 'important');
 }
 
@@ -842,7 +844,7 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
     return null;
   };
 
-  const _zIndexFor = (el, fallback = 250) => {
+  const _zIndexFor = (el, fallback = Z.windowBase) => {
     const raw = el ? window.getComputedStyle(el).zIndex : '';
     const n = parseInt(raw, 10);
     return Number.isFinite(n) ? n : fallback;
@@ -998,7 +1000,7 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
   stripe.style.bottom = '0';
   stripe.style.width = '10px';
   stripe.style.cursor = 'col-resize';
-  stripe.style.zIndex = '261';
+  stripe.style.zIndex = String(Z.tileStripe);
   stripe.style.background = 'linear-gradient(to right, transparent 0 3px, color-mix(in srgb, var(--accent, var(--red)) 35%, transparent) 3px 7px, transparent 7px 10px)';
   stripe.style.pointerEvents = 'auto';
   stripe.style.touchAction = 'none';

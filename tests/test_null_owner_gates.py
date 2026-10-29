@@ -143,46 +143,6 @@ def test_document_owner_filter_applies_owner_clause():
 # gallery._owner_filter
 # ---------------------------------------------------------------------------
 
-def test_gallery_owner_filter_blocks_anonymous(monkeypatch):
-    monkeypatch.setenv("AUTH_ENABLED", "true")
-    from routes.gallery_routes import _owner_filter
-    fake_q = MagicMock()
-    out = _owner_filter(fake_q, user=None)
-    fake_q.filter.assert_called_once_with(False)
-    assert out is fake_q.filter.return_value
-
-
-def test_gallery_owner_filter_allows_single_user_mode(monkeypatch):
-    monkeypatch.setenv("AUTH_ENABLED", "false")
-    from routes.gallery_routes import _owner_filter
-    fake_q = MagicMock()
-    out = _owner_filter(fake_q, user=None)
-    fake_q.filter.assert_not_called()
-    assert out is fake_q
-
-
-def test_gallery_owner_filter_passes_user():
-    from routes.gallery_routes import _owner_filter
-    fake_q = MagicMock()
-    out = _owner_filter(fake_q, user="alice")
-    # Under the SQLAlchemy MagicMock stubs we can't introspect the
-    # column clause; verifying that filter() was invoked exactly once
-    # (and returned its mocked query) is enough to guard the signature
-    # and stop a regression where the function silently no-ops on
-    # logged-in users.
-    fake_q.filter.assert_called_once()
-    assert out is fake_q.filter.return_value
-
-
-# ---------------------------------------------------------------------------
-# webhook._caller_owns_session  (POST /api/v1/chat sync-chat endpoint)
-# ---------------------------------------------------------------------------
-# This is the FOURTH place the `owner and owner != user` pattern showed up:
-# the token-authenticated sync-chat endpoint let any chat-scoped token resume
-# a null-owner session by passing its id, leaking its history and reusing the
-# owner's endpoint credentials. The gate must fail closed, exactly like the
-# calendar/notes/gallery gates above and _verify_session_owner.
-
 def _import_webhook_helper():
     """Import routes.webhook_routes. Stubs for core.database (ChatMessage,
     Webhook) and src.webhook_manager are provided by the _null_owner_stubs

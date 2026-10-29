@@ -205,21 +205,16 @@ respond with `[Name](#session-<id>)`".
 **PORTABILITY — CRITICAL.** Skills are shared across users. Do NOT \
 hardcode anything user-specific into the procedure:
   - NO hostnames or IPs (e.g. `gpu-box`, `user@192.0.2.10`) — \
-    use placeholders like `<gpu_host>` or call `list_serve_presets` / \
-    `list_cached_models` to discover them at runtime.
+    use placeholders like `<host>` instead.
   - NO absolute filesystem paths tied to one machine (e.g. \
     `/home/<user>/vllm-env/bin/vllm`) — say "use the user's vLLM \
     install" or call the wrapped tool that picks the right binary.
   - NO model repo IDs the user happened to pick this time unless the \
     skill is specifically about THAT model — generalise to "the model \
-    the user named, looked up via list_cached_models / search_hf_models".
-  - NO tmux session names invented in the failed trace — these are \
-    one-shot artefacts. The named tool (`serve_model`, `stop_served_model`) \
-    owns session naming.
-  - NO direct `ssh <host> 'tmux ...'` shell incantations even if that's \
-    what the failed trace did — those bypass the cookbook's state \
-    tracker. The skill must use `serve_model` / `stop_served_model` \
-    / `serve_preset`, not bash.
+    the user named".
+  - NO one-shot session names invented in the failed trace.
+  - NO direct shell/SSH incantations; reference the dedicated high-level \
+    tool for the action instead.
 
 If you do NOT believe the task is solvable with the available tools, \
 output the explanation paragraph but OMIT the JSON block entirely. \
@@ -302,19 +297,13 @@ SPECIFIC tool name and argument shape the student can copy.
 
 **PORTABILITY — CRITICAL.** Skills are shared across users. Strip every \
 user-specific token from your trace before writing the procedure:
-  - Replace hostnames/IPs with placeholders (`<gpu_host>` etc.) or \
-    instruct the student to discover them via `list_serve_presets` / \
-    `list_cached_models` at runtime.
+  - Replace hostnames/IPs with placeholders (`<host>` etc.).
   - Replace user-specific paths (`/home/<user>/...`) with the wrapped \
     tool that picks the right binary on whatever machine runs the skill.
   - Don't bake in the specific model repo_id you happened to use unless \
     the skill is about that exact model.
-  - Reference the high-level tools (`serve_model`, `stop_served_model`, \
-    `serve_preset`, `list_cached_models`, `search_hf_models`, etc.) \
-    rather than `ssh <host> 'tmux new-session ... vllm serve ...'` \
-    shell incantations — even if THAT'S what worked in the trace. Raw \
-    shell launches bypass the cookbook tracker and don't reproduce on \
-    another user's box.
+  - Reference the dedicated high-level tools rather than raw \
+    shell/SSH incantations — even if that is what worked in the trace.
 
 If the trace did NOT genuinely solve the user's problem (e.g. you also \
 gave up, or the underlying issue was external infrastructure that no \

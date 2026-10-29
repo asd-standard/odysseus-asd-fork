@@ -531,38 +531,22 @@ async def do_api_call(content: str) -> Dict:
 
 
 # Paths the generic `app_api` tool will refuse to call. Auth/token/user
-# administration and host shell execution are too risky to route through an
-# agent surface even when the agent is admin-context; accidental account or
-# command mistakes have permanent blast radius.
+# administration is too risky to route through an agent surface even when the
+# agent is admin-context; accidental account mistakes have permanent blast
+# radius.
 _APP_API_BLOCKLIST_PREFIXES = (
     "/api/auth",           # login/logout/password
     "/api/users",          # user CRUD (bare /api/users list+create+delete must also block)
     "/api/tokens",         # api token mgmt (bare /api/tokens list+create must also block)
     "/api/admin",          # admin one-shots (wipe etc.)
-    "/api/shell",          # host shell execution must stay behind named command tooling
     "/api/backup/restore", # destructive restore
 )
 
 # (method, prefix) pairs to refuse specifically. Used for endpoints
 # where GET is fine but writes are destructive or host-control shaped.
-# Saw the agent wipe cookbook_state.json (presets + tasks) by POSTing
-# {"tasks": []} to /api/cookbook/state, which overwrote the whole file.
 # Use dedicated tools or UI flows instead.
 _APP_API_BLOCKLIST_METHOD_PATH = (
     ("GET",    "/api/email/accounts"),  # owner-filtered in tool context; use list_email_accounts MCP tool
-    ("POST",   "/api/cookbook/state"),   # whole-file overwrite — agent must use serve_preset/serve_model instead
-    ("DELETE", "/api/cookbook/state"),
-    # Host-control routes: package install, engine rebuild, and process
-    # signalling should not be reachable through the generic API bridge.
-    ("POST",   "/api/cookbook/packages/install"),
-    ("POST",   "/api/cookbook/rebuild-engine"),
-    ("POST",   "/api/cookbook/kill-pid"),
-    # Use the named tools (download_model / serve_model) — they handle
-    # host-name resolution, per-host env_prefix, AND register the task
-    # in cookbook state so it shows in the UI + list_downloads. Hitting
-    # the raw endpoint via app_api skips all of that → orphan task.
-    ("POST",   "/api/model/download"),
-    ("POST",   "/api/model/serve"),
     # Use trigger_research — it returns a UI hint so the Deep Research
     # sidebar surfaces the session. Raw start works but the agent
     # fumbles the payload + the session doesn't reliably show up.
@@ -587,20 +571,20 @@ _APP_API_BLOCKLIST_METHOD_PATH = (
 
 async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
     """Generic loopback to allowed internal Odysseus API endpoints. Lets the
-    agent reach the full UI-button surface (cookbook, email, notes,
-    calendar, skills, sessions, gallery, research, etc.) without us
-    landing a named tool wrapper for every one.
+    agent reach the UI-button surface (email, notes, calendar, skills,
+    sessions, research, etc.) without us landing a named tool wrapper for
+    every one.
 
     Args (JSON):
       action: "call" (default) | "endpoints"
-      path:   "/api/cookbook/gpus"     # required for call
+      path:   "/api/documents/list"    # required for call
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" (default GET)
       body:   <object>                 # JSON body for POST/PUT/PATCH
       query:  <object>                 # querystring params
 
     The `endpoints` action returns the OpenAPI surface (method + path +
     summary) so the agent can discover what's reachable. A blocklist
-    refuses sensitive auth/user/admin/shell paths and method-specific
+    refuses sensitive auth/user/admin paths and method-specific
     host-control routes to keep blast radius bounded.
     """
     # `_internal_headers` and `_INTERNAL_BASE` still live in
@@ -663,7 +647,7 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
     # action == "call"
     path = args.get("path") or ""
     if not path:
-        return {"error": "path is required (e.g. '/api/cookbook/gpus')", "exit_code": 1}
+        return {"error": "path is required (e.g. '/api/documents/list')", "exit_code": 1}
     if not path.startswith("/"):
         path = "/" + path
     if any(path.startswith(p) for p in _APP_API_BLOCKLIST_PREFIXES):
@@ -675,16 +659,6 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
     if any(method == m and path.startswith(p) for m, p in _APP_API_BLOCKLIST_METHOD_PATH):
         if "/api/email/accounts" in path:
             return {"error": "Don't use /api/email/accounts via app_api — it is owner-filtered in tool context and may return empty. Use the `list_email_accounts` email tool, then pass `account` to list_emails/read_email.", "exit_code": 1}
-        if "/api/cookbook/packages/install" in path:
-            return {"error": "Don't POST /api/cookbook/packages/install via app_api — package installation is host code execution. Use the dedicated Cookbook dependency UI/flow instead.", "exit_code": 1}
-        if "/api/cookbook/rebuild-engine" in path:
-            return {"error": "Don't POST /api/cookbook/rebuild-engine via app_api — engine rebuild mutates local or remote host state. Use the dedicated Cookbook UI/flow instead.", "exit_code": 1}
-        if "/api/cookbook/kill-pid" in path:
-            return {"error": "Don't POST /api/cookbook/kill-pid via app_api — process signalling is host control. Use the dedicated Cookbook stop/diagnostic flow instead.", "exit_code": 1}
-        if "/api/model/download" in path:
-            return {"error": "Don't POST /api/model/download directly — use the `download_model` tool (it resolves the server name, sets the venv env_prefix, and registers the task so it shows in the UI).", "exit_code": 1}
-        if "/api/model/serve" in path:
-            return {"error": "Don't POST /api/model/serve directly — use the `serve_model` or `serve_preset` tool (handles host resolution, env_prefix, and cookbook tracking).", "exit_code": 1}
         if "/api/research/start" in path:
             return {"error": "Don't POST /api/research/start directly — use the `trigger_research` tool (it surfaces the session in the Deep Research sidebar).", "exit_code": 1}
         if "/api/search" in path:
@@ -693,7 +667,7 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
             return {"error": "Don't hit /api/notes via app_api — use the `manage_notes` tool. It accepts natural-language due_date ('11pm today', 'tomorrow at 9am'), fires reminders from the due_date itself (no separate calendar event), and uses the caller's timezone. The raw endpoint requires ISO-UTC + a separate calendar event, both of which the agent tends to get wrong.", "exit_code": 1}
         if "/api/calendar/events" in path:
             return {"error": "Don't hit /api/calendar/events via app_api — use the `manage_calendar` tool. It handles tz-aware natural-language datetimes and reminder_minutes correctly. If the user wants a note + reminder, prefer `manage_notes` with due_date — it bundles both.", "exit_code": 1}
-        return {"error": f"{method} {path} is blocked — it overwrites the whole cookbook state file. Use list_serve_presets / serve_preset / serve_model instead.", "exit_code": 1}
+        return {"error": f"{method} {path} is blocked by app_api policy.", "exit_code": 1}
 
     body = args.get("body")
     query = args.get("query") or None
