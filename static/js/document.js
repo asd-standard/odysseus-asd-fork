@@ -5845,7 +5845,6 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _fontIdx = (_fontIdx + 1) % 3;
       _applyDocFont();
       syncHighlighting();
-      _scheduleSelRerender();
     });
 
     // Undo button in header
@@ -5980,7 +5979,6 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         pre.scrollTop = ta.scrollTop;
         pre.scrollLeft = ta.scrollLeft;
         syncGutterScroll();
-        syncSelectionOverlay();
         // Re-position find rects so they track the textarea on scroll.
         if (_findMatches && _findMatches.length) {
           const _q = document.getElementById('doc-find-input')?.value || '';
@@ -8121,48 +8119,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   // Tracked selection state — when set, the next chat message auto-includes this context
   let _selections = [];  // [{ text, startLine, endLine, start, end }, ...]
 
-  // Pinned-selection overlays are positioned in pixel coords measured
-  // against the textarea's current size. When the window shrinks (or
-  // the sidebar collapses, or the panel resizes), the text wraps to
-  // more rows but the overlay rectangles stay where they were —
-  // visibly drifting off the real highlighted text. Re-render on any
-  // size change so the overlays follow the new wrap. Debounced via
-  // rAF to coalesce the rapid-fire ResizeObserver pulses during a
-  // drag-resize.
-  let _selResizeScheduled = false;
-  function _scheduleSelRerender() {
-    if (_selResizeScheduled || _selections.length === 0) return;
-    _selResizeScheduled = true;
-    requestAnimationFrame(() => {
-      _selResizeScheduled = false;
-      try { renderAllSelectionHighlights(); } catch (_) {}
-    });
-  }
-  if (typeof window !== 'undefined') {
-    window.addEventListener('resize', _scheduleSelRerender);
-  }
-  // Observe the textarea itself so internal layout changes (sidebar
-  // collapse, panel snap, mobile keyboard show/hide) also trigger a
-  // re-render. The observer attaches lazily on first selection so we
-  // don't churn before the editor mounts.
-  let _selResizeObserver = null;
-  function _ensureSelResizeObserver() {
-    if (_selResizeObserver || typeof ResizeObserver === 'undefined') return;
-    const ta = document.getElementById('doc-editor-textarea');
-    if (!ta) return;
-    _selResizeObserver = new ResizeObserver(_scheduleSelRerender);
-    _selResizeObserver.observe(ta);
-  }
-
-  /** Update selection tracking, show badge + persistent highlight.
+  /** Update selection tracking and show the badge.
    *  Each new selection is added (pinned). Click without selecting to clear all. */
   function updateSelectionState() {
-    // The mirror measurement below uses the textarea's live computed metrics,
-    // so pinned selections remain valid with wrapped lines, larger font sizes,
-    // mobile widths, and non-fullscreen panes. Older code disabled selection
-    // whenever wrapping was detected; increasing the document font made that
-    // path fire constantly, so selecting text appeared to stop working.
-    _ensureSelResizeObserver();
     const textarea = document.getElementById('doc-editor-textarea');
     if (!textarea) return;
 
@@ -8232,35 +8191,6 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     });
   }
 
-  /** Markdown / prose docs get character-precise highlights (like a
-   *  normal browser selection but persistent). Code docs get line-based
-   *  highlights — when working in code you usually operate on whole
-   *  lines, and the character-based version reads as jittery against
-   *  monospace alignment. */
-  function _isCodeDoc() {
-    const lang = (document.getElementById('doc-language-select')?.value || '').toLowerCase();
-    if (!lang) return false;
-    // Prose / preview types that should get character-precise highlights.
-    const prose = new Set(['markdown', 'md', 'text', 'txt', 'email', 'html', 'csv']);
-    return !prose.has(lang);
-  }
-
-  /** Measure the visual x,y position of a character index inside the
-   *  mirror element by inserting a zero-width marker span there and
-   *  reading its bounding rect. Returns {x, y} relative to the mirror's
-   *  content-box origin. */
-  function _measurePos(mirror, text, pos) {
-    mirror.innerHTML = '';
-    if (pos > 0) mirror.appendChild(document.createTextNode(text.substring(0, pos)));
-    const marker = document.createElement('span');
-    marker.textContent = '​';
-    mirror.appendChild(marker);
-    const r = marker.getBoundingClientRect();
-    const m = mirror.getBoundingClientRect();
-    return { x: r.left - m.left, y: r.top - m.top };
-  }
-
-  /** Render persistent highlight overlays for all selections */
   // Re-anchor pinned selections against the live textarea content. After
   // an undo or any other path that shrinks/shifts the text, captured
   // {start, end} positions can point at unrelated content (or past the
@@ -8308,99 +8238,13 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     _selections = survivors;
   }
 
+  /** Validate pinned selections after edits. The native ::selection paints
+   *  the live range exactly; pinned regions are surfaced by the badge and
+   *  remain available to getSelectionContext(). */
   function renderAllSelectionHighlights() {
-    const wrap = document.getElementById('doc-editor-wrap');
-    if (!wrap) return;
-    // Remove old overlays
-    wrap.querySelectorAll('.doc-selection-overlay').forEach(el => el.remove());
-
     const textarea = document.getElementById('doc-editor-textarea');
     if (!textarea || _selections.length === 0) return;
-
-    const text = textarea.value;
-    // Pre-render guard: re-anchor or drop selections whose text has
-    // shifted (undo, programmatic edits, etc.) so the overlays never
-    // draw on the wrong region.
-    _validateSelections(text);
-    if (_selections.length === 0) return;
-    const style = getComputedStyle(textarea);
-    const paddingTop = parseFloat(style.paddingTop) || 10;
-    const paddingLeft = parseFloat(style.paddingLeft) || 48;
-    const lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.45);
-
-    // Shared mirror for measurement — same box model as the textarea
-    // so any measurement we take lines up 1:1 with the rendered text.
-    const mirror = _ensureMeasureMirror(textarea, style, wrap);
-
-    const codeDoc = _isCodeDoc();
-    const scrollTop = textarea.scrollTop;
-
-    for (const sel of _selections) {
-      if (codeDoc) {
-        // Line-based: span every line that contains any selected char.
-        const beforeStart = text.substring(0, sel.start);
-        const lastNewline = beforeStart.lastIndexOf('\n');
-        const startLineBegin = lastNewline + 1;
-        mirror.textContent = text.substring(0, startLineBegin);
-        const startTop = mirror.scrollHeight - paddingTop;
-
-        const afterEnd = text.indexOf('\n', sel.end);
-        const endLineEnd = afterEnd === -1 ? text.length : afterEnd;
-        mirror.textContent = text.substring(0, endLineEnd);
-        const endBottom = mirror.scrollHeight - paddingTop;
-
-        mirror.textContent = '';
-
-        const top = paddingTop + startTop - scrollTop;
-        const height = endBottom - startTop || lineHeight;
-        const overlay = document.createElement('div');
-        overlay.className = 'doc-selection-overlay';
-        overlay.style.top = top + 'px';
-        overlay.style.left = paddingLeft + 'px';
-        overlay.style.right = '0';
-        overlay.style.height = height + 'px';
-        wrap.appendChild(overlay);
-      } else {
-        // Character-precise: measure the actual selection start/end via
-        // a marker span. Render one rect for single-line selections, or
-        // three rects (first partial, middle full, last partial) for
-        // multi-line selections.
-        const startPos = _measurePos(mirror, text, sel.start);
-        const endPos = _measurePos(mirror, text, sel.end);
-        mirror.innerHTML = '';
-
-        const addRect = (top, left, width, height) => {
-          const overlay = document.createElement('div');
-          overlay.className = 'doc-selection-overlay';
-          overlay.style.top = (paddingTop + top - scrollTop) + 'px';
-          overlay.style.left = (paddingLeft + left) + 'px';
-          if (width != null) overlay.style.width = width + 'px';
-          else overlay.style.right = '0';
-          overlay.style.height = height + 'px';
-          wrap.appendChild(overlay);
-        };
-
-        if (Math.abs(endPos.y - startPos.y) < 1) {
-          // Single visual line.
-          addRect(startPos.y, startPos.x, endPos.x - startPos.x, lineHeight);
-        } else {
-          // First line: from selection start to right edge.
-          addRect(startPos.y, startPos.x, null, lineHeight);
-          // Middle lines (if any): full-width band between the two.
-          const middleTop = startPos.y + lineHeight;
-          const middleHeight = endPos.y - middleTop;
-          if (middleHeight > 0) addRect(middleTop, 0, null, middleHeight);
-          // Last line: from left edge to selection end.
-          addRect(endPos.y, 0, endPos.x, lineHeight);
-        }
-      }
-    }
-  }
-
-  /** Sync all selection highlight positions on scroll */
-  function syncSelectionOverlay() {
-    if (_selections.length === 0) return;
-    renderAllSelectionHighlights();
+    _validateSelections(textarea.value);
   }
 
   /** Clear all selections, badge, and highlights */
@@ -8826,8 +8670,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
    * text. Wrapping depends on width/font/padding, so a clone is the only way to
    * turn "line N" into a pixel offset when paragraphs wrap.
    *
-   * Shared by the selection overlays and the suggestion-scroll restore; both
-   * need the same 1:1 geometry or their offsets drift from the real text.
+   * Used by the suggestion-scroll restore, which needs 1:1 geometry or its
+   * target offset drifts from the real text.
    * `box-sizing:border-box` is critical: without it the mirror's box is wider
    * than the textarea's text area by its horizontal padding, so text wraps at a
    * different column and every measurement is wrong.

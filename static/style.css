@@ -13826,10 +13826,12 @@ mark.doc-find-mark.current {
   color: var(--fg);
   opacity: 0.25;
 }
-/* Show real text when selecting so copy/paste is visible */
+/* Show real text when selecting so copy/paste is visible. Use the theme
+   accent (--red, set per theme in theme.js) instead of the fixed
+   --color-accent so the native selection follows the palette. */
 .doc-editor-textarea::selection {
   color: var(--fg);
-  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--red) 28%, transparent);
 }
 
 /* ---- Selection indicator badge ---- */
@@ -13953,13 +13955,13 @@ mark.doc-find-mark.current {
   padding: 0 4px !important;
 }
 .import-prompt-dismiss:hover { opacity: 1; background: none !important; }
+/* Pinned selections are tracked for AI context and surfaced by the selection
+   badge; the native ::selection above is the only painted highlight. The old
+   overlay rectangles were measured against a mirror and drifted from the real
+   text, so they are no longer drawn. Kept hidden defensively for any stale
+   overlay left in the DOM during a hot reload. */
 .doc-selection-overlay {
-  position: absolute;
-  background: color-mix(in srgb, var(--red) 10%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--red) 50%, transparent);
-  pointer-events: none;
-  z-index: 0;
-  transition: top 0.05s;
+  display: none;
 }
 
 /* ── Suggestion comments (Google Docs style) ── */
