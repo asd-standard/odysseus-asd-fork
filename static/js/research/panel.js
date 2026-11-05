@@ -223,16 +223,18 @@ export function toggle() {
     Modals.restore('research-overlay');
     return;
   }
-  if (_open) closePanel();
+  // Trigger click: open → collapse to a card, closed → open.
+  if (_open) Modals.minimize('research-overlay');
   else openPanel();
 }
 
 export function openPanel(focusJobId) {
+  if (Modals.isMinimized('research-overlay')) {
+    Modals.restore('research-overlay');
+    if (focusJobId) _focusJob(focusJobId);
+    return;
+  }
   if (_open) {
-    if (Modals.isMinimized('research-overlay')) {
-      Modals.restore('research-overlay');
-      return;
-    }
     document.body.classList.add('research-panel-view');
     if (focusJobId) _focusJob(focusJobId);
     return;
@@ -273,7 +275,7 @@ export function openPanel(focusJobId) {
   // Document-level ESC handler — overlay-only listener never fired because
   // overlay isn't focused. Tracked in module scope so closePanel can detach.
   _onDocKeydown = (e) => {
-    if (e.key === 'Escape' && _open) {
+    if (e.key === 'Escape' && _open && !Modals.isMinimized('research-overlay')) {
       e.preventDefault();
       closePanel();
     }

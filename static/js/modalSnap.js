@@ -42,6 +42,15 @@ function _hasOtherDockedWindow(side, owner) {
     if (!el || el === owner) return false;
     if (owner && el.contains && el.contains(owner)) return false;
     if (owner && owner.contains && owner.contains(el)) return false;
+    // A minimized/closed window keeps its dock class (so it can return to the
+    // same side), but it must NOT keep the workspace padding reserved. Without
+    // this, collapsing the last visible column left an empty strip that
+    // squeezed the chat next to a tiled/floating window.
+    if (el.classList.contains('hidden') || el.classList.contains('modal-minimized')) return false;
+    try {
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    } catch (_) {}
     return true;
   });
 }
@@ -540,6 +549,16 @@ function _applyDockInternal(modal, side, dockClass) {
     } else {
       modal._dockCloseWatcher = { obs };
     }
+  }
+  // Tell the window manager that this surface is now a docked column. It
+  // enforces the single-dock rule (at most one left/right column at a time).
+  if (!modal.classList.contains('hidden') && !modal.classList.contains('modal-minimized')) {
+    const windowId = modal.getAttribute('data-window-id') || modal.id;
+    try {
+      window.dispatchEvent(new CustomEvent('odysseus:edge-docked', {
+        detail: { id: windowId, side },
+      }));
+    } catch (_) {}
   }
   return w;
 }

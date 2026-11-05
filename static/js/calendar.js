@@ -3478,13 +3478,15 @@ function _wheelNav(e) {
 }
 
 function openCalendar() {
-  if (_open) return;
-  // If currently minimized — restore in place, preserve all state
+  // Check the minimized state before `_open`: minimizing preserves calendar
+  // state (including `_open`), so the old ordering made this branch
+  // unreachable and direct openers could not restore the chip.
   if (Modals.isMinimized('calendar-modal')) {
     Modals.restore('calendar-modal');
     _open = true;
     return;
   }
+  if (_open) return;
   _open = true;
   if (_todayCount() > 0) { _markBadgeSeen(); _updateBadge(); }
   _collapseSidebar();
@@ -3511,6 +3513,9 @@ function openCalendar() {
   _view = 'month';
   _scrollToTodayOnOpen = true;  // first render lands on today's row
   _escHandler = (e) => {
+    // A collapsed calendar must not react to (or be destroyed by) keys while
+    // another window is in front.
+    if (Modals.isMinimized('calendar-modal')) return;
     if (e.key === 'Escape') {
       // Layer Esc: close the topmost calendar surface first, only fall through
       // to closing the whole calendar when nothing else is on top.

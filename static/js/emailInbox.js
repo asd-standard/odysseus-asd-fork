@@ -268,7 +268,8 @@ function _bindEvents() {
     header.style.cursor = 'pointer';
     header.addEventListener('click', (e) => {
       if (e.target.closest('#email-compose-btn')) return;
-      openEmailLibrary();
+      // Closed → open, open → collapse to a card, collapsed → restore.
+      Modals.requestToggle('email-lib-modal', () => openEmailLibrary());
       markInboxAsSeen();
     });
   }

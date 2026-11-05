@@ -8,8 +8,13 @@ MODAL_MANAGER = Path("static/js/modalManager.js").read_text(encoding="utf-8")
 
 
 def test_minimized_window_dock_clears_the_composer():
+    # The dock now lives in the chat's top-right corner, clear of the composer
+    # and the scroll-to-bottom button.
     assert "#minimized-dock {" in CSS
-    assert "bottom: var(--composer-clearance, 12px);" in CSS
+    dock = CSS[CSS.index("#minimized-dock {"):]
+    dock = dock[: dock.index("}")]
+    assert "top: 12px" in dock
+    assert "bottom: auto" in dock
 
 
 def test_legacy_modal_dock_is_gone():

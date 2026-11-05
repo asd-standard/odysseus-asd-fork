@@ -149,16 +149,16 @@ const _WINDOWS = {
   // Full SVG markup (not a single path-d) — the rounded-lobe brain needs
   // three sub-paths, which the dock renderer supports when the icon string
   // contains '<'.
-  'memory-modal':      { label: 'Brain',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>', rail: null, sidebar: 'tool-memory-btn' },
+  'memory-modal':      { label: 'Brain',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>', rail: 'rail-memory', sidebar: 'tool-memory-btn' },
   'notes-panel':       { label: 'Notes',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>', rail: 'rail-notes', sidebar: 'tool-notes-btn' },
-  'email-lib-modal':   { label: 'Email',     icon: 'M2 4h20v16H2zM22 7l-9.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7', rail: null, sidebar: null },
+  'email-lib-modal':   { label: 'Email',     icon: 'M2 4h20v16H2zM22 7l-9.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7', rail: 'rail-email', sidebar: 'email-section-title' },
   // The Prompt window (characters / inject / group). Syringe = "prompt" icon,
   // matching its title bar. Full SVG markup (multi-path) per the dock renderer.
   'custom-preset-modal': { label: 'Prompt',  icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>', rail: null, sidebar: null },
   'research-overlay':  { label: 'Research',  icon: 'M3 11a8 8 0 1 0 16 0a8 8 0 1 0-16 0M21 21l-4.35-4.35M11 8L11 14M8 11L14 11', rail: 'rail-research', sidebar: 'tool-research-btn' },
-  'theme-modal':       { label: 'Theme',     icon: 'M12 2a10 10 0 1 0 10 10c0-1-1-2-2-2h-2a2 2 0 0 1 0-4h1a2 2 0 0 0 0-4 10 10 0 0 0-7-2zM7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM12 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM16.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z', rail: null, sidebar: 'tool-theme-btn' },
+  'theme-modal':       { label: 'Theme',     icon: 'M12 2a10 10 0 1 0 10 10c0-1-1-2-2-2h-2a2 2 0 0 1 0-4h1a2 2 0 0 0 0-4 10 10 0 0 0-7-2zM7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM12 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM16.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z', rail: 'rail-theme', sidebar: 'tool-theme-btn' },
   'compare-model-overlay': { label: 'Compare',  icon: 'M4.5 4h5A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-5A1.5 1.5 0 0 1 3 18.5v-13A1.5 1.5 0 0 1 4.5 4ZM15.5 4h5A1.5 1.5 0 0 1 22 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-13A1.5 1.5 0 0 1 15.5 4ZM10 8h4M10 16h4', rail: 'rail-compare', sidebar: 'tool-compare-btn' },
-  'settings-modal':    { label: 'Settings',  icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.4.4.62.94.6 1.51V11a2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z', rail: null, sidebar: 'tool-settings-btn' },
+  'settings-modal':    { label: 'Settings',  icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.4.4.62.94.6 1.51V11a2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z', rail: null, sidebar: 'user-bar-settings' },
   // Virtual id — the doc editor pane isn't a modal, but it minimizes to a
   // chip via the same dock infrastructure.
   'doc-panel':         { label: 'Document', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8', virtual: true },
@@ -264,16 +264,50 @@ function _loadDockState() {
   } catch {}
 }
 
-// Push the remembered dock position onto the live element. Called on every
-// render because the empty-dock branch wipes inline styles via cssText='',
-// which would otherwise drop the position the moment the dock clears.
-function _applyDockPos(dock) {
-  if (!_dockPos) return;
-  dock.style.left = `${_dockPos.left}px`;
-  dock.style.top = `${_dockPos.top}px`;
-  dock.style.right = 'auto';
+// Anchor the collapsed-window bar to the chat's top-right corner (just below
+// its top bar). Keeping it away from the bottom-right leaves the
+// scroll-to-bottom button and composer clear.
+function _positionDock(dock = document.getElementById('minimized-dock')) {
+  if (!dock) return;
+  const chat = document.getElementById('chat-container');
+  const chatRect = chat ? chat.getBoundingClientRect() : null;
+  const topBar = document.querySelector('.chat-top-bar');
+  const topBarRect = topBar ? topBar.getBoundingClientRect() : null;
+  const margin = 10;
+  dock.style.left = 'auto';
   dock.style.bottom = 'auto';
   dock.style.transform = 'none';
+  if (chatRect && chatRect.width > 0 && chatRect.height > 0) {
+    const anchorTop = (topBarRect && topBarRect.height > 0)
+      ? Math.min(topBarRect.bottom, chatRect.bottom)
+      : chatRect.top;
+    dock.style.top = Math.max(margin, Math.round(anchorTop + 8)) + 'px';
+    dock.style.right = Math.max(margin, Math.round(window.innerWidth - chatRect.right + margin)) + 'px';
+  } else {
+    // Chat hidden (full-screen doc/email) — keep the bar in the corner.
+    dock.style.top = '12px';
+    dock.style.right = '12px';
+  }
+}
+
+let _dockAnchorObs = null;
+function _watchDockAnchor() {
+  const bar = document.querySelector('.chat-input-bar');
+  if (bar && !_dockAnchorObs && typeof ResizeObserver !== 'undefined') {
+    _dockAnchorObs = new ResizeObserver(() => _positionDock());
+    _dockAnchorObs.observe(bar);
+  }
+  const reanchor = () => _positionDock();
+  const chat = document.getElementById('chat-container');
+  if (chat && typeof MutationObserver !== 'undefined' && !chat._mmDockObs) {
+    chat._mmDockObs = new MutationObserver(reanchor);
+    chat._mmDockObs.observe(chat, { attributes: true, attributeFilter: ['class', 'style'] });
+  }
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar && typeof MutationObserver !== 'undefined' && !sidebar._mmDockObs) {
+    sidebar._mmDockObs = new MutationObserver(reanchor);
+    sidebar._mmDockObs.observe(sidebar, { attributes: true, attributeFilter: ['class', 'style'] });
+  }
 }
 
 // A free chip near the viewport edge is off-screen after the window shrinks.
@@ -293,6 +327,7 @@ window.addEventListener('resize', () => {
         changed = true;
       }
     }
+    _positionDock();
     if (changed) {
       _saveDockState();
       _renderDock();
@@ -400,10 +435,10 @@ function _renderDock() {
   });
 
   dock.style.display = '';
-  // Re-assert the remembered position — the empty-dock branch clears inline
-  // styles, so without this the dock would snap back to its CSS default the
-  // first time it re-populates after every chip was restored.
-  _applyDockPos(dock);
+  // Re-anchor to the composer every render — the empty-dock branch clears
+  // inline styles via cssText='', and the composer moves with the layout.
+  _watchDockAnchor();
+  _positionDock(dock);
   dock.innerHTML = '';
   for (const id of renderIds) {
     const meta = _WINDOWS[id] || { label: id, icon: '' };
@@ -765,9 +800,9 @@ function _wireChipDrag(chip, dock) {
         dragMode = 'free';
         _positionTrashZoneOpposite(trashZone, chipStartTop, chip.offsetHeight);
       } else {
-        // Lone dock chip — keep move-dock so the user can reposition the
-        // dock pad (long-press still promotes to free-drag).
-        dragMode = 'move-dock';
+        // Lone dock chip — the bar is fixed to the composer, so a normal drag
+        // does nothing. Long-press still peels the chip out for trash/close.
+        dragMode = null;
         const dr = dock.getBoundingClientRect();
         dockStartLeft = dr.left;
         dockStartTop = dr.top;
@@ -812,17 +847,10 @@ function _wireChipDrag(chip, dock) {
       return;
     }
 
-    // Desktop — reorder vs move-dock
+    // Desktop — reorder inside the fixed vertical bar. The bar itself is
+    // anchored to the composer and is deliberately not draggable.
     const chips = [...dock.querySelectorAll('.minimized-dock-chip')];
-    const idx = chips.indexOf(chip);
-    const isEdge = idx === 0 || idx === chips.length - 1;
-    dragMode = (isEdge && chips.length >= 2) ? 'move-dock' : (chips.length >= 2 ? 'reorder' : 'move-dock');
-    if (chips.length === 1) dragMode = 'move-dock';
-    if (dragMode === 'move-dock') {
-      const dr = dock.getBoundingClientRect();
-      dockStartLeft = dr.left;
-      dockStartTop = dr.top;
-    }
+    dragMode = chips.length >= 2 ? 'reorder' : null;
     chip.setPointerCapture(e.pointerId);
     chip.addEventListener('pointermove', onPointerMove);
     chip.addEventListener('pointerup', onPointerUp, { once: true });
@@ -859,12 +887,10 @@ function _wireChipDrag(chip, dock) {
           };
           chainState.raf = requestAnimationFrame(stepLoop);
         } else {
-          // Init failed for some reason — fall back to move-dock so the
-          // user's gesture isn't dropped on the floor.
-          dragMode = 'move-dock';
-          dock.classList.add('dock-dragging');
+          // Chain init failed — leave the bar alone rather than moving it.
+          dragMode = null;
         }
-      } else {
+      } else if (dragMode === 'move-dock') {
         dock.classList.add('dock-dragging');
       }
     }
@@ -872,7 +898,7 @@ function _wireChipDrag(chip, dock) {
     // Desktop: dragging a chip into a screen snap zone previews restoring the
     // window + snapping it there (top → maximize/fullscreen, right → right
     // dock). Releasing in the zone commits it (see onPointerUp).
-    if (dragMode !== 'free' && e.pointerType !== 'touch' && window.innerWidth > 768) {
+    if (dragMode && dragMode !== 'free' && e.pointerType !== 'touch' && window.innerWidth > 768) {
       const z = previewZoneAt(e.clientX, e.clientY, modal);
       // Ignore the bottom zone — the dock lives at the bottom, so horizontal
       // chip reordering must not get hijacked into a bottom-half snap.
@@ -935,11 +961,11 @@ function _wireChipDrag(chip, dock) {
       chip.style.transform = `translate(${dx}px, ${dy}px) scale(1.05)`;
       chip.style.zIndex = String(Z.chipDrag);
 
-      // Find sibling under cursor and swap
+      // Find sibling under cursor and swap (vertical bar → compare Y).
       const siblings = [...dock.querySelectorAll('.minimized-dock-chip:not(.dragging)')];
       for (const sib of siblings) {
         const r = sib.getBoundingClientRect();
-        if (e.clientX >= r.left && e.clientX <= r.right) {
+        if (e.clientY >= r.top && e.clientY <= r.bottom) {
           const myIdx = _dockOrder.indexOf(chip.dataset.modalId);
           const sibIdx = _dockOrder.indexOf(sib.dataset.modalId);
           if (myIdx !== sibIdx) {
@@ -951,7 +977,7 @@ function _wireChipDrag(chip, dock) {
           }
         }
       }
-    } else {
+    } else if (dragMode === 'move-dock') {
       // Move-dock: reposition the entire dock element. On touch, the whole
       // chain also interacts with the trash zone — drop on X to close every
       // chip in the dock.
@@ -994,6 +1020,12 @@ function _wireChipDrag(chip, dock) {
     chip.removeEventListener('pointermove', onPointerMove);
     activePointerId = null;
     cancelLongPress();
+    // A drag on the fixed bar (no reorder target) must not turn into a tap
+    // that restores the window.
+    if (!dragMode && dragging) {
+      chip._wasDragging = true;
+      setTimeout(() => { chip._wasDragging = false; }, 350);
+    }
     // Clear the global drag flag so the chat container's edge-swipe handler
     // can resume opening the sidebar on plain swipes.
     setTimeout(() => { window._chipDragging = false; }, 0);
@@ -1248,32 +1280,6 @@ function _canDisplace(id) {
   return true;
 }
 
-function _composerClearance() {
-  try {
-    const n = parseFloat(
-      getComputedStyle(document.documentElement).getPropertyValue('--composer-clearance')
-    );
-    return Number.isFinite(n) ? n : 12;
-  } catch (_) {
-    return 12;
-  }
-}
-
-/**
- * Park a collapsed window's chip bottom-left, above the composer, stacking
- * upwards so several displaced windows don't land on top of each other.
- * Only the first time: once the user drags it, their position wins.
- */
-function _seedChipPosition(id) {
-  if (!id || _chipPositions.has(id)) return;
-  const taken = _chipPositions.size;
-  _chipPositions.set(id, {
-    left: 12,
-    top: Math.max(8, window.innerHeight - _composerClearance() - 44 - taken * 40),
-  });
-  _saveDockState();
-}
-
 function _collapseForDisplacement(id) {
   // Suppress the impending hidden-transition: this minimize is a consequence of
   // another window opening, and must not also unwind id's own displaced parent.
@@ -1281,36 +1287,164 @@ function _collapseForDisplacement(id) {
   const hook = _minimizeHooks.get(id);
   if (hook) {
     try { hook(); } catch (e) { console.error('minimize hook failed for', id, e); }
-    _seedChipPosition(id);
     _renderDock();
     return;
   }
   minimize(id);
-  _seedChipPosition(id);
-  _renderDock();
+}
+
+// Collapse a visible column that fell out of the foreground stack (for example
+// a side column preserved while a floating window was open). It has no pending
+// restoration pair, so it is minimized without suppression.
+function _collapseLooseWindow(id) {
+  const hook = _minimizeHooks.get(id);
+  if (hook) {
+    try { hook(); } catch (e) { console.error('minimize hook failed for', id, e); }
+    _renderDock();
+    return;
+  }
+  minimize(id);
+}
+
+/** Single-dock rule: only one edge-docked column may stay visible. */
+function _collapseOtherDockedColumns(newId) {
+  const els = document.querySelectorAll(
+    '.modal.modal-left-docked, .modal.modal-right-docked, .modal.email-snap-left, '
+    + '.notes-pane.modal-left-docked, .notes-pane.modal-right-docked'
+  );
+  for (const el of els) {
+    const wid = el.getAttribute('data-window-id') || el.id;
+    if (!wid || wid === newId) continue;
+    if (el.classList.contains('hidden') || el.classList.contains('modal-minimized')) continue;
+    let st = _state.get(wid);
+    if (!st && _AUTO_WIRE[wid]) st = _autoRegister(wid);
+    if (!st) continue;
+    _collapseLooseWindow(wid);
+  }
+}
+
+/** Every visible tool window that should give way to a document restore.
+ *  This catches tiled/floating windows too, while preserving the deliberate
+ *  left-docked email split. */
+function _collapseOtherVisibleWindows(childId) {
+  const els = document.querySelectorAll('.modal[data-window-id], .notes-pane[data-window-id]');
+  for (const el of els) {
+    const wid = el.getAttribute('data-window-id') || el.id;
+    if (!wid || wid === childId) continue;
+    if (el.classList.contains('hidden') || el.classList.contains('modal-minimized')) continue;
+    // Keep only the real email split partner (left-docked), not just any
+    // email window that happens to be open.
+    if (_isEdgeDocked(el) && _keepsEdgeDockOnOpen(wid, childId)) continue;
+    let st = _state.get(wid);
+    if (!st && _AUTO_WIRE[wid]) st = _autoRegister(wid);
+    if (!st) continue;
+    // The visible element wins over a possibly stale `isMinimized` flag.
+    _collapseLooseWindow(wid);
+  }
+}
+
+/** Every visible docked column that the new docked window should replace. */
+/** Public hook for the document editor: clear every other window before the
+ *  split layout is applied. */
+export function collapseOtherWindows(childId) {
+  _collapseOtherVisibleWindows(childId);
+}
+
+function _collapseOtherVisibleColumns(childId) {
+  const els = document.querySelectorAll(
+    '.modal.modal-left-docked, .modal.modal-right-docked, .modal.email-snap-left, '
+    + '.notes-pane.modal-left-docked, .notes-pane.modal-right-docked'
+  );
+  for (const el of els) {
+    const wid = el.getAttribute('data-window-id') || el.id;
+    if (!wid || wid === childId) continue;
+    if (el.classList.contains('hidden') || el.classList.contains('modal-minimized')) continue;
+    if (_keepsEdgeDockOnOpen(wid, childId)) continue;
+    let st = _state.get(wid);
+    if (!st && _AUTO_WIRE[wid]) st = _autoRegister(wid);
+    if (!st) continue;
+    _collapseLooseWindow(wid);
+  }
+}
+
+// The new window may apply its initial/remembered dock a frame or two after
+// it opens. Re-check briefly before deciding whether it should replace columns.
+function _scheduleColumnReconcile(childId) {
+  const check = (attempt) => {
+    const childDocked = childId === 'doc-panel' || _isEdgeDocked(_windowEl(childId));
+    if (!childDocked) {
+      if (attempt < 2) { setTimeout(() => check(attempt + 1), 40); return; }
+      return;
+    }
+    if (childId === 'doc-panel') _collapseOtherVisibleWindows(childId);
+    else _collapseOtherVisibleColumns(childId);
+  };
+  setTimeout(() => check(0), 0);
 }
 
 function _fgOpened(id) {
   if (!_canDisplace(id)) return;
+  _scheduleColumnReconcile(id);
   const { minimize: parent } = _fgStack.opened(id);
   if (!parent || parent === id) return;
-  // Edge-docked windows are part of the split layout (email beside a reader,
-  // notes/doc beside chat): they stay visible and are never collapsed to a
-  // chip when another window opens.
-  if (_isEdgeDocked(_windowEl(parent))) return;
-  // A window can be visible without ever having been registered (the Library is
-  // auto-wired but registers lazily). Register it now so it can be collapsed.
-  let state = _state.get(parent);
-  if (!state && _AUTO_WIRE[parent]) state = _autoRegister(parent);
-  // Only displace a window that is genuinely open and still registered.
-  if (!state || state.isMinimized) return;
-  _collapseForDisplacement(parent);
+
+  const displace = () => {
+    const el = _windowEl(parent);
+    if (!el || el.classList.contains('hidden')) return;
+    // A window can be visible without ever having been registered (the Library
+    // is auto-wired but registers lazily). Register it now so it can collapse.
+    let state = _state.get(parent);
+    if (!state && _AUTO_WIRE[parent]) state = _autoRegister(parent);
+    // Only displace a window that is genuinely open and still registered.
+    if (!state || state.isMinimized) return;
+    _collapseForDisplacement(parent);
+  };
+
+  if (!_isEdgeDocked(_windowEl(parent))) {
+    displace();
+    if (id === 'doc-panel') _collapseOtherVisibleWindows(id);
+    return;
+  }
+
+  // The document editor is a split-side surface, not a free-floating window:
+  // it always replaces a docked column (except the explicit email split).
+  if (id === 'doc-panel') {
+    if (!_keepsEdgeDockOnOpen(parent, id)) displace();
+    _collapseOtherVisibleWindows(id);
+    return;
+  }
+
+  // A side column stays put when the new window is free-floating (reference
+  // panes should not be yanked into chips), but another docked window replaces
+  // it so two same-side columns cannot stack. Remembered docks can be applied
+  // a frame or two after the open, so re-check briefly before deciding.
+  const decide = (attempt) => {
+    const childEl = _windowEl(id);
+    const childDocked = id === 'doc-panel' || _isEdgeDocked(childEl);
+    if (!childDocked) {
+      if (attempt < 2) { setTimeout(() => decide(attempt + 1), 40); return; }
+      return; // floating child → keep the side column
+    }
+    if (_keepsEdgeDockOnOpen(parent, id)) return;
+    displace();
+  };
+  requestAnimationFrame(() => decide(0));
 }
 
 function _isEdgeDocked(el) {
   return !!el && (el.classList.contains('modal-left-docked')
     || el.classList.contains('modal-right-docked')
     || el.classList.contains('email-snap-left'));
+}
+
+/** The only docked layouts that survive another window opening. */
+function _keepsEdgeDockOnOpen(parentId, childId) {
+  const isEmailWindow = (wid) => wid === 'email-lib-modal' || wid.startsWith('email-reader-');
+  if (!isEmailWindow(parentId)) return false;
+  // Email beside the document editor is the deliberate split.
+  if (childId === 'doc-panel') return true;
+  // Email library ↔ reader tabs are one email surface, not two columns.
+  return isEmailWindow(childId);
 }
 
 function _fgLeft(id) {
@@ -1388,6 +1522,14 @@ if (typeof window !== 'undefined') {
   window.addEventListener('odysseus:modal-opened', (e) => {
     const id = e && e.detail && e.detail.id;
     if (id) _fgOpened(id);
+  });
+  // At most one edge-docked column: docking another window collapses the
+  // previously docked one to a chip. Deferred so the docking drag/commit and
+  // body classes settle first.
+  window.addEventListener('odysseus:edge-docked', (e) => {
+    const id = e && e.detail && e.detail.id;
+    if (!id) return;
+    requestAnimationFrame(() => _collapseOtherDockedColumns(id));
   });
 }
 
@@ -1494,10 +1636,12 @@ export function minimize(id) {
   if (!_state.has(id) && _AUTO_WIRE[id]) _autoRegister(id);
   const s = _state.get(id);
   if (!s) return false;
-  // The id may refer to a virtual tool (e.g. the document panel) that has no
-  // actual modal element — in that case we just track the minimized state
-  // and let the chip drive restore/close via the registered functions.
-  const modal = document.getElementById(id);
+  // Resolve through data-window-id as well as #id: Notes registers as
+  // `notes-panel` but is mounted as `#notes-pane`, and the document editor
+  // keeps a virtual registry id. A window with no DOM element (a truly
+  // virtual tool) just tracks the minimized state and lets the chip drive
+  // restore/close via the registered functions.
+  const modal = _windowEl(id);
   if (modal) {
     _captureRestoreHeight(modal, s);
     // If this window is edge-docked (right/left), SUSPEND the dock: release
@@ -1525,10 +1669,19 @@ export function minimize(id) {
   return true;
 }
 
+// Notes and the document editor own their own z-index surfaces (the Notes
+// backdrop and the doc split layout), so the manager must not stamp an inline
+// z-index onto those panes when restoring them.
+function _ownsWindowZ(modal) {
+  return !!(modal
+    && !modal.classList.contains('notes-pane')
+    && !modal.classList.contains('doc-editor-pane'));
+}
+
 export function restore(id) {
   const s = _state.get(id);
   if (!s) return false;
-  const modal = document.getElementById(id);
+  const modal = _windowEl(id);
   if (modal) {
     modal.classList.remove('hidden', 'modal-minimized');
     modal.style.display = '';
@@ -1536,7 +1689,7 @@ export function restore(id) {
     // Surface above any already-open tool window — restoring from the dock
     // should bring this tool to the front, not leave it stuck behind one with
     // a higher static z-index.
-    _bringToFront(modal);
+    if (_ownsWindowZ(modal)) _bringToFront(modal);
     // If the window was edge-docked when minimized, re-apply the dock so the
     // chat nudges back in and the window returns exactly where it was.
     try { resumeDock(modal); } catch (e) { console.warn('resumeDock on restore failed', e); }
@@ -1544,11 +1697,10 @@ export function restore(id) {
   }
   s.isMinimized = false;
   _setBadge(s.btnIds, false);
-  // Intentionally don't clear _chipPositions here: on mobile a free-
-  // positioned chip is meant to act as a persistent toggle that stays
-  // visible alongside the open modal, so the user can re-collapse it with
-  // one tap. The chip only goes away when the modal is fully closed (see
-  // close() above, which does delete the position).
+  // A restored window's chip is finished: it must disappear, even when the
+  // user had dragged it to a free position or it was seeded there by a
+  // displacement.
+  if (_chipPositions.delete(id)) _saveDockState();
   _renderDock();
   try { s.restoreFn(); } catch (e) { console.error('restoreFn:', e); }
   return true;
@@ -1563,9 +1715,32 @@ export function restore(id) {
 export function toggle(id) {
   const s = _state.get(id);
   if (!s) return false;
-  const modal = document.getElementById(id);
+  const modal = _windowEl(id);
   if (!modal) { _state.delete(id); return false; }
   if (s.isMinimized) return restore(id);
+  return false;
+}
+
+/**
+ * The canonical trigger-button behaviour for a tool window:
+ *   collapsed → restore, visible → collapse to a chip, closed → open.
+ * `openFn` is the module's own builder for the closed case.
+ */
+export function requestToggle(id, openFn) {
+  if (!id) return false;
+  if (isMinimized(id)) return restore(id);
+  const modal = _windowEl(id);
+  let visible = false;
+  if (modal) {
+    try {
+      const cs = getComputedStyle(modal);
+      visible = !modal.classList.contains('hidden')
+        && cs.display !== 'none'
+        && cs.visibility !== 'hidden';
+    } catch (_) {}
+  }
+  if (visible) return minimize(id);
+  if (typeof openFn === 'function') { openFn(); return true; }
   return false;
 }
 
@@ -1579,7 +1754,7 @@ export function close(id) {
     // hand-back: drop its pairs so nothing pops back later. A foreground close
     // is left alone — its hide-transition restores what it displaced.
     if (s.isMinimized) _fgStack.forget(id);
-    const modalBeforeClose = document.getElementById(id);
+    const modalBeforeClose = _windowEl(id);
     const contentBeforeClose = modalBeforeClose?.querySelector?.('.modal-content');
     const suspendedDockSide = contentBeforeClose?._dockSuspended
       || (modalBeforeClose?.classList?.contains('modal-left-docked') ? 'left'
@@ -1595,7 +1770,7 @@ export function close(id) {
     // path — making the tool feel unresponsive. Force the modal into a
     // fully-closed state synchronously so subsequent open() calls always
     // hit the real open path.
-    const modal = document.getElementById(id);
+    const modal = _windowEl(id);
     if (!modal) {
       // closeFn removed the element: no visibility transition will ever fire,
       // so report the departure now.
@@ -1734,15 +1909,7 @@ if (document.readyState !== 'loading') {
   document.addEventListener('DOMContentLoaded', () => setTimeout(_scanAndWire, 100));
 }
 
-// Tools that survive a swipe-down as a dock chip. Anything else falls
-// through to the legacy close handler and goes away entirely.
-const _SWIPE_DOWN_MINIMIZES = new Set([
-  'calendar-modal',
-  'email-lib-modal',
-]);
-// Same idea but matched by id prefix — so dynamically-created modals
-// (per-email reader tabs) survive swipe-down too.
-const _SWIPE_DOWN_MINIMIZES_PREFIX = ['email-reader-'];
+
 
 function _clearEmailSplitAfterMinimize() {
   document.body.classList.remove('email-doc-split-active', 'email-front');
@@ -1762,32 +1929,18 @@ function _clearEmailSplitAfterMinimize() {
   setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
 }
 
-// Re-route swipe-dismiss to minimize-rather-than-close — but only for the
-// allowlisted tools above. For every other modal, return early so the
-// default close handler runs and the modal goes away.
+// Swipe-down is a collapse gesture for every registered tool window. The
+// generic handler below leaves transient dialogs alone (they are not in the
+// window registry), so those still fall through to the legacy close path.
 window.addEventListener('modal-dismissed', (e) => {
   const id = e.detail?.id;
   if (!id) return;
-  if (!_SWIPE_DOWN_MINIMIZES.has(id) && !_SWIPE_DOWN_MINIMIZES_PREFIX.some(p => id.startsWith(p))) return;
-  // Auto-register if it's a known tool modal
-  if (!_state.has(id)) _autoRegister(id);
-  const s = _state.get(id);
-  if (!s) return;
-  s.isMinimized = true;
-  _setBadge(s.btnIds, true);
-  const modal = document.getElementById(id);
-  if (modal) {
-    const isEmailModal = id === 'email-lib-modal' || id.startsWith('email-reader-');
-    if (modal.classList.contains('modal-right-docked')
-        || modal.classList.contains('modal-left-docked')
-        || modal.classList.contains('email-snap-left')) {
-      try { suspendDock(modal); } catch (err) { console.warn('suspendDock on dismissed failed', err); }
-    }
-    if (isEmailModal) _clearEmailSplitAfterMinimize();
-    modal.classList.add('modal-minimized');
-  }
-  _ensureDock();
-  _renderDock();
+  if (!_canDisplace(id)) return;
+  const isEmailModal = id === 'email-lib-modal' || id.startsWith('email-reader-');
+  // ui.js already hid the element and dispatched this event; `minimize` now
+  // owns the state, chip, dock suspension and badges for every window.
+  if (isEmailModal) _clearEmailSplitAfterMinimize();
+  minimize(id);
   // Stop legacy listeners that reset internal `_open` state
   e.stopImmediatePropagation();
 });
@@ -1811,4 +1964,4 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-export default { register, unregister, isRegistered, isMinimized, minimize, restore, toggle, close, injectMinimizeButton, notifyOpened, notifyLeft, notifyClosed, forgetForeground, registerMinimizeHook };
+export default { register, unregister, isRegistered, isMinimized, minimize, restore, toggle, requestToggle, close, injectMinimizeButton, notifyOpened, notifyLeft, notifyClosed, forgetForeground, registerMinimizeHook, collapseOtherWindows };

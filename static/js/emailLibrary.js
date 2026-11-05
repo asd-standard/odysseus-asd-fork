@@ -2506,6 +2506,18 @@ export function initEmailLibrary(config) {
 export function isOpen() { return state._libOpen; }
 
 export function openEmailLibrary(opts = {}) {
+  // Restore a collapsed Email window instead of rebuilding it (which would
+  // discard its search/filter/scroll state and orphan the dock chip). When the
+  // caller asks for a specific folder/uid, rebuild through the normal path so
+  // the request is honoured.
+  if (Modals.isMinimized('email-lib-modal')) {
+    const wantsTarget = !!(opts && (opts.folder || opts.uid || opts.account_id));
+    if (!wantsTarget) {
+      Modals.restore('email-lib-modal');
+      return;
+    }
+    Modals.close('email-lib-modal');
+  }
   // Foreground email always wins: cancel a delayed/idle callback and abort the
   // one optional request if it has already started. Generation checks make a
   // non-abortable response harmless if it races this transition.
@@ -2696,8 +2708,12 @@ export function openEmailLibrary(opts = {}) {
       label: 'Email',
       icon: 'M2 4h20v16H2zM22 7l-9.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7',
       closeFn: () => {
-        const m = document.getElementById('email-lib-modal');
-        if (m) m.classList.add('hidden');
+        // Real close (chip ✕ / X): tear the window down instead of merely
+        // hiding it, so module state and timers cannot outlive the modal.
+        try { closeEmailLibrary(); } catch (_) {
+          const m = document.getElementById('email-lib-modal');
+          if (m) m.classList.add('hidden');
+        }
       },
       restoreFn: () => {
         // Reopened last → bring the email windows in front of any open doc.

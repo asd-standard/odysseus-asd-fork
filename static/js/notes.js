@@ -15,6 +15,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
+// Collapsed windows keep their pane mounted (like every other tool window);
+// `_open` is false while collapsed so callers treat it as not visible.
+let _collapsed = false;
 let _notes = [];
 let _editingId = null;
 let _selectedIds = new Set();
@@ -51,6 +54,7 @@ const NOTES_FIRST_OPEN_HINT_KEY = 'odysseus-notes-first-open-hint-v1';
 
 function _forceCloseNotesPanel() {
   _open = false;
+  _collapsed = false;
   _editingId = null;
   try { _commitOpenInPlaceEditor(); } catch {}
   try { _closeMobileFullscreenEdit({ save: true }); } catch {}
@@ -70,6 +74,7 @@ function _forceCloseNotesPanel() {
   document.body.classList.remove('notes-view', 'notes-mobile-mode', 'notes-drag-mode');
   document.getElementById('tool-notes-btn')?.classList.remove('active');
   try { Modals.unregister('notes-panel'); } catch {}
+  try { document.getElementById('notes-pane-backdrop')?.classList.remove('is-collapsed'); } catch {}
   try { document.getElementById('notes-pane')?.remove(); } catch {}
   try { document.getElementById('notes-pane-backdrop')?.remove(); } catch {}
   try { window._restoreSidebarIfRouteCollapsed?.(); } catch {}
@@ -531,7 +536,7 @@ function _uid() { return Math.random().toString(36).slice(2, 10); }
 
 // Mobile swipe-to-dismiss for the notes sheet. Mirrors the document panel
 // gesture (finger-following, velocity-based dismiss, rubber-band, snap-back)
-// so both sheets feel identical; dismisses via the notes closePanel('down').
+// so both sheets feel identical; dismisses via the notes collapsePanel().
 function _wireNotesSwipeDismiss(el, pane) {
   if (!el || !pane) return;
   const DISMISS_THRESHOLD = 50, VELOCITY_THRESHOLD = 0.3, RUBBER = 0.35;
@@ -577,7 +582,7 @@ function _wireNotesSwipeDismiss(el, pane) {
       // reset) so it doesn't flash back before closePanel removes it.
       pane.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0.4, 1)';
       pane.style.transform = 'translateY(100%)';
-      setTimeout(() => closePanel('down'), 200);
+      setTimeout(() => collapsePanel(), 200);
     } else {
       pane.style.transition = 'transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.05)';
       pane.style.transform = '';
@@ -1143,6 +1148,16 @@ export async function refreshDueBadge(opts = {}) {
 // ---- Panel ----
 
 export function openPanel() {
+  if (_collapsed) {
+    // Let the manager do the DOM show + dock resume when it owns the state,
+    // then its restoreFn calls us again with the manager's flag cleared.
+    if (Modals.isMinimized('notes-panel')) {
+      Modals.restore('notes-panel');
+      return;
+    }
+    _restoreCollapsedPanel();
+    return;
+  }
   if (_open) {
     _bringNotesToFront();
     return;
@@ -1241,7 +1256,7 @@ export function openPanel() {
   backdrop.className = 'notes-pane-backdrop';
   backdrop.id = 'notes-pane-backdrop';
   backdrop.addEventListener('click', (ev) => {
-    if (ev.target === backdrop) closePanel('down');
+    if (ev.target === backdrop) closePanel();
   });
   backdrop.appendChild(pane);
   document.body.appendChild(backdrop);
@@ -1265,7 +1280,7 @@ export function openPanel() {
   if (minBtn) minBtn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    closePanel('down');
+    collapsePanel();
   });
   // Search
   const searchEl = document.getElementById('notes-search');
@@ -1343,6 +1358,7 @@ export function openPanel() {
     document.removeEventListener('keydown', _notesSelectEscHandler, true);
   }
   _notesSelectEscHandler = (e) => {
+    if (_collapsed) return;
     if (e.key === 'Escape' && _selectMode) {
       e.preventDefault();
       e.stopPropagation();
@@ -1389,7 +1405,7 @@ export function openPanel() {
     _notesKeydownHandler = null;
   }
   _notesKeydownHandler = (e) => {
-    if (!_open) return;
+    if (!_open || _collapsed) return;
     const t = e.target;
     const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
     // Ctrl/Cmd+Z anywhere in the panel — undo the last note action. Skip when
@@ -1623,10 +1639,11 @@ function _renderLabelsInto(_body) {
 }
 
 function _ensureNotesChipRegistered() {
-  // Notes is not a `.modal`, so ModalManager cannot hide it. Tell it how to
-  // collapse this window; the foreground stack calls this when another window
-  // opens over the notes panel.
-  try { Modals.registerMinimizeHook('notes-panel', () => closePanel('down')); } catch (_) {}
+  // Notes is not a `.modal`, so ModalManager needs a hook for its module-owned
+  // collapse path. The manager hides the `#notes-pane` element itself (it is
+  // resolved through data-window-id), suspends any edge dock, and restores it
+  // through restoreFn → openPanel.
+  try { Modals.registerMinimizeHook('notes-panel', () => collapsePanel()); } catch (_) {}
   if (Modals.isRegistered('notes-panel')) return;
   Modals.register('notes-panel', {
     railBtnId: 'rail-notes',
@@ -1636,22 +1653,81 @@ function _ensureNotesChipRegistered() {
   });
 }
 
-// `direction === 'down'` (mobile swipe-down) MINIMIZES the panel to a
-// dock chip instead of fully closing — tapping the chip reopens it.
-// Any other call (close button, programmatic) is a full close.
-export function closePanel(direction) {
+/**
+ * Collapse Notes to a dock chip. The pane and backdrop stay mounted so search,
+ * filters, scroll and in-progress state survive; only the layout classes are
+ * removed and the manager hides the pane.
+ */
+export function collapsePanel() {
+  if (!_open || _collapsed) return;
+  _editingId = null;
+  // Preserve in-progress edits, exactly like the old close path did.
+  try { _commitOpenInPlaceEditor(); } catch {}
+  try { _closeMobileFullscreenEdit({ save: true }); } catch {}
+  try { _clearViewedReminderGlows(); } catch {}
+  // Leaving the foreground hands the screen back to whatever Notes displaced.
+  try { Modals.notifyLeft('notes-panel'); } catch (_) {}
+  _ensureNotesChipRegistered();
+
+  const ae = document.activeElement;
+  if (ae && ae.closest && ae.closest('#notes-pane')) { try { ae.blur(); } catch {} }
+
+  _open = false;
+  _collapsed = true;
+  document.body.classList.remove('notes-view', 'notes-mobile-mode', 'notes-drag-mode');
+  document.getElementById('tool-notes-btn')?.classList.remove('active');
+  const backdrop = document.getElementById('notes-pane-backdrop');
+  if (backdrop) backdrop.classList.add('is-collapsed');
+  // Manager hides the pane + suspends any edge dock so chat returns to full
+  // width while the chip is parked. The reminder interval keeps running.
+  try { Modals.minimize('notes-panel'); } catch {}
+  try { window._restoreSidebarIfRouteCollapsed?.(); } catch {}
+}
+
+function _restoreCollapsedPanel() {
+  if (!_collapsed) return;
+  const pane = document.getElementById('notes-pane');
+  const backdrop = document.getElementById('notes-pane-backdrop');
+  if (!pane) {
+    // Pane was removed while collapsed — rebuild from scratch.
+    _collapsed = false;
+    _open = false;
+    openPanel();
+    return;
+  }
+  _collapsed = false;
+  _open = true;
+  if (pane) {
+    pane.classList.remove('hidden', 'modal-minimized', 'notes-pane-leaving');
+    pane.style.display = '';
+    pane.style.transform = '';
+    pane.style.transition = '';
+  }
+  if (backdrop) backdrop.classList.remove('is-collapsed');
+  document.body.classList.add('notes-view');
+  if (_isNotesMobileMode()) document.body.classList.add('notes-mobile-mode');
+  const btn = document.getElementById('tool-notes-btn');
+  if (btn) btn.classList.add('active');
+  _bringNotesToFront(pane);
+  try { Modals.notifyOpened('notes-panel'); } catch (_) {}
+  if (_viewMode === 'grid') {
+    requestAnimationFrame(() => _applyMasonry(document.querySelector('#notes-pane .notes-pane-body')));
+  }
+}
+
+// Real close — removes the pane/backdrop and drops the window state.
+// Collapsing to a chip is collapsePanel().
+export function closePanel() {
+  if (_collapsed) { _forceCloseNotesPanel(); return; }
   if (!_open) return;
   _open = false;
   _editingId = null;
   _clearViewedReminderGlows();
-  const _minimize = direction === 'down';
   // Leaving the foreground: the window this one displaced comes back (a
   // minimize hands it back; a close restores it). Then a real close drops the
   // chain so nothing can resurrect a destroyed panel.
   try { Modals.notifyLeft('notes-panel'); } catch (_) {}
-  if (_minimize) {
-    _ensureNotesChipRegistered();
-  } else if (Modals.isRegistered('notes-panel')) {
+  if (Modals.isRegistered('notes-panel')) {
     Modals.unregister('notes-panel');
     try { Modals.forgetForeground('notes-panel'); } catch (_) {}
   }
@@ -1702,12 +1778,15 @@ export function closePanel(direction) {
   } else if (backdrop) {
     backdrop.remove();
   }
-  // Show the dock chip for a swipe-down minimize (tap it to reopen).
-  if (_minimize) { try { Modals.minimize('notes-panel'); } catch {} }
 }
 
 export function togglePanel() {
-  if (_open) closePanel();
+  if (_collapsed) {
+    if (Modals.isMinimized('notes-panel')) Modals.restore('notes-panel');
+    else openPanel();
+    return;
+  }
+  if (_open) collapsePanel();
   else openPanel();
 }
 
@@ -5370,9 +5449,9 @@ async function openNote(noteId) {
   setTimeout(tryNext, 120);
 }
 
-const notesModule = { openPanel, closePanel, togglePanel, isPanelOpen, openNote, openNotes: openPanel, closeNotes: closePanel, isNotesOpen: isPanelOpen, refreshDueBadge };
+const notesModule = { openPanel, collapsePanel, closePanel, togglePanel, isPanelOpen, openNote, openNotes: openPanel, closeNotes: closePanel, isNotesOpen: isPanelOpen, refreshDueBadge };
 export default notesModule;
-export { openPanel as openNotes, closePanel as closeNotes, isPanelOpen as isNotesOpen, openNote };
+export { openPanel as openNotes, collapsePanel as collapseNotes, closePanel as closeNotes, isPanelOpen as isNotesOpen, openNote };
 window.notesModule = notesModule;
 
 // Start reminder loop on module load (after a short delay so app loads first)

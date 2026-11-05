@@ -98,6 +98,11 @@ def test_notes_uses_its_registry_id_not_its_dom_id():
     assert "pane.id = 'notes-pane'" in notes
 
 
+def test_editor_pane_stamps_its_virtual_registry_id():
+    doc = (ROOT / "static/js/document.js").read_text(encoding="utf-8")
+    assert "pane.setAttribute('data-window-id', 'doc-panel')" in doc
+
+
 def test_static_modals_declare_their_window_id():
     for wid in ("memory-modal", "theme-modal", "custom-preset-modal", "settings-modal"):
         assert f'data-window-id="{wid}"' in INDEX, wid

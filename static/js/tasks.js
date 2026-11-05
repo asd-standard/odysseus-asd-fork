@@ -2926,6 +2926,10 @@ function _renderMainView() {
 
 export function openTasks(focusId, opts) {
   startNotificationPolling();
+  // Restore a collapsed Tasks chip rather than trying to re-open the hidden
+  // modal (openTasks early-returns while `_open` is still true). Fall through
+  // so focus/filter requests still apply to the restored window.
+  if (Modals.isMinimized('tasks-modal')) Modals.restore('tasks-modal');
   const o = opts || {};
   const openActivityForFailure = _taskFailurePending && !focusId && o.filter === undefined;
   const openCompletedForNotification = _taskCompletionPending && !focusId && o.filter === undefined;
@@ -3020,6 +3024,9 @@ export function openTasks(focusId, opts) {
   });
 
   _escHandler = (e) => {
+    // A collapsed window must not be destroyed by Escape while another
+    // window is in front.
+    if (Modals.isMinimized('tasks-modal')) return;
     if (e.key === 'Escape') {
       if (_viewingRuns) {
         _viewingRuns = null;

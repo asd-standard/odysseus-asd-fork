@@ -2293,6 +2293,12 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
   }
 
   export function openLibrary(opts) {
+    // A collapsed window is still "open" internally; restore its chip instead
+    // of rebuilding it (which would leave a stale dock chip behind).
+    if (Modals.isMinimized('doclib-modal')) {
+      Modals.restore('doclib-modal');
+      return;
+    }
     if (_libraryOpen) {
       // Recover from stuck state: the swipe-to-dismiss in ui.js adds .hidden
       // to the modal without calling closeLibrary, so _libraryOpen can stay

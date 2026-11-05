@@ -127,11 +127,13 @@ export function initKeyboardShortcuts(modules) {
     }
     if (openId) {
       _lastWindow = openId;
-      const m = document.getElementById(openId);
-      const closeBtn = m && m.querySelector('.close-btn, .modal-close, [data-close]');
-      if (closeBtn) closeBtn.click();
-      else if (openId === 'settings-modal' && settingsModule) settingsModule.close();
-      else { const t = el(_WINDOW_TRIGGERS[openId]); if (t) t.click(); }
+      // Same contract as the trigger buttons: an open window collapses to a
+      // chip; the chip/trigger restores it. Import lazily so importing this
+      // module under Node (keybind tests) never pulls in DOM side effects.
+      const t = el(_WINDOW_TRIGGERS[openId]);
+      import('./modalManager.js')
+        .then(M => M.requestToggle(openId, () => { if (t) t.click(); }))
+        .catch(() => { if (t) t.click(); });
     } else if (_lastWindow === 'settings-modal') {
       if (settingsModule) settingsModule.open();
     } else {

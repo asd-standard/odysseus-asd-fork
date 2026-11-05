@@ -26,10 +26,12 @@ LIB = (ROOT / "static/js/documentLibrary.js").read_text(encoding="utf-8")
 NOTES = (ROOT / "static/js/notes.js").read_text(encoding="utf-8")
 TASKS = (ROOT / "static/js/tasks.js").read_text(encoding="utf-8")
 EMAIL = (ROOT / "static/js/emailLibrary.js").read_text(encoding="utf-8")
+EMAIL_INBOX = (ROOT / "static/js/emailInbox.js").read_text(encoding="utf-8")
 RESEARCH = (ROOT / "static/js/research/panel.js").read_text(encoding="utf-8")
 COMPARE = (ROOT / "static/js/compare/index.js").read_text(encoding="utf-8")
 APP_JS = (ROOT / "static/app.js").read_text(encoding="utf-8")
 CSS = (ROOT / "static/style.css").read_text(encoding="utf-8")
+SNAP = (ROOT / "static/js/modalSnap.js").read_text(encoding="utf-8")
 
 
 # ── behavioural: run the real state machine ────────────────────────────────
@@ -283,36 +285,41 @@ def test_dismiss_path_reports_closed():
     assert "destroyed: _isDynamicWindow" in fn
 
 
-def test_edge_docked_windows_are_not_collapsed():
-    """A left/right docked window is layout, not foreground: opening a tool
-    over it must not turn it into a chip."""
+def test_side_columns_collapse_only_for_docked_children():
+    """A free-floating window leaves a docked side column alone; another
+    docked window replaces it. Email's split beside the editor is exempt."""
     body = MM[MM.index("function _fgOpened("):]
     body = body[: body.index("\n}")]
-    assert "_isEdgeDocked(_windowEl(parent))" in body
+    assert "const childDocked = id === 'doc-panel' || _isEdgeDocked(childEl);" in body
+    assert "if (!childDocked)" in body
+    assert "_keepsEdgeDockOnOpen(parent, id)" in body
+    # Columns that fell out of the foreground stack are still reconciled.
+    assert "_scheduleColumnReconcile(id)" in body
+    assert "function _collapseOtherVisibleColumns(" in MM
+    assert "function _collapseLooseWindow(" in MM
     helper = MM[MM.index("function _isEdgeDocked("):]
     helper = helper[: helper.index("\n}")]
     assert "modal-left-docked" in helper
     assert "modal-right-docked" in helper
+    keep = MM[MM.index("function _keepsEdgeDockOnOpen("):]
+    keep = keep[: keep.index("\n}")]
+    assert "childId === 'doc-panel'" in keep
+    assert "isEmailWindow(childId)" in keep
 
 
 # ── the collapsed window becomes a chip above the composer ─────────────────
 
-def test_displaced_window_chip_parks_bottom_left_above_the_composer():
-    assert "function _seedChipPosition(" in MM
-    seed = MM[MM.index("function _seedChipPosition("):]
-    seed = seed[: seed.index("\n}")]
-    assert "left: 12" in seed
-    assert "--composer-clearance" in MM
-    # Stacking upwards keeps several collapsed windows from overlapping.
-    assert "taken * 40" in seed
-    # Only when the user has not placed it: their position wins.
-    assert "_chipPositions.has(id)" in seed
-
-
-def test_chip_is_seeded_for_both_collapse_paths():
+def test_collapsed_windows_land_in_the_shared_dock():
+    # Every collapse starts in the dock; free positions come only from a user
+    # drag, and a restored window's chip disappears.
+    assert "function _seedChipPosition(" not in MM
     collapse = MM[MM.index("function _collapseForDisplacement("):]
     collapse = collapse[: collapse.index("\n}")]
-    assert collapse.count("_seedChipPosition(id)") == 2   # hook path + minimize path
+    assert "_renderDock();" in collapse
+    restore = MM[MM.index("export function restore(id) {"):]
+    restore = restore[: restore.index("\n}")]
+    assert "if (_chipPositions.delete(id)) _saveDockState();" in restore
+    assert "_renderDock();" in restore
 
 
 def test_free_chips_render_on_desktop():
@@ -328,10 +335,8 @@ def test_desktop_drag_of_a_positioned_chip_is_a_free_move():
     down = MM[MM.index("const onPointerDown = (e) => {"):]
     down = down[: down.index("\n  };")]
     assert "if (_chipPositions.has(chip.dataset.modalId))" in down
-    # It must take the free path, not the dock-move path.
-    free_at = down.index("dragMode = 'free';")
-    dock_at = down.index("dragMode = 'move-dock'")
-    assert free_at < dock_at
+    # The fixed bar is not draggable; dock-resident chips only reorder.
+    assert "dragMode = chips.length >= 2 ? 'reorder' : null;" in down
 
 
 def test_free_drag_survives_having_no_trash_zone():
@@ -403,16 +408,71 @@ def test_notes_registers_hooks_before_announcing_the_foreground():
 
 
 def test_notes_has_a_minimize_hook():
-    # Modals.minimize() cannot hide a pane that has no #notes-panel element.
+    # Notes keeps its pane mounted; the hook collapses it to a chip.
     assert "registerMinimizeHook('notes-panel'" in NOTES
-    assert "closePanel('down')" in NOTES
+    assert "collapsePanel()" in NOTES
 
 
 def test_notes_hands_the_place_back_and_forgets_on_close():
-    close_fn = NOTES[NOTES.index("export function closePanel(direction) {"):]
+    close_fn = NOTES[NOTES.index("export function closePanel() {"):]
     close_fn = close_fn[: close_fn.index("\n  // Drop the document keydown")]
     assert "Modals.notifyLeft('notes-panel')" in close_fn
     assert "Modals.forgetForeground('notes-panel')" in close_fn
+
+
+def test_notes_collapse_keeps_the_pane_mounted():
+    collapse = NOTES[NOTES.index("export function collapsePanel() {"):]
+    collapse = collapse[: collapse.index("\n}")]
+    assert "Modals.minimize('notes-panel')" in collapse
+    assert ".remove()" not in collapse
+    assert "#notes-pane-backdrop.is-collapsed" in CSS
+
+
+def test_editor_collapse_keeps_the_pane_mounted():
+    collapse = DOC[DOC.index("export function collapsePanel() {"):]
+    collapse = collapse[: collapse.index("\n  }")]
+    assert "Modals.minimize('doc-panel')" in collapse
+    assert "is-collapsed" in collapse
+    assert "pane.remove()" not in collapse
+    assert "pane.setAttribute('data-window-id', 'doc-panel')" in DOC
+    assert ".doc-editor-pane.is-collapsed" in CSS
+    # The editor exposes its own `_` control in the tab strip's top-right.
+    assert 'id="doc-pane-minimize"' in DOC
+    assert ".doc-tab-minimize" in CSS
+
+
+# ── trigger contract: closed → open, open → collapse, collapsed → restore ──
+
+def test_request_toggle_is_the_one_trigger_contract():
+    fn = MM[MM.index("export function requestToggle("):]
+    fn = fn[: fn.index("\n}")]
+    assert "if (isMinimized(id)) return restore(id);" in fn
+    assert "if (visible) return minimize(id);" in fn
+    assert "openFn()" in fn
+
+
+def test_manager_resolves_notes_and_editor_through_data_window_id():
+    for name in ("minimize", "restore", "toggle"):
+        start = MM.index(f"export function {name}(id)")
+        fn = MM[start:]
+        fn = fn[: fn.index("\n}")]
+        assert "_windowEl(id)" in fn, name
+    close_fn = MM[MM.index("export function close(id) {"):]
+    close_fn = close_fn[: close_fn.index("\n/** Inject a minimize")]
+    assert "_windowEl(id)" in close_fn
+
+
+def test_trigger_buttons_collapse_instead_of_closing():
+    for token in (
+        "requestToggle('tasks-modal'",
+        "requestToggle('calendar-modal'",
+        "requestToggle('doclib-modal'",
+        "requestToggle('memory-modal'",
+        "requestToggle('theme-modal'",
+        "requestToggle('settings-modal'",
+    ):
+        assert token in APP_JS, token
+    assert "requestToggle('email-lib-modal'" in EMAIL_INBOX
 
 
 # ── chips must stay visible above tool windows ─────────────────────────────
@@ -424,6 +484,48 @@ def test_dock_sits_above_edge_docked_windows():
     # Edge-docked tool windows use the split-pane tier in doc view.
     assert "--z-dock: 10040;" in CSS
     assert "--z-split-pane: 10000;" in CSS
+
+
+def test_collapsed_chip_reads_as_a_click_target():
+    rule = CSS[CSS.index(".minimized-dock-chip {"):]
+    rule = rule[: rule.index("}")]
+    assert "cursor: pointer" in rule
+    assert "cursor: grab" not in rule
+
+
+def test_applying_a_dock_announces_the_single_column_rule():
+    assert "odysseus:edge-docked" in SNAP
+    assert "detail: { id: windowId, side }" in SNAP
+    assert "addEventListener('odysseus:edge-docked'" in MM
+    assert "requestAnimationFrame(() => _collapseOtherDockedColumns(id))" in MM
+    helper = MM[MM.index("function _collapseOtherDockedColumns("):]
+    helper = helper[: helper.index("\n}")]
+    assert "modal-left-docked" in helper
+    assert "modal-right-docked" in helper
+    assert "_collapseLooseWindow(wid)" in helper
+
+
+def test_hidden_docked_windows_do_not_reserve_workspace_padding():
+    fn = SNAP[SNAP.index("function _hasOtherDockedWindow("):]
+    fn = fn[: fn.index("\n}")]
+    assert "el.classList.contains('hidden')" in fn
+    assert "el.classList.contains('modal-minimized')" in fn
+    assert "cs.display === 'none'" in fn
+
+
+def test_dock_is_a_vertical_bar_anchored_to_the_chat_corner():
+    dock = CSS[CSS.index("#minimized-dock {"):]
+    dock = dock[: dock.index("}")]
+    assert "flex-direction: column" in dock
+    assert "top: 12px" in dock
+    assert "function _positionDock(" in MM
+    assert "document.getElementById('chat-container')" in MM
+    assert "document.querySelector('.chat-top-bar')" in MM
+
+
+def test_mobile_chip_keeps_a_visible_close_affordance():
+    assert ".minimized-dock-label { display: none !important; }" in CSS
+    assert ".minimized-dock-x {\n        display: flex !important;" in CSS
 
 
 def test_free_chips_sit_above_the_dock():

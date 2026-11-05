@@ -33,7 +33,10 @@ import notesModule from './js/notes.js';
 import adminModule from './js/admin.js?v=20260716openrouter3';
 import settingsModule from './js/settings.js?v=20260815approvalsave1';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
-import * as Modals from './js/modalManager.js?v=20260723compareicon2';
+// Import the same specifier every panel module uses. A version query here
+// would create a SECOND module instance with its own window state, dock and
+// event listeners.
+import * as Modals from './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
 import './js/tileManager.js';
 import themeModule from './js/theme.js';
@@ -734,17 +737,15 @@ function initializeEventListeners() {
         }
       }
 
-      // No modals/popups open — minimize the document panel if open.
-      // Esc should tab the doc down to a dock chip (same as the chevron),
-      // NOT fully close it — closePanel('down') registers the chip +
-      // Modals.minimize so the doc is preserved and restorable.
+      // No modals/popups open — Esc is a real close for the document panel.
+      // Collapsing it to a chip is the divider chevron or the mobile swipe.
       if (documentModule && documentModule.isPanelOpen()) {
         // If there's a text selection in the document editor, let Escape clear that first
         const docTextarea = document.getElementById('doc-editor-textarea');
         if (docTextarea && docTextarea.selectionStart !== docTextarea.selectionEnd) {
           return;
         }
-        documentModule.closePanel('down');
+        documentModule.closePanel();
         return;
       }
     }
@@ -1008,24 +1009,19 @@ function initializeEventListeners() {
     });
   });
     toolTasksBtn.addEventListener('click', () => {
-      if (tasksModule) {
-        tasksModule.isTasksOpen() ? tasksModule.closeTasks() : tasksModule.openTasks();
-      }
+      if (!tasksModule) return;
+      // Trigger click: closed → open, open → collapse to a card,
+      // collapsed → restore.
+      Modals.requestToggle('tasks-modal', () => tasksModule.openTasks());
     });
   }
 
   // Calendar tool button
   const toolCalendarBtn = el('tool-calendar-btn');
   if (toolCalendarBtn) {
-    toolCalendarBtn.addEventListener('click', async () => {
+    toolCalendarBtn.addEventListener('click', () => {
       if (!calendarModule) return;
-      const Modals = await import('./js/modalManager.js');
-      // toggle returns true when a registered modal was minimized/restored;
-      // returns false when nothing is registered → open fresh.
-      if (!Modals.toggle('calendar-modal')) {
-        if (calendarModule.isCalendarOpen()) calendarModule.closeCalendar();
-        else calendarModule.openCalendar();
-      }
+      Modals.requestToggle('calendar-modal', () => calendarModule.openCalendar());
     });
   }
 
@@ -1179,7 +1175,9 @@ function initializeEventListeners() {
   const toolLibraryBtn = el('tool-library-btn');
   if (toolLibraryBtn) {
     toolLibraryBtn.addEventListener('click', () => {
-      if (sessionModule) sessionModule.openLibrary();
+      if (!sessionModule) return;
+      // Closed → open, open → collapse to a card, collapsed → restore.
+      Modals.requestToggle('doclib-modal', () => sessionModule.openLibrary());
     });
   }
 
@@ -1220,7 +1218,9 @@ function initializeEventListeners() {
   if (toolThemeBtn) {
     toolThemeBtn.addEventListener('click', () => {
       const tm = document.getElementById('theme-modal');
-      if (tm) tm.classList.remove('hidden');
+      Modals.requestToggle('theme-modal', () => {
+        if (tm) tm.classList.remove('hidden');
+      });
     });
   }
 
@@ -1239,7 +1239,9 @@ function initializeEventListeners() {
   const userBarAdmin = el('user-bar-admin');
 
   if (userBarSettings) {
-    userBarSettings.addEventListener('click', () => settingsModule.open());
+    userBarSettings.addEventListener('click', () => {
+      Modals.requestToggle('settings-modal', () => settingsModule.open());
+    });
   }
   if (userBarProfile) {
     // Clicking the user (avatar + name) jumps straight to the Account tab
@@ -1609,9 +1611,11 @@ function initializeEventListeners() {
   const toolMemoryBtn = el('tool-memory-btn');
   if (toolMemoryBtn && memoryModal) {
     toolMemoryBtn.addEventListener('click', () => {
-      memoryModal.classList.remove('hidden');
-      if (memoryModule && memoryModule.renderMemoryList) memoryModule.renderMemoryList();
-      if (memoryModule && memoryModule.updateMemoryCount) memoryModule.updateMemoryCount();
+      Modals.requestToggle('memory-modal', () => {
+        memoryModal.classList.remove('hidden');
+        if (memoryModule && memoryModule.renderMemoryList) memoryModule.renderMemoryList();
+        if (memoryModule && memoryModule.updateMemoryCount) memoryModule.updateMemoryCount();
+      });
     });
   }
 
@@ -1923,9 +1927,13 @@ function initializeEventListeners() {
       if (!documentModule) return;
       if (bringOpenDocumentToFrontOnMobile()) return;
       if (documentModule.isPanelOpen()) {
-        documentModule.closePanel();
+        // Trigger click collapses to a card; a real close is the chip's ✕.
+        documentModule.collapsePanel();
         overflowDocBtn.classList.remove('active');
-        const st = loadToggleState(); st.doc = false; saveToggleState(st);
+      } else if (documentModule.isPanelCollapsed && documentModule.isPanelCollapsed()) {
+        documentModule.openPanel();
+        overflowDocBtn.classList.add('active');
+        const st = loadToggleState(); st.doc = true; saveToggleState(st);
       } else {
         let sessionId = sessionModule.getCurrentSessionId();
         // If there's a pending "New Chat", materialize it first

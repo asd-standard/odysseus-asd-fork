@@ -3,6 +3,7 @@
 
 import uiModule from './ui.js';
 import searchModule from './search.js';
+import * as Modals from './modalManager.js';
 import { byId } from './settings/dom.js';
 import {
   getSettingsRegistryIssues,
@@ -5456,6 +5457,9 @@ function syncAdminVisibility() {
    PUBLIC API
    ═══════════════════════════════════════════ */
 export function open(tab) {
+  // Direct openers (profile, admin, deep links) must restore a collapsed
+  // Settings chip rather than showing the hidden modal with a stale chip.
+  if (Modals.isMinimized('settings-modal')) Modals.restore('settings-modal');
   if (!initialized) initAll();
 
   syncAppearanceCheckboxes();

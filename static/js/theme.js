@@ -7,6 +7,7 @@ import { initColorPickers, attachColorPicker } from './colorPicker.js';
 import { hexToRgb } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
+import * as Modals from './modalManager.js';
 
 export const THEMES = {
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
@@ -1491,6 +1492,10 @@ export function makeDraggable(el, handle) {
 export function togglePopup() {
   const modal = document.getElementById('theme-modal');
   if (!modal) return;
+  if (Modals.isMinimized('theme-modal')) {
+    Modals.restore('theme-modal');
+    return;
+  }
   const visible = !modal.classList.contains('hidden');
   if (visible) {
     modal.classList.add('hidden');

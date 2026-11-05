@@ -944,26 +944,45 @@ body.bg-pattern-sparkles {
       transition: left 0.12s ease, top 0.12s ease, width 0.12s ease, height 0.12s ease, opacity 0.12s, transform 0.12s;
     }
     #tile-ghost.visible { opacity: 1; transform: scale(1); }
-    /* Bottom dock — chip per minimized modal */
+    /* Collapsed-window bar — a dedicated vertical column anchored just above
+       the chat composer (positioned by modalManager from the live composer
+       rect). CSS keeps a sane right/bottom fallback when the composer is
+       hidden (fullscreen doc, etc.). */
     #minimized-dock {
-      position: fixed; bottom: var(--composer-clearance, 12px); left: 50%; transform: translateX(-50%);
-      display: flex; gap: 6px; flex-wrap: wrap;
-      max-width: calc(100vw - 24px);
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      bottom: auto;
+      left: auto;
+      transform: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+      flex-wrap: nowrap;
+      max-width: min(260px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow-y: auto;
+      overflow-x: visible;
       padding: 4px;
+      scrollbar-width: none;
       /* Above edge-docked tool windows (the split-pane tier), so a chip in
          the dock never disappears behind the right column. */
       z-index: var(--z-dock);
       pointer-events: none;
     }
+    #minimized-dock::-webkit-scrollbar { display: none; }
     .minimized-dock-chip {
       pointer-events: auto;
       display: inline-flex; align-items: center; gap: 6px;
+      max-width: 100%;
       padding: 6px 8px 6px 10px;
       background: var(--panel, var(--bg));
       border: 1px solid var(--border);
       border-radius: 999px;
       color: var(--fg); font-family: inherit; font-size: 12px;
-      cursor: grab; touch-action: none; user-select: none;
+      /* A chip is a click target (restore) — the bar itself is not movable. */
+      cursor: pointer; touch-action: none; user-select: none;
       box-shadow: 0 4px 14px rgba(0,0,0,0.35);
       transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s, border-color 0.15s;
       animation: dock-chip-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
@@ -972,7 +991,8 @@ body.bg-pattern-sparkles {
       background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel, var(--bg)));
       border-color: color-mix(in srgb, var(--accent, var(--red)) 40%, var(--border));
     }
-    .minimized-dock-chip:active { cursor: grabbing; }
+    .minimized-dock-chip:active { cursor: pointer; }
+    /* Only an actual in-bar reorder shows the grab cursor. */
     .minimized-dock-chip.dragging {
       cursor: grabbing; z-index: 1000;
       box-shadow: 0 8px 24px rgba(0,0,0,0.55);
@@ -992,12 +1012,24 @@ body.bg-pattern-sparkles {
                   inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 25%, transparent);
     }
     .minimized-dock-chip svg { opacity: 0.7; flex-shrink: 0; }
-    .minimized-dock-label { white-space: nowrap; }
+    .minimized-dock-label {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
 
     /* Mobile: chips are icon-only round pills. Tap to restore, drag toward
        the trash zone at top-center to close. touch-action:none lets the
        pointermove listener claim the gesture instead of the page scroll. */
     @media (max-width: 768px) {
+      #minimized-dock {
+        align-items: flex-end;
+        gap: 12px;
+        max-width: 72px;
+        right: 10px;
+        padding: 10px;
+      }
       .minimized-dock-chip {
         width: 40px; height: 40px;
         padding: 0 !important;
@@ -1008,8 +1040,25 @@ body.bg-pattern-sparkles {
         touch-action: none;
       }
       .minimized-dock-chip svg { width: 18px; height: 18px; opacity: 0.9; }
-      .minimized-dock-label,
-      .minimized-dock-x { display: none !important; }
+      .minimized-dock-label { display: none !important; }
+      /* Keep an explicit close affordance on touch too — an invisible hit
+         target made the right edge of a circular chip close unexpectedly. */
+      .minimized-dock-x {
+        display: flex !important;
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 17px;
+        height: 17px;
+        margin: 0;
+        font-size: 13px;
+        font-weight: 700;
+        opacity: 1;
+        background: var(--panel, var(--bg));
+        border: 1px solid var(--border);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        z-index: 2;
+      }
       .minimized-dock-chip.chip-free-drag {
         box-shadow: 0 8px 22px rgba(0,0,0,0.55),
                     0 0 0 2px color-mix(in srgb, var(--accent, var(--red)) 50%, transparent) !important;
@@ -12589,6 +12638,10 @@ textarea.memory-add-input {
   .doc-editor-pane,
   .doc-editor-pane.doc-pane-leaving { animation: none; }
 }
+/* Collapsed editor: the pane/divider stay mounted (state preserved) but are
+   hidden while the window is parked as a dock chip. */
+.doc-editor-pane.is-collapsed,
+.doc-divider.is-collapsed { display: none !important; }
 .doc-loading-overlay {
   position: absolute;
   inset: 0;
@@ -12607,6 +12660,13 @@ textarea.memory-add-input {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   height: 36px;
+}
+/* Editor minimize: the pane has no modal header, so the `_` lives at the
+   right end of the tab strip. */
+.doc-tab-minimize {
+  align-self: center;
+  flex-shrink: 0;
+  margin: 0 6px 0 2px;
 }
 .doc-tab-scroll {
   display: flex;
@@ -33812,6 +33872,9 @@ body.doc-find-active mark.doc-find-mark.current {
 /* ── Notes ── */
 /* Notes panel — body-level flex sibling of chat-container */
 body.notes-view .chat-container { flex: 1; min-width: 0; }
+/* Collapsed Notes keeps its pane mounted (state preserved) but hides the
+   whole backdrop so it cannot intercept clicks while parked as a dock chip. */
+#notes-pane-backdrop.is-collapsed { display: none !important; }
 
 /* Mobile: notes panel takes over full screen */
 @media (max-width: 768px) {

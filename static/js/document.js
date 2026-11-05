@@ -19,6 +19,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   let API_BASE = '';
   let isOpen = false;
+  // Collapsed windows keep their editor pane mounted (like every other tool
+  // window); `isOpen` is false while collapsed so callers treat it as hidden.
+  let isCollapsed = false;
+  // Small safety snapshot: display:none can reset scroll positions in some
+  // browsers even when the DOM node is kept.
+  let _collapsedUi = null;
   let _hlDebounce = null;
   let _isEditingTabTitle = false;
   let _autoDetectDebounce = null;
@@ -207,7 +213,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     // Tell it how "collapse this window" works; the foreground stack uses this
     // when another window opens over the editor.
     try {
-      Modals.registerMinimizeHook('doc-panel', () => closePanel('down'));
+      Modals.registerMinimizeHook('doc-panel', () => collapsePanel());
     } catch (e) { console.debug('doc-panel minimize hook not registered:', e); }
     initLibrary({
       apiBase,
@@ -326,7 +332,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       const dy = lastY - startY;
       const shouldDismiss = dy > DISMISS_THRESHOLD || (dy > 20 && velocity > VELOCITY_THRESHOLD);
       if (shouldDismiss) {
-        closePanel('down');
+        collapsePanel();
       } else {
         p.style.transition = 'transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.05)';
         p.style.transform = '';
@@ -380,7 +386,15 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     html += `<button class="doc-tab-new" id="doc-tab-new-btn" title="New document"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>`;
     html += '</div>';
     html += '<button class="doc-tab-arrow doc-tab-arrow-right" id="doc-tab-right" title="Scroll right">&#x203A;</button>';
+    // Dedicated collapse control in the pane's top-right corner (the editor
+    // has no modal header, so this is its `_` equivalent).
+    html += '<button type="button" class="modal-minimize-btn doc-tab-minimize" id="doc-pane-minimize" title="Minimize" aria-label="Minimize document"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="18" x2="19" y2="18"/></svg></button>';
     tabBar.innerHTML = html;
+
+    document.getElementById('doc-pane-minimize')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      collapsePanel();
+    });
 
     // Wire scroll arrows
     const scrollArea = document.getElementById('doc-tab-scroll');
@@ -4847,13 +4861,23 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   export function openPanel() {
+    if (isCollapsed) {
+      // Let the manager unhide + re-apply any dock before the module restores
+      // its body classes; its restoreFn calls us again afterwards.
+      if (Modals.isMinimized('doc-panel')) {
+        Modals.restore('doc-panel');
+        return;
+      }
+      _restoreCollapsedPanel();
+      return;
+    }
     _closeNotesForDocumentOpen();
     if (isOpen) return;
     // Clear any pane/divider still sliding out from a just-fired close so we
     // don't end up with two #doc-editor-pane nodes (and a stale close stripping
     // doc-view). Paired with the isOpen guard in _finishClose above.
-    document.getElementById('doc-editor-pane')?.remove();
-    document.getElementById('doc-divider')?.remove();
+    document.querySelectorAll('#doc-editor-pane').forEach(el => el.remove());
+    document.querySelectorAll('#doc-divider').forEach(el => el.remove());
     // If the doc was minimized as a chip and the user opened the panel via
     // a different path (toolbar button, indicator), clear that chip — the
     // doc is becoming visible again.
@@ -4903,13 +4927,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const _divHide = divider.querySelector('.doc-divider-hide');
     if (_divHide) {
       _divHide.addEventListener('mousedown', (e) => e.stopPropagation());
-      _divHide.addEventListener('click', (e) => { e.stopPropagation(); closePanel('down'); });
+      _divHide.addEventListener('click', (e) => { e.stopPropagation(); closePanel(); });
     }
 
     // Create the editor pane
     const pane = document.createElement('div');
     pane.id = 'doc-editor-pane';
     pane.className = 'doc-editor-pane';
+    // Stable registry identity: the manager resolves windows through this
+    // attribute, so a collapse can hide/restore the pane directly.
+    pane.setAttribute('data-window-id', 'doc-panel');
     // ── Mobile: make toolbar/footer buttons work on the FIRST tap with the
     // keyboard up ──
     // Normally a tap while the keyboard is open is eaten by the OS keyboard
@@ -5209,7 +5236,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         if (_dragging) { _dragging = false; return; }  // suppress click after drag
         const mode = _divCollapse.dataset.mode;
         if (mode === 'fullscreen' || mode === 'unfullscreen') toggleFullscreen();
-        else closePanel('down');
+        else collapsePanel();
       });
       const HYSTERESIS = 24;
       const _applyMode = (ev) => {
@@ -5288,10 +5315,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     // Mobile grab handle — swipe down to dismiss (like the other sheet windows).
     _wireSwipeDismiss(document.getElementById('doc-mobile-grabber'));
-    document.getElementById('doc-mobile-grabber')?.addEventListener('click', () => closePanel('down'));
+    document.getElementById('doc-mobile-grabber')?.addEventListener('click', () => collapsePanel());
 
     // Wire up events
-    document.getElementById('doc-close-btn')?.addEventListener('click', () => closePanel('down'));
+    document.getElementById('doc-close-btn')?.addEventListener('click', () => closePanel());
     document.getElementById('doc-footer-close-btn')?.addEventListener('click', () => { if (activeDocId) closeTab(activeDocId); });
     document.getElementById('doc-import-btn')?.addEventListener('click', () => openLibrary());
     document.getElementById('doc-footer-copy-btn')?.addEventListener('click', (e) => {
@@ -6001,11 +6028,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
             e.stopPropagation();
             return;
           }
-          // No pinned selection — Esc MINIMIZES the panel (tabs it
-          // down to a dock chip) — same as the chevron button.
+          // No pinned selection — Esc is a real close, like every other
+          // window. Collapsing to a chip is the divider chevron or swipe.
           e.preventDefault();
           e.stopPropagation();
-          closePanel('down');
+          closePanel();
           return;
         }
         if (e.key === 'Tab') {
@@ -6966,80 +6993,280 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   function _ensureDocChipRegistered() {
     if (Modals.isRegistered('doc-panel')) return;
     Modals.register('doc-panel', {
-      // The ✕ / drag-to-trash on the minimized chip is a real close — detach
-      // the doc from the chat session so it doesn't reappear in that chat.
+      // The ✕ / drag-to-trash on the minimized chip is a real close — destroy
+      // the retained pane and detach the doc from the chat session.
       closeFn: () => {
-        // Content was already saved to the map when the panel was minimized,
-        // so just detach (don't re-read the now-removed editor).
         const id = _minimizedDocId;
         _minimizedDocId = null;
+        // Detach before tearing the pane down: the save path still needs the
+        // live active document while content is being flushed.
         if (id) _detachDocFromSession(id);
+        _destroyPanel();
       },
       restoreFn: () => {
         const id = _minimizedDocId;
         _minimizedDocId = null;
-        // openPanel builds the pane shell; switchToDoc re-renders the
-        // saved doc content into it (including PDF render-pages, syntax
-        // highlighting, etc.). Without switchToDoc, the pane is empty.
+        // The pane stays mounted while collapsed, so restoring is just a
+        // show. If it was torn down by a real close in the meantime, rebuild
+        // and reload the doc that was active when it was collapsed.
+        const hadPane = !!document.getElementById('doc-editor-pane');
         openPanel();
-        if (id && docs.has(id)) {
+        if (id && docs.has(id) && !hadPane) {
           try { switchToDoc(id); } catch (e) { console.error('Restore doc failed:', e); }
         }
       },
     });
   }
 
-  export function closePanel(direction) {
+  function _captureCollapsedUi() {
+    const ta = document.getElementById('doc-editor-textarea');
+    const pre = document.getElementById('doc-editor-highlight');
+    _collapsedUi = {
+      docId: activeDocId || null,
+      taTop: ta ? ta.scrollTop : 0,
+      taLeft: ta ? ta.scrollLeft : 0,
+      preTop: pre ? pre.scrollTop : 0,
+      preLeft: pre ? pre.scrollLeft : 0,
+      selStart: ta ? ta.selectionStart : 0,
+      selEnd: ta ? ta.selectionEnd : 0,
+    };
+  }
+
+  function _applyCollapsedUi() {
+    const ui = _collapsedUi;
+    _collapsedUi = null;
+    if (!ui) return;
+    requestAnimationFrame(() => {
+      const ta = document.getElementById('doc-editor-textarea');
+      const pre = document.getElementById('doc-editor-highlight');
+      if (pre) { pre.scrollTop = ui.preTop; pre.scrollLeft = ui.preLeft; }
+      if (ta) {
+        try { ta.setSelectionRange(ui.selStart, ui.selEnd); } catch (_) {}
+        ta.scrollTop = ui.taTop;
+        ta.scrollLeft = ui.taLeft;
+      }
+    });
+  }
+
+  /**
+   * Collapse the editor to a dock chip. The pane/divider stay mounted so tab,
+   * scroll, selection, find bar and preview state survive; only the layout
+   * classes are removed and the manager hides the pane.
+   */
+  export function collapsePanel() {
+    if (!isOpen || isCollapsed) return;
+    _captureCollapsedUi();
+    _minimizedDocId = activeDocId;
+    _markDocVisibleState(_lastSessionId, 'minimized');
+    _ensureDocChipRegistered();
+    // Leaving the foreground hands the screen back to whatever it displaced.
+    try { Modals.notifyLeft('doc-panel') } catch (_) {}
+    isOpen = false;
+    isCollapsed = true;
+    // Drop the keyboard while the pane is parked.
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { try { ae.blur(); } catch (_) {} }
+    saveCurrentToMap();
+
+    const pane = document.getElementById('doc-editor-pane');
+    const divider = document.getElementById('doc-divider');
+
+    const _finishCollapse = () => {
+      // Restored during the slide-out animation — leave the pane visible.
+      if (!isCollapsed) return;
+      if (pane) {
+        pane.classList.add('is-collapsed');
+        pane.style.transform = '';
+        pane.style.opacity = '';
+        pane.style.transition = '';
+      }
+      if (divider) {
+        divider.classList.add('is-collapsed');
+        divider.style.opacity = '';
+        divider.style.transition = '';
+      }
+      document.body.classList.remove('doc-view');
+      const container = document.getElementById('chat-container');
+      if (container) container.style.display = '';
+      const btn = document.getElementById('overflow-doc-btn');
+      if (btn) btn.classList.remove('active');
+      const docInd = document.getElementById('doc-indicator-btn');
+      if (docInd) docInd.classList.remove('active');
+      // Manager sets the minimized state, hides the pane (data-window-id) and
+      // renders the chip.
+      try { Modals.minimize('doc-panel') } catch (_) {}
+    };
+
+    if (pane) {
+      // Slide out in the direction the pane already sits; on mobile this reads
+      // as the sheet tabbing down.
+      const transform = window.innerWidth <= 768
+        ? 'translateY(100%)'
+        : (pane.classList.contains('doc-left') ? 'translateX(-40px)' : 'translateX(40px)');
+      pane.style.transition = 'transform 0.15s ease-in, opacity 0.1s ease-in';
+      pane.style.transform = transform;
+      pane.style.opacity = '0';
+      if (divider) { divider.style.transition = 'opacity 0.1s ease-in'; divider.style.opacity = '0'; }
+      pane.addEventListener('transitionend', _finishCollapse, { once: true });
+      setTimeout(_finishCollapse, 200);
+    } else {
+      _finishCollapse();
+    }
+  }
+
+  function _restoreCollapsedPanel() {
+    if (!isCollapsed) return;
+    const panes = Array.from(document.querySelectorAll('#doc-editor-pane'));
+    const pane = panes[0] || document.getElementById('doc-editor-pane');
+    // Defensive: an interrupted close/open cycle must never leave a second
+    // flex sibling pane that eats the chat width.
+    panes.slice(1).forEach(el => { try { el.remove(); } catch (_) {} });
+    const dividers = Array.from(document.querySelectorAll('#doc-divider'));
+    const divider = dividers[0] || document.getElementById('doc-divider');
+    dividers.slice(1).forEach(el => { try { el.remove(); } catch (_) {} });
+    if (!pane) {
+      // The retained pane disappeared while collapsed (e.g. a full teardown
+      // raced the collapse). Rebuild from scratch.
+      isCollapsed = false;
+      isOpen = false;
+      openPanel();
+      return;
+    }
+    isCollapsed = false;
+    isOpen = true;
+    // The editor is a primary split surface: a chip restore must not leave a
+    // second tool window visible as another column. This runs directly (in
+    // addition to the foreground event) so the layout is clean before doc-view
+    // is applied.
+    try { Modals.collapseOtherWindows('doc-panel'); } catch (_) {}
+    if (pane) {
+      pane.classList.remove('hidden', 'modal-minimized', 'is-collapsed');
+      pane.style.display = '';
+      pane.style.transform = '';
+      pane.style.opacity = '';
+      pane.style.transition = '';
+    }
+    if (divider) divider.classList.remove('is-collapsed');
+
+    // Drop stale split/dock geometry from a previous email-reply layout. The
+    // document keeps its own tab/scroll content; only positioning state that
+    // would make it a fixed overlay is cleared. A visible email window is the
+    // legitimate owner of the split, so leave that layout alone.
+    const emailSplitOwner = document.querySelector(
+      '#email-lib-modal.email-snap-left:not(.hidden):not(.modal-minimized), '
+      + '#email-lib-modal.modal-left-docked:not(.hidden):not(.modal-minimized), '
+      + '.modal[id^="email-reader-"].email-snap-left:not(.hidden):not(.modal-minimized), '
+      + '.modal[id^="email-reader-"].modal-left-docked:not(.hidden):not(.modal-minimized)'
+    );
+    if (!emailSplitOwner) {
+      document.body.classList.remove('email-doc-split-active');
+      ['--email-doc-split-left-x', '--email-doc-split-email-w', '--email-doc-split-right-x']
+        .forEach(v => document.documentElement.style.removeProperty(v));
+      if (pane) {
+        // Reset the split geometry to the default flex row. The old close path
+        // rebuilt the pane, so it never carried a stale drag-resize width or a
+        // previous split/mobile position across a minimize→restore cycle.
+        ['position', 'left', 'right', 'top', 'bottom', 'height', 'max-height',
+          'z-index', 'margin', 'flex', 'width', 'max-width', 'min-width']
+          .forEach(prop => pane.style.removeProperty(prop));
+      }
+    }
+
+    // Re-anchor the pane/divider to the chat side in case a split/dock cycle
+    // moved them. This is the same DOM order swapSide() maintains.
+    const container = document.getElementById('chat-container');
+    const sidebar = document.getElementById('sidebar');
+    if (pane && divider && container && container.parentNode) {
+      if (sidebar && sidebar.classList.contains('right-side')) {
+        pane.classList.add('doc-left');
+        container.parentNode.insertBefore(pane, container);
+        container.parentNode.insertBefore(divider, container);
+      } else {
+        pane.classList.remove('doc-left');
+        container.after(divider);
+        divider.after(pane);
+      }
+    }
+    document.body.classList.add('doc-view');
+    if (container) {
+      container.style.display = pane && pane.classList.contains('doc-fullscreen') ? 'none' : '';
+    }
+    const btn = document.getElementById('overflow-doc-btn');
+    if (btn) btn.classList.add('active');
+    const docInd = document.getElementById('doc-indicator-btn');
+    if (docInd) docInd.classList.add('active');
+    _markDocVisibleState(_lastSessionId, 'open');
+    _applyCollapsedUi();
+    requestAnimationFrame(() => {
+      try { syncHighlighting(); } catch (_) {}
+    });
+    try { _syncDocIndicator(); } catch (_) {}
+  }
+
+  /** Tear down the retained pane and drop the window state. */
+  function _destroyPanel() {
+    isOpen = false;
+    isCollapsed = false;
+    _collapsedUi = null;
+    _minimizedDocId = null;
+    _markDocVisibleState(_lastSessionId, 'closed');
+    const pane = document.getElementById('doc-editor-pane');
+    const divider = document.getElementById('doc-divider');
+    document.body.classList.remove('doc-view');
+    const container = document.getElementById('chat-container');
+    if (container) container.style.display = '';
+    if (pane) pane.remove();
+    if (divider) divider.remove();
+    activeDocId = null;
+    _publishActiveDoc(activeDocId);
+    const btn = document.getElementById('overflow-doc-btn');
+    if (btn) btn.classList.remove('active');
+    const docInd = document.getElementById('doc-indicator-btn');
+    if (docInd) docInd.classList.remove('active');
+    if (Modals.isRegistered('doc-panel')) {
+      try { Modals.unregister('doc-panel'); } catch (_) {}
+      try { Modals.forgetForeground('doc-panel'); } catch (_) {}
+    }
+  }
+
+  // Real close — removes the pane/divider and drops the window state.
+  // Collapsing to a chip is collapsePanel().
+  export function closePanel() {
+    if (isCollapsed) { _destroyPanel(); return; }
     if (!isOpen) {
-      if (direction !== 'down' && Modals.isRegistered('doc-panel')) {
+      if (Modals.isRegistered('doc-panel')) {
         _minimizedDocId = null;
         _markDocVisibleState(_lastSessionId, 'closed');
         Modals.unregister('doc-panel');
         // Real close: the editor can never come back, so drop its restoration
         // chain (a minimized window closed from its chip must not resurrect the
         // thing it displaced).
-        try { Modals.forgetForeground('doc-panel'); } catch (_) {}
+        try { Modals.forgetForeground('doc-panel') } catch (_) {}
       }
       return;
     }
     isOpen = false;
     // Leaving the foreground: hand the screen back to whatever this window
-    // displaced (a minimize hands it back; a close restores it too, unless the
-    // panel was itself only a chip — handled above).
-    try { Modals.notifyLeft('doc-panel'); } catch (_) {}
+    // displaced (a minimize hands it back; a close restores it too).
+    try { Modals.notifyLeft('doc-panel') } catch (_) {}
     // On touch, closing the doc should leave the keyboard DOWN. The tap blurs
     // the textarea (keyboard starts down), but a stray refocus during teardown
-    // (the view behind regaining focus, etc.) was bouncing it back up. Blur any
-    // focused field now and again after the close settles to keep it down.
-    if (direction !== 'down' && (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0)) {
-      const _dropKb = () => {
-        const ae = document.activeElement;
-        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { try { ae.blur(); } catch (_) {} }
-      };
-      _dropKb();
-      requestAnimationFrame(_dropKb);
-      setTimeout(_dropKb, 80);
-    }
-    // Save current state
+    // (the view behind regaining focus, etc.) was bouncing it back up.
+    const _dropKb = () => {
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) { try { ae.blur(); } catch (_) {} }
+    };
+    _dropKb();
+    requestAnimationFrame(_dropKb);
+    setTimeout(_dropKb, 80);
     saveCurrentToMap();
 
-    // A "down" close means minimize, not close. Register the chip and flip
-    // the dock state to minimized so a chip appears at the bottom. Any
-    // other direction is a real close — make sure any leftover chip from a
-    // prior minimize cycle is cleared too.
-    if (direction === 'down') {
-      _minimizedDocId = activeDocId;
-      _markDocVisibleState(_lastSessionId, 'minimized');
-      _ensureDocChipRegistered();
-      Modals.minimize('doc-panel');
-    } else if (Modals.isRegistered('doc-panel')) {
-      _minimizedDocId = null;
-      _markDocVisibleState(_lastSessionId, 'closed');
+    _minimizedDocId = null;
+    _markDocVisibleState(_lastSessionId, 'closed');
+    if (Modals.isRegistered('doc-panel')) {
       Modals.unregister('doc-panel');
       // Destroyed, not displaced: nothing may restore it later.
-      try { Modals.forgetForeground('doc-panel'); } catch (_) {}
-    } else {
-      _markDocVisibleState(_lastSessionId, 'closed');
+      try { Modals.forgetForeground('doc-panel') } catch (_) {}
     }
 
     const pane = document.getElementById('doc-editor-pane');
@@ -7066,15 +7293,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     };
 
     if (pane) {
-      // Determine slide direction
-      let transform;
-      if (direction === 'down') {
-        // Full slide off-screen on mobile (sheet dismiss); small nudge on desktop.
-        transform = window.innerWidth <= 768 ? 'translateY(100%)' : 'translateY(30px)';
-      } else {
-        const fromLeft = pane.classList.contains('doc-left');
-        transform = fromLeft ? 'translateX(-40px)' : 'translateX(40px)';
-      }
+      const fromLeft = pane.classList.contains('doc-left');
+      const transform = fromLeft ? 'translateX(-40px)' : 'translateX(40px)';
       pane.style.transition = 'transform 0.15s ease-in, opacity 0.1s ease-in';
       pane.style.transform = transform;
       pane.style.opacity = '0';
@@ -7594,7 +7814,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         _ensureDocChipRegistered();
         if (isOpen) {
           try { switchToDoc(target.id); } catch (e) { console.error('Minimize restored doc failed:', e); }
-          closePanel('down');
+          collapsePanel();
+        } else if (isCollapsed) {
+          // Keep the hidden pane on the current session's document so the
+          // chip restores what the user expects.
+          try { switchToDoc(target.id); } catch (e) { console.error('Minimize restored doc failed:', e); }
         } else {
           Modals.minimize('doc-panel');
         }
@@ -11800,7 +12024,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     activeDocId = null;
     _publishActiveDoc(activeDocId);
     _lastSessionId = '';
-    if (isOpen) closePanel();
+    if (isOpen || isCollapsed) closePanel();
     // `docs.clear()` alone left the mounted textarea showing the previous
     // document's text with no tab and no active id — a pane that looks like a
     // document but is registered nowhere. Blank it so "pane on screen" always
@@ -11815,6 +12039,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   export function isPanelOpen() {
     return isOpen;
+  }
+
+  export function isPanelCollapsed() {
+    return isCollapsed;
   }
 
   export function getCurrentDocId() {
@@ -11878,6 +12106,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
    * registered. Used only to phrase messages accurately and to self-heal.
    */
   export function hasStaleEditorPane() {
+    // A collapsed pane is intentionally still mounted; it is not "stale".
+    if (isCollapsed) return false;
     return !getDisplayedDocId()
       && !!(isOpen || document.getElementById('doc-editor-pane'));
   }
@@ -11918,7 +12148,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 const documentModule = {
   init,
   openPanel,
+  collapsePanel,
   closePanel,
+  isPanelCollapsed,
   swapSide,
   createDocument,
   newDocument,
