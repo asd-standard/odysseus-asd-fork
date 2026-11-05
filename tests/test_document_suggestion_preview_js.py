@@ -342,9 +342,10 @@ def test_anchor_state_is_cleared_on_exit():
     assert "_suggestionPreviewAnchorScroll = null" in EXIT
 
 
-def test_measure_mirror_is_shared_with_selection_overlays():
-    """One geometry helper, so both measurements cannot drift apart."""
-    assert DOC_JS.count("_ensureMeasureMirror(") >= 3   # definition + 2 callers
+def test_measure_mirror_is_used_by_suggestion_scroll():
+    """One geometry helper for the suggestion scroll measurement."""
+    # The selection overlay was removed; only the suggestion scroll uses it now.
+    assert DOC_JS.count("_ensureMeasureMirror(") >= 2   # definition + 1 caller
     # The selection overlay no longer inlines its own mirror setup.
     assert "mirror.id = 'doc-selection-mirror'" in DOC_JS
     assert DOC_JS.count("mirror.id = 'doc-selection-mirror'") == 1
