@@ -4671,8 +4671,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       requestAnimationFrame(() => toggleCsvPreview());
     }
 
-    // Exit HTML preview on switch
-    exitHtmlPreview();
+    // Exit HTML preview on switch. Don't restore the outgoing doc's Write
+    // position into the newly selected document.
+    exitHtmlPreview({ restoreScroll: false });
 
     // Show/hide email fields. Markdown preview uses the same editor wrapper
     // as email source mode, so clear it before showing the rich email body;
@@ -10763,13 +10764,132 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (mdToolbar?._syncOverflow) requestAnimationFrame(mdToolbar._syncOverflow);
   }
 
-  /** Toggle markdown preview */
-  function _setMarkdownPreviewActive(active, { remember = true } = {}) {
+  // ---- View scroll preservation ----
+  // Independent scroll positions per document for preview modes that cannot be
+  // mapped 1:1 to source (the HTML/SVG/XML iframe, plus the Write view when a
+  // rendering preview hides it). Keeping the map per doc means switching tabs
+  // doesn't leak one document's position into another.
+  const _viewScrollMemory = new Map();
+
+  function _viewScrollState(docId) {
+    const id = docId || activeDocId || '__none__';
+    let state = _viewScrollMemory.get(id);
+    if (!state) { state = {}; _viewScrollMemory.set(id, state); }
+    return state;
+  }
+
+  function _saveViewScroll(view, el, docId) {
+    if (!el) return;
+    _viewScrollState(docId)[view] = el.scrollTop || 0;
+  }
+
+  function _restoreViewScroll(view, el, docId) {
+    if (!el) return;
+    const state = _viewScrollState(docId);
+    if (!(view in state)) return;
+    const top = state[view];
+    const apply = () => {
+      if (!el.isConnected) return;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      el.scrollTop = Math.max(0, Math.min(top, max));
+    };
+    apply();
+    requestAnimationFrame(apply);
+  }
+
+  function _scrollRatio(el) {
+    if (!el) return 0;
+    const max = el.scrollHeight - el.clientHeight;
+    return max > 0 ? Math.max(0, Math.min(1, el.scrollTop / max)) : 0;
+  }
+
+  function _applyScrollRatio(el, ratio) {
+    if (!el) return;
+    const apply = () => {
+      if (!el.isConnected) return;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      el.scrollTop = max > 0 ? Math.max(0, Math.min(max, ratio * max)) : 0;
+    };
+    apply();
+    requestAnimationFrame(apply);
+  }
+
+  /** Top visible source line (1-based) and how far into it the viewport starts. */
+  function _topVisibleLineAnchor(textarea) {
+    if (!textarea) return { line: 1, fraction: 0 };
+    const text = textarea.value || '';
+    const style = getComputedStyle(textarea);
+    const paddingTop = parseFloat(style.paddingTop) || 10;
+    const lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.45);
+    const lineCount = Math.max(1, text.split('\n').length);
+    const target = textarea.scrollTop + paddingTop;
+    let lo = 0, hi = lineCount - 1, best = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (_lineTopOffset(textarea, text, mid, style) <= target + 0.5) {
+        best = mid; lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    const top = _lineTopOffset(textarea, text, best, style);
+    const nextTop = best + 1 < lineCount
+      ? _lineTopOffset(textarea, text, best + 1, style)
+      : top + lineHeight;
+    const height = Math.max(1, nextTop - top);
+    return {
+      line: best + 1,
+      fraction: Math.max(0, Math.min(1, (target - top) / height)),
+    };
+  }
+
+  function _lineTopOffset(textarea, text, lineIndex, style) {
+    if (!textarea) return 0;
+    const st = style || getComputedStyle(textarea);
+    const paddingBottom = parseFloat(st.paddingBottom) || 10;
+    const lines = (text || '').split('\n');
+    const idx = Math.max(0, Math.min(Number(lineIndex) || 0, lines.length));
+    const wrap = document.getElementById('doc-editor-wrap');
+    try {
+      const mirror = _ensureMeasureMirror(textarea, st, wrap);
+      mirror.textContent = lines.slice(0, idx).join('\n');
+      const y = mirror.scrollHeight - paddingBottom;
+      mirror.textContent = '';
+      return y;
+    } catch (_) {
+      const lineHeight = parseFloat(st.lineHeight) || 20;
+      return idx * lineHeight;
+    }
+  }
+
+  function _scrollTextareaToLine(textarea, line, fraction = 0) {
+    if (!textarea) return;
+    const text = textarea.value || '';
+    const style = getComputedStyle(textarea);
+    const paddingTop = parseFloat(style.paddingTop) || 10;
+    const idx = Math.max(0, (Number(line) || 1) - 1);
+    const top = _lineTopOffset(textarea, text, idx, style);
+    const nextTop = _lineTopOffset(textarea, text, idx + 1, style);
+    const height = Math.max(1, nextTop - top);
+    textarea.scrollTop = Math.max(0, top - paddingTop + fraction * height);
+  }
+
+  /** Toggle markdown preview. `syncScroll` maps the reading position when the
+   *  user switches Write ↔ Preview; programmatic loads leave it off so a new
+   *  document doesn't inherit the previous one's position. */
+  function _setMarkdownPreviewActive(active, { remember = true, syncScroll = false, ratio = null } = {}) {
     const preview = document.getElementById('doc-md-preview');
     const wrap = document.getElementById('doc-editor-wrap');
     const textarea = document.getElementById('doc-editor-textarea');
     if (!preview || !wrap || !textarea) return;
 
+    const wasActive = preview.style.display !== 'none';
+    let targetRatio = ratio;
+    if (syncScroll && active !== wasActive) {
+      targetRatio = _scrollRatio(wasActive ? preview : textarea);
+    }
+
+    let mermaidPromise = null;
     if (active) {
       const md = textarea.value || '';
       if (markdownModule && markdownModule.mdToHtml) {
@@ -10781,7 +10901,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         preview.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
       }
       if (markdownModule && markdownModule.renderMermaid) {
-        markdownModule.renderMermaid(preview);
+        mermaidPromise = markdownModule.renderMermaid(preview);
       }
       preview.style.display = '';
       wrap.style.display = 'none';
@@ -10794,6 +10914,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         wrap.style.display = '';
       }
     }
+    if (targetRatio != null) {
+      const target = active ? preview : textarea;
+      _applyScrollRatio(target, targetRatio);
+      // Mermaid diagrams can change the preview height after the first paint.
+      if (active && mermaidPromise && typeof mermaidPromise.then === 'function') {
+        mermaidPromise.then(() => {
+          if (_isMarkdownPreviewVisible()) _applyScrollRatio(preview, targetRatio);
+        }).catch(() => {});
+      }
+    }
     if (remember && activeDocId && docs.has(activeDocId)) {
       docs.get(activeDocId)._markdownPreviewActive = !!active;
     }
@@ -10802,35 +10932,54 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   function toggleMarkdownPreview() {
     const preview = document.getElementById('doc-md-preview');
-    _setMarkdownPreviewActive(!(preview && preview.style.display !== 'none'));
+    const next = !(preview && preview.style.display !== 'none');
+    _setMarkdownPreviewActive(next, { syncScroll: true });
   }
 
-  /** Parse CSV text into a 2D array (handles quoted fields) */
+  /** Parse CSV text into rows + the 1-based source line each row starts on.
+   *  Row lines let the table view and the raw text share an exact scroll
+   *  position instead of guessing with a ratio. */
   function parseCSV(text) {
     const rows = [];
+    const rowLines = [];
     let row = [];
     let field = '';
     let inQuotes = false;
+    let line = 1;
+    let rowLine = 1;
+    const finishRow = () => {
+      row.push(field);
+      field = '';
+      if (row.some(c => c.trim())) {
+        rows.push(row);
+        rowLines.push(rowLine);
+      }
+      row = [];
+      rowLine = line;
+    };
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
       if (inQuotes) {
         if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
         else if (ch === '"') { inQuotes = false; }
-        else { field += ch; }
+        else {
+          // Newlines inside a quoted field still advance the source line
+          // even though they don't end the row.
+          if (ch === '\n') line++;
+          field += ch;
+        }
       } else {
         if (ch === '"') { inQuotes = true; }
         else if (ch === ',') { row.push(field); field = ''; }
         else if (ch === '\n' || (ch === '\r' && text[i + 1] === '\n')) {
           if (ch === '\r') i++;
-          row.push(field); field = '';
-          if (row.some(c => c.trim())) rows.push(row);
-          row = [];
+          line++;
+          finishRow();
         } else { field += ch; }
       }
     }
-    row.push(field);
-    if (row.some(c => c.trim())) rows.push(row);
-    return rows;
+    finishRow();
+    return { rows, rowLines };
   }
 
   /** Escape a CSV field (quote if it contains comma, quote, or newline) */
@@ -10858,6 +11007,42 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
+  function _csvRowTop(preview, tr) {
+    return tr.getBoundingClientRect().top - preview.getBoundingClientRect().top + preview.scrollTop;
+  }
+
+  function _scrollCsvToLine(preview, line, fraction = 0) {
+    if (!preview) return;
+    const rows = [...preview.querySelectorAll('tr[data-src-line]')];
+    if (!rows.length) return;
+    let target = rows[0];
+    for (const tr of rows) {
+      if ((Number(tr.dataset.srcLine) || 1) <= line) target = tr;
+      else break;
+    }
+    const paddingTop = parseFloat(getComputedStyle(preview).paddingTop) || 0;
+    const top = _csvRowTop(preview, target) - paddingTop;
+    preview.scrollTop = Math.max(0, top + fraction * target.offsetHeight);
+  }
+
+  function _topVisibleCsvAnchor(preview) {
+    if (!preview) return { line: 1, fraction: 0 };
+    const rows = [...preview.querySelectorAll('tr[data-src-line]')];
+    if (!rows.length) return { line: 1, fraction: 0 };
+    const paddingTop = parseFloat(getComputedStyle(preview).paddingTop) || 0;
+    const viewTop = preview.getBoundingClientRect().top + paddingTop;
+    let target = rows[0];
+    for (const tr of rows) {
+      if (tr.getBoundingClientRect().bottom > viewTop + 1) { target = tr; break; }
+    }
+    const rect = target.getBoundingClientRect();
+    const height = Math.max(1, rect.height);
+    return {
+      line: Number(target.dataset.srcLine) || 1,
+      fraction: Math.max(0, Math.min(1, (viewTop - rect.top) / height)),
+    };
+  }
+
   /** Toggle CSV table preview */
   function toggleCsvPreview() {
     const preview = document.getElementById('doc-csv-preview');
@@ -10866,7 +11051,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (!preview || !wrap || !textarea) return;
 
     if (preview.style.display === 'none') {
-      const rows = parseCSV(textarea.value || '');
+      const anchor = _topVisibleLineAnchor(textarea);
+      const { rows, rowLines } = parseCSV(textarea.value || '');
       if (rows.length === 0) {
         // Re-route the "no data" message to the shared run-output block so
         // every doc type surfaces errors/empty-state in the same place
@@ -10885,13 +11071,13 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       } else {
         const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         const colCount = Math.max(...rows.map(r => r.length));
-        let html = '<div class="csv-table-wrap"><table class="csv-table"><thead><tr>';
+        let html = `<div class="csv-table-wrap"><table class="csv-table"><thead><tr data-src-line="${rowLines[0] || 1}">`;
         for (let j = 0; j < colCount; j++) {
           html += `<th contenteditable="true">${esc(rows[0][j] || '')}</th>`;
         }
         html += '</tr></thead><tbody>';
         for (let i = 1; i < rows.length; i++) {
-          html += '<tr>';
+          html += `<tr data-src-line="${rowLines[i] || (rowLines[0] + i)}">`;
           for (let j = 0; j < colCount; j++) {
             html += `<td contenteditable="true">${esc(rows[i][j] || '')}</td>`;
           }
@@ -10933,6 +11119,8 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
           addBtn.addEventListener('click', () => {
             const tbody = table.querySelector('tbody');
             const tr = document.createElement('tr');
+            const prevLine = Number(tbody.lastElementChild?.dataset.srcLine) || 1;
+            tr.dataset.srcLine = String(prevLine + 1);
             for (let j = 0; j < colCount; j++) {
               const td = document.createElement('td');
               td.contentEditable = 'true';
@@ -10946,9 +11134,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       }
       preview.style.display = '';
       wrap.style.display = 'none';
+      requestAnimationFrame(() => _scrollCsvToLine(preview, anchor.line, anchor.fraction));
     } else {
+      const anchor = _topVisibleCsvAnchor(preview);
       preview.style.display = 'none';
       wrap.style.display = '';
+      requestAnimationFrame(() => _scrollTextareaToLine(textarea, anchor.line, anchor.fraction));
     }
     // Update the segmented Code/Run toggle's active class so the icon
     // highlights match the new state — without this, opening a CSV that
@@ -10968,8 +11159,16 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       // Show preview — hide markdown preview if active
       const mdPreview = document.getElementById('doc-md-preview');
       if (mdPreview) mdPreview.style.display = 'none';
+      _saveViewScroll('write', textarea);
       const code = textarea.value || '';
-      iframe.srcdoc = code;
+      // Reassigning srcdoc destroys the iframe document AND its scroll
+      // position. Only rebuild when the source or document actually changed,
+      // so flipping back to an unchanged preview keeps its own position.
+      if (iframe._odysseusSrcDoc !== code || iframe._odysseusDocId !== activeDocId) {
+        iframe._odysseusSrcDoc = code;
+        iframe._odysseusDocId = activeDocId;
+        iframe.srcdoc = code;
+      }
       iframe.style.display = '';
       wrap.style.display = 'none';
       _htmlPreviewActive = true;
@@ -10980,13 +11179,17 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   /** Exit HTML preview back to code view */
-  function exitHtmlPreview() {
+  function exitHtmlPreview({ restoreScroll = true } = {}) {
     const iframe = document.getElementById('doc-html-preview');
     const wrap = document.getElementById('doc-editor-wrap');
+    const textarea = document.getElementById('doc-editor-textarea');
     if (!_htmlPreviewActive) return;
     _htmlPreviewActive = false;
-    if (iframe) { iframe.style.display = 'none'; iframe.srcdoc = ''; }
+    // Keep srcdoc: the hidden document retains its own scroll position for the
+    // next time the user opens preview on this same source.
+    if (iframe) iframe.style.display = 'none';
     if (wrap) wrap.style.display = '';
+    if (restoreScroll && textarea) _restoreViewScroll('write', textarea);
     renderTabs();
   }
 
@@ -11455,7 +11658,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       uiModule.showToast('Preview is read-only. Click Write to edit the document.', {
         duration: 5000,
         action: 'Write',
-        onAction: () => _setMarkdownPreviewActive(false, { remember: true }),
+        onAction: () => _setMarkdownPreviewActive(false, { remember: true, syncScroll: true }),
       });
     }
   }
@@ -11468,7 +11671,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const textarea = document.getElementById('doc-editor-textarea');
     if (textarea) textarea.value = content;
     syncHighlighting();
-    _setMarkdownPreviewActive(true, { remember: false });
+    // Rebuilding the preview normally resets it to the top. Keep the reader
+    // where they were through streaming/AI refreshes of the same document.
+    const preview = document.getElementById('doc-md-preview');
+    const ratio = _scrollRatio(preview);
+    _setMarkdownPreviewActive(true, { remember: false, ratio });
     return true;
   }
 

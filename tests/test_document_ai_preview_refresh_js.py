@@ -32,7 +32,8 @@ def test_markdown_preview_refresh_rerenders_visible_preview():
     assert "lang !== 'markdown'" in body
     assert "textarea.value = content;" in body
     assert "syncHighlighting();" in body
-    assert "_setMarkdownPreviewActive(true, { remember: false });" in body
+    assert "const ratio = _scrollRatio(preview);" in body
+    assert "_setMarkdownPreviewActive(true, { remember: false, ratio });" in body
 
 
 def test_doc_update_refreshes_preview_instead_of_hidden_editor_animation():
