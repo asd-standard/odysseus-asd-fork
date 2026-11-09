@@ -579,7 +579,9 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             return _ALIASES_SET.get(k2, (k or "").strip())
 
         def _is_managed_key(key):
-            return key in DEFAULT_SETTINGS and key not in RETIRED_SETTING_KEYS
+            # Tool policy is not a general setting, even if a future default
+            # is added: resetting it must never re-enable disabled tools.
+            return key != "disabled_tools" and key in DEFAULT_SETTINGS and key not in RETIRED_SETTING_KEYS
 
         _ENUMS = {
             "reminder_channel": ["browser", "email", "ntfy", "webhook"],
@@ -706,12 +708,34 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             save_settings(s)
             return {"response": f"Reset {key} to default ({DEFAULT_SETTINGS[key]}).", "exit_code": 0}
 
-        elif action in ("disable_tool", "enable_tool", "list_tools"):
+        elif action == "enable_tool":
+            # The global disabled_tools denylist is the one hard permission
+            # boundary the Settings -> Agent Tools panel offers admins. It
+            # must only ever be *narrowed* from inside an agent turn: a model
+            # that can call enable_tool can undo the boundary itself, and any
+            # web page, email, or document the agent reads can ask it to
+            # (prompt injection re-enabling shell/email/etc.). Widening the
+            # tool set stays a human action in the Settings panel.
+            tool_name = (args.get("tool") or args.get("name") or "").strip().lower()
+            return {
+                "error": (
+                    f"Re-enabling tools is not available from chat"
+                    f"{f' (requested: {tool_name})' if tool_name else ''}. "
+                    "Disabled tools are an admin policy: ask the user to turn the tool "
+                    "back on in Settings > Agent Tools. You can still disable tools "
+                    "(disable_tool) or list the current state (list_tools)."
+                ),
+                "exit_code": 1,
+            }
+
+        elif action in ("disable_tool", "list_tools"):
             # Tool-toggle actions. These edit settings.json:disabled_tools
             # (the global list read on every chat request) rather than
             # prefs.json. Friendly aliases accepted: "search" -> "web_search",
             # "browser" -> "builtin_browser", "documents" -> the document tool
-            # set, "memory" -> manage_memory, etc.
+            # set, "memory" -> manage_memory, etc. Only disable_tool mutates:
+            # see the enable_tool branch above for why the agent can never
+            # widen the denylist.
             from src.settings import get_setting, save_settings, load_settings
             _ALIASES = {
                 "search": ["web_search", "web_fetch"],
@@ -741,7 +765,8 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                     "response": (
                         f"Currently disabled: {', '.join(current) if current else '(none)'}.\n"
                         "Common toggles: search (web_search), browser, documents, "
-                        "memory, skills, tasks, notes, calendar, email."
+                        "memory, skills, tasks, notes, calendar, email. "
+                        "To re-enable a tool, open Settings > Agent Tools."
                     ),
                     "disabled": list(current),
                     "exit_code": 0,
@@ -759,13 +784,11 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                 for t in targets:
                     if t not in current:
                         current.append(t)
-            else:  # enable_tool
-                current = [t for t in current if t not in targets]
             after = set(current)
             settings["disabled_tools"] = current
             save_settings(settings)
 
-            verb = "Disabled" if action == "disable_tool" else "Enabled"
+            verb = "Disabled" if action == "disable_tool" else "Tool state"
             changed = sorted(after.symmetric_difference(before))
             return {
                 "response": (

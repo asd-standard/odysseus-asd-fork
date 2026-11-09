@@ -546,6 +546,8 @@ _APP_API_BLOCKLIST_PREFIXES = (
 # where GET is fine but writes are destructive or host-control shaped.
 # Use dedicated tools or UI flows instead.
 _APP_API_BLOCKLIST_METHOD_PATH = (
+    ("POST",   "/api/tools"),  # global tool policy is changed by a human in Settings
+    ("PATCH",  "/api/mcp/servers"),  # per-server MCP tool policy and server toggles, same reason
     ("GET",    "/api/email/accounts"),  # owner-filtered in tool context; use list_email_accounts MCP tool
     # Use trigger_research — it returns a UI hint so the Deep Research
     # sidebar surfaces the session. Raw start works but the agent
@@ -678,6 +680,10 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
             return {"error": "Don't hit /api/calendar/events via app_api — use the `manage_calendar` tool. It handles tz-aware natural-language datetimes and reminder_minutes correctly. If the user wants a note + reminder, prefer `manage_notes` with due_date — it bundles both.", "exit_code": 1}
         if "/api/document" in path:
             return {"error": "Don't mutate documents via app_api — use `edit_document`/`update_document` for documents not open in the editor, or `suggest_document` for the document open in the editor. Those tools enforce owner, version, and open-editor policy.", "exit_code": 1}
+        if path.startswith("/api/tools"):
+            return {"error": "Tool policy cannot be replaced from chat. Re-enable tools in Settings > Agent Tools; use manage_settings to list or disable them.", "exit_code": 1}
+        if path.startswith("/api/mcp/servers"):
+            return {"error": "MCP server and tool policy cannot be changed from chat. Ask the user to change it in Settings > Integrations.", "exit_code": 1}
         return {"error": f"{method} {path} is blocked by app_api policy.", "exit_code": 1}
 
     body = args.get("body")
