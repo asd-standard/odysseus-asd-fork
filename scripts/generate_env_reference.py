@@ -383,30 +383,10 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Request duration in seconds above which the middleware logs a slow-request "
         "warning.",
     ),
-    "ODYSSEUS_REQUIRE_TOOL_INDEX_READY": (
-        "Deployment and first run", USER,
-        "Set truthy to make semantic tool-index readiness gate startup. Off by "
-        "default so an install stays available on deterministic tool selection.",
-    ),
-    "ODYSSEUS_TOOL_INDEX_PREWARM": (
-        "Deployment and first run", USER,
-        "Set to 0, false, no or off to skip background initialization of semantic "
-        "tool retrieval at startup.",
-    ),
     "ODYSSEUS_ENABLE_HOST_DOCKER": (
         "Deployment and first run", USER,
         "Security-relevant. Must be exactly `true` before tools may use a mounted "
         "host Docker socket, and the socket itself must exist.",
-    ),
-    "ODYSSEUS_CONTAINER_NETWORK_MODE": (
-        "Deployment and first run", USER,
-        "Declares the container's Docker network mode. Set to `host` to skip "
-        "host-gateway probing when discovering local model endpoints.",
-    ),
-    "ODYSSEUS_ALLOW_OLLAMA_CLI_SCAN": (
-        "Deployment and first run", USER,
-        "On Windows only, set truthy to let the Cookbook dependency probe shell out "
-        "to `ollama list`. Ignored on other platforms, where the scan always runs.",
     ),
 
     # -- Data directories and paths ----------------------------------------
@@ -432,26 +412,10 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "On by default. Set 0, false, no or off to drop the gate that checks a local "
         "endpoint before routing a request to it.",
     ),
-    "ODYSSEUS_FIRST_TOKEN_TIMEOUT": (
-        "Model routing and providers", USER,
-        "Seconds to wait for the first streamed token from a local endpoint before "
-        "failing. Unset keeps the generous read timeout, which makes a stalled "
-        "backend look like a hung agent.",
-    ),
     "ODYSSEUS_MISTRAL_REASONING_EFFORT": (
         "Model routing and providers", USER,
         "Reasoning effort sent to Mistral thinking-capable models. The API accepts "
         "high, medium, low and none.",
-    ),
-    "ODYSSEUS_DEEPSEEK_REASONING_EFFORT": (
-        "Model routing and providers", USER,
-        "Reasoning effort for DeepSeek. Only `high` and `max` are accepted; any "
-        "other value falls back to the default.",
-    ),
-    "ODYSSEUS_QWEN_ROUTE_THINKING": (
-        "Model routing and providers", USER,
-        "Thinking policy for the Qwen routing step. An unrecognized value falls back "
-        "to `auto`.",
     ),
     "ODYSSEUS_COPILOT_CLIENT_ID": (
         "Model routing and providers", USER,
@@ -461,11 +425,6 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
     "ODYSSEUS_COPILOT_API_VERSION": (
         "Model routing and providers", USER,
         "Dated API-version header the Copilot models and chat endpoints require.",
-    ),
-    "ODYSSEUS_MLX_IMAGE_VLM_MODEL": (
-        "Model routing and providers", USER,
-        "Vision-language model id for the MLX image server script. Required unless "
-        "`--vlm-model` is passed on the command line.",
     ),
     "ODYSSEUS_COPILOT_USER_AGENT": (
         "Model routing and providers", INTERNAL,
@@ -479,61 +438,17 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Model routing and providers", INTERNAL,
         "Editor-version header presented to the Copilot API. Kept stable on purpose.",
     ),
-    "ODYSSEUS_DEBUG_LLM_SHAPE": (
-        "Model routing and providers", INTERNAL,
-        "Truthy logs the shape of streamed provider chunks. Debugging aid for "
-        "provider response parsing.",
-    ),
 
     # -- Agent loop and tool execution -------------------------------------
-    "ODYSSEUS_TOOL_APPROVAL_GATE": (
-        "Agent loop and tool execution", USER,
-        "Security-relevant. Truthy makes tool calls pass through the approval gate. "
-        "Off by default.",
-    ),
     "ODYSSEUS_MCP_ALLOWED_COMMANDS": (
         "Agent loop and tool execution", USER,
         "Security-relevant. Comma-separated allowlist of MCP launcher basenames the "
         "agent may start. Empty by default, and the deny list still wins.",
     ),
-    "ODYSSEUS_PYTHON_TOOL_SITE_PACKAGES": (
-        "Agent loop and tool execution", USER,
-        "Security-relevant. Absolute package roots, separated by the platform path "
-        "separator, exposed to the sandboxed Python tool. Empty exposes none.",
-    ),
     "ODYSSEUS_DISABLE_MCP": (
         "Agent loop and tool execution", USER,
         "Truthy disables MCP entirely, as an escape hatch for compatibility "
         "problems with a server.",
-    ),
-    "ODYSSEUS_SCRIPT_HOST": (
-        "Agent loop and tool execution", USER,
-        "Default host for the run-script action. `localhost`, `127.0.0.1`, `local` "
-        "and empty run locally; any other value runs over SSH.",
-    ),
-    "ODYSSEUS_MAX_VISUAL_EVIDENCE_IMAGES": (
-        "Agent loop and tool execution", USER,
-        "How many images one tool result may contribute to the model turn. Clamped "
-        "to 1-8.",
-    ),
-    "ODYSSEUS_MAX_VISUAL_EVIDENCE_FRAMES": (
-        "Agent loop and tool execution", USER,
-        "How many video frames one tool result may contribute. Clamped to 1-8.",
-    ),
-    "ODYSSEUS_CAPTURE_MODEL_REQUESTS": (
-        "Agent loop and tool execution", INTERNAL,
-        "Truthy writes model-request snapshots for local debugging. The marker file "
-        "`/tmp/odysseus_capture_model_requests` enables the same thing.",
-    ),
-    "ODYSSEUS_EXPOSE_RAW_BROWSER_MCP": (
-        "Agent loop and tool execution", INTERNAL,
-        "Truthy stops hiding the raw Playwright MCP tools from agent prompts when "
-        "the private-browser tool is available.",
-    ),
-    "ODYSSEUS_TOOL_CONTRACT_ROOT": (
-        "Agent loop and tool execution", INTERNAL,
-        "Directory holding the tool-contract scripts the clean-agent preview loads. "
-        "The default is a path on the maintainer's own machine.",
     ),
 
     # -- Browser automation -------------------------------------------------
@@ -562,38 +477,8 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Truthy refuses to start the browser MCP server unless its npm package is "
         "already in the npx cache, instead of installing it at startup.",
     ),
-    "ODYSSEUS_BROWSER_NAMESPACE": (
-        "Browser automation", USER,
-        "Namespace for the detached agent-browser daemon's pid files, so two "
-        "runtimes on one machine do not terminate each other's browsers.",
-    ),
-    "ODYSSEUS_BROWSER_SCREENSHOT_DIR": (
-        "Browser automation", USER,
-        "Where private-browser screenshots are written. Falls back to the container "
-        "path, then the system temp directory.",
-    ),
 
     # -- Container and workspace mounts ------------------------------------
-    "ODYSSEUS_WORKSPACE_MOUNTS": (
-        "Container and workspace mounts", USER,
-        "`host=container` path pairs separated by commas or semicolons, so the agent "
-        "can translate a container path back to the host path a user typed.",
-    ),
-    "ODYSSEUS_WORKSPACE_HOST_ROOT": (
-        "Container and workspace mounts", USER,
-        "Single host-side root, paired with the container root below. Simpler than "
-        "the explicit mount list when there is only one mount.",
-    ),
-    "ODYSSEUS_WORKSPACE_CONTAINER_ROOT": (
-        "Container and workspace mounts", USER,
-        "Container-side root that the host root maps onto. An `or` fallback, not a "
-        "read default, supplies `/workspace` when it is unset.",
-    ),
-    "ODYSSEUS_WORKSPACE_DEFAULT": (
-        "Container and workspace mounts", USER,
-        "Default workspace path the admin-only workspace route reports. Empty means "
-        "no default is configured.",
-    ),
 
     # -- Email --------------------------------------------------------------
     "ODYSSEUS_IMAP_TIMEOUT_SECONDS": (
@@ -605,11 +490,6 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Email", USER,
         "Owner stamped on documents the email MCP server creates. Stdio MCP tools "
         "get no authenticated user, so without this a draft is invisible.",
-    ),
-    "ODYSSEUS_EMAIL_FIXTURE": (
-        "Email", INTERNAL,
-        "Exactly `1`, plus a fixture file on disk, makes the email MCP server serve "
-        "fixtures instead of a real mailbox.",
     ),
 
     # -- Calendar, notes and single-user mode -------------------------------
@@ -640,9 +520,6 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Upload and media limits", USER,
         "Maximum bytes accepted for an image handed to a gallery transform.",
     ),
-    "ODYSSEUS_EDITOR_DRAFT_MAX_BYTES": (
-        "Upload and media limits", USER, "Maximum bytes accepted for a saved editor draft.",
-    ),
     "ODYSSEUS_MEMORY_IMPORT_MAX_BYTES": (
         "Upload and media limits", USER, "Maximum bytes accepted for a memory import file.",
     ),
@@ -661,88 +538,16 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
     "ODYSSEUS_ICS_MAX_BYTES": (
         "Upload and media limits", USER, "Maximum bytes accepted for an imported ICS file.",
     ),
-    "ODYSSEUS_MEDIA_MAX_FILES": (
-        "Upload and media limits", USER,
-        "How many local media files one agent turn may ingest.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_IMAGE_BYTES": (
-        "Upload and media limits", USER, "Largest source image the media pipeline will read.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_VIDEO_BYTES": (
-        "Upload and media limits", USER, "Largest source video the media pipeline will read.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_DOCUMENT_BYTES": (
-        "Upload and media limits", USER, "Largest source document the media pipeline will read.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_AUDIO_BYTES": (
-        "Upload and media limits", USER, "Largest source audio file the media pipeline will read.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_ENCODED_BYTES": (
-        "Upload and media limits", USER,
-        "Budget for the encoded payload handed to the model, counted cumulatively "
-        "across one turn's attachments rather than per file.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_DOCUMENT_CHARS": (
-        "Upload and media limits", USER,
-        "How many characters of an ingested document are inlined into the turn.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_DIMENSION": (
-        "Upload and media limits", USER,
-        "Longest edge in pixels an image is resized down to before encoding.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_PIXELS": (
-        "Upload and media limits", USER,
-        "Total pixel budget for a source image, as a decompression-bomb guard.",
-    ),
-    "ODYSSEUS_MEDIA_MAX_VIDEO_FRAMES": (
-        "Upload and media limits", USER, "How many frames are sampled from a video.",
-    ),
-    "ODYSSEUS_MEDIA_PROBE_TIMEOUT": (
-        "Upload and media limits", USER,
-        "Seconds allowed for probing a video's metadata before giving up.",
-    ),
-    "ODYSSEUS_MEDIA_FRAME_TIMEOUT": (
-        "Upload and media limits", USER,
-        "Seconds allowed for extracting frames from a video before giving up.",
-    ),
 
     # -- Search -------------------------------------------------------------
-    "ODYSSEUS_SEARCH_PROVIDER": (
-        "Search", USER,
-        "Forces the search provider, overriding the Settings value. Empty keeps the "
-        "UI authoritative, which is what a normal install wants.",
-    ),
 
     # -- Memory and skills --------------------------------------------------
-    "ODYSSEUS_SKILL_SEMANTIC_RETRIEVAL": (
-        "Memory and skills", USER,
-        "On by default. Set 0, false, no or off to fall back to keyword-only skill "
-        "retrieval when no vector store is reachable.",
-    ),
-    "ODYSSEUS_SKILL_SEMANTIC_THRESHOLD": (
-        "Memory and skills", USER,
-        "Minimum semantic score a skill needs to be retrieved. A non-numeric value "
-        "falls back to the default.",
-    ),
 
     # -- Speech and vision models -------------------------------------------
-    "ODYSSEUS_STT_MODEL": (
-        "Speech and vision models", USER,
-        "Default speech-to-text model for media transcription when the tool call "
-        "does not name one.",
-    ),
     "ODYSSEUS_TTS_CACHE_MAX_BYTES": (
         "Speech and vision models", USER,
         "Cap on the synthesized-speech cache. A non-numeric value falls back to the "
         "default.",
-    ),
-    "ODYSSEUS_SAM_MODEL": (
-        "Speech and vision models", USER,
-        "Segmentation model id the gallery loads for subject selection.",
-    ),
-    "ODYSSEUS_GROUNDING_MODEL": (
-        "Speech and vision models", USER,
-        "Object-grounding model id the gallery loads for text-driven selection.",
     ),
 
     # -- Auth and internal API ----------------------------------------------
@@ -770,61 +575,13 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Any non-empty value suppresses the `start the server with` hint at the end "
         "of setup. `start-macos.sh` sets it because it starts the server itself.",
     ),
-    "ODYSSEUS_TEST_STATIC_ORIGIN": (
+    "ODYSSEUS_DOCKER_TEST_IMAGE": (
         "Testing, capture and development tooling", INTERNAL,
-        "Origin an already-running static server is serving the repository from, so "
-        "snapshot tooling reuses it instead of starting its own.",
-    ),
-    "ODYSSEUS_TEST_STATIC_PORT": (
-        "Testing, capture and development tooling", INTERNAL,
-        "Fixed port for the test suite's static server. Unset takes an ephemeral "
-        "port, which is what keeps parallel runs from colliding.",
-    ),
-    "ODYSSEUS_SFT_TRACE_CAPTURE": (
-        "Testing, capture and development tooling", INTERNAL,
-        "On by default, but only for owners whose name starts with `sft_`. Set 0, "
-        "false, no or off to stop writing training traces.",
-    ),
-    "ODYSSEUS_SFT_TRACE_DIR": (
-        "Testing, capture and development tooling", INTERNAL,
-        "Directory the SFT trace JSONL files are written to. Defaults to "
-        "`sft_traces` under the data directory.",
-    ),
-    "ODYSSEUS_SFT_FORCE_UTC_TIMEZONE": (
-        "Testing, capture and development tooling", INTERNAL,
-        "Truthy forces `sft_` accounts to UTC for deterministic batch generation. "
-        "Interactive accounts still follow the browser timezone.",
-    ),
-    "ODYSSEUS_SFT_DISABLE_WORKSPACE_TOOLS": (
-        "Testing, capture and development tooling", INTERNAL,
-        "On by default. Keeps synthetic personal-assistant fixtures out of workspace "
-        "mode; set 0, false, no or off to let them through.",
-    ),
-    "ODYSSEUS_RUNTIME_REVISION": (
-        "Testing, capture and development tooling", INTERNAL,
-        "Revision string stamped into each captured SFT trace record, so a trace can "
-        "be tied back to the build that produced it.",
-    ),
-    "ODYSSEUS_QA_TEACHER_ATTEMPTS": (
-        "Testing, capture and development tooling", INTERNAL,
-        "Retry budget for the conversation-QA teacher model call. Clamped to 1-3.",
-    ),
-    "ODYSSEUS_QA_TEACHER_TIMEOUT": (
-        "Testing, capture and development tooling", INTERNAL,
-        "Timeout in seconds for that call. Clamped to 15-120.",
+        "Docker image tag the entrypoint hardening test inspects before running. "
+        "Defaults to the locally built compose image; the test skips when absent.",
     ),
 
     # -- Build and release metadata ----------------------------------------
-    "ODYSSEUS_BUILD_VERSION": (
-        "Build and release metadata", INTERNAL,
-        "Overrides the build-version string the API and UI report, without touching "
-        "the public application version.",
-    ),
-    "ODYSSEUS_SOURCE_COMMIT": (
-        "Build and release metadata", INTERNAL,
-        "Overrides the source commit reported for runtime provenance, for builds "
-        "that ship without a git directory.",
-    ),
 }
 
 
