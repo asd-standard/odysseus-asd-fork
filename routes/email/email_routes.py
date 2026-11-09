@@ -13,6 +13,7 @@ handlers need. The split is mechanical — no behavior change.
 """
 
 import asyncio
+from starlette.concurrency import run_in_threadpool
 import os
 import sqlite3 as _sql3
 import time
@@ -72,6 +73,38 @@ ODYSSEUS_MAIL_ORIGIN = "odysseus-ui"
 EMAIL_READ_ATTACHMENT_VERSION = 2
 _GOOGLE_OAUTH_IMAP_HOST = "imap.gmail.com"
 _GOOGLE_OAUTH_SMTP_HOST = "smtp.gmail.com"
+def _mail_private_blocked(owner: str | None) -> bool:
+    """Whether private/loopback mail hosts are disallowed for this owner.
+
+    Mail hosts are user-supplied and therefore an SSRF surface. Private
+    addresses are legitimate for an admin configuring self-hosted mail on the
+    LAN, but a regular user has no reason to reach internal services, so they
+    are blocked by default. Operators can override per deployment:
+      EMAIL_BLOCK_PRIVATE_IPS=true   -> block for everyone, admins included
+      EMAIL_ALLOW_PRIVATE_IPS=true   -> allow for everyone (trusted single user)
+    """
+    if os.getenv("EMAIL_BLOCK_PRIVATE_IPS", "").strip().lower() == "true":
+        return True
+    if os.getenv("EMAIL_ALLOW_PRIVATE_IPS", "").strip().lower() == "true":
+        return False
+    try:
+        from src.tool_security import owner_is_admin_or_single_user
+        return not owner_is_admin_or_single_user(owner)
+    except Exception:
+        # Fail closed: an unresolved privilege check must not widen the policy.
+        return True
+
+
+def _check_mail_host(host, owner: str, label: str) -> str | None:
+    """Reject unsafe or unresolved mail hosts before saving or testing them."""
+    from src.url_safety import check_outbound_host
+    ok, reason = check_outbound_host(host, block_private=_mail_private_blocked(owner))
+    if ok:
+        return None
+    logger.warning("Rejected %s mail host for owner=%r: %s", label, owner, reason)
+    # Resolver and exception details belong in server logs, never the response.
+    return f"Rejected {label} host: server address is not allowed or does not resolve"
+
 _SERVER_OWNED_OAUTH_FIELDS = {
     "oauth_provider",
     "oauth_access_token",
@@ -5510,6 +5543,12 @@ def setup_email_routes():
         if account_id:
             _assert_owns_account(account_id, owner)
 
+        for field, label in (("imap_host", "IMAP"), ("smtp_host", "SMTP")):
+            if data.get(field):
+                host_error = await run_in_threadpool(_check_mail_host, data[field], owner, label)
+                if host_error:
+                    return {"ok": False, "error": host_error}
+
         # Non-reply automation flags stay global. Away/auto-reply settings are
         # account-scoped when an account_id is supplied by the Email Settings UI.
         settings = _load_settings()
@@ -5648,6 +5687,11 @@ def setup_email_routes():
         smtp_port, port_err = _coerce_port(data.get("smtp_port"), 465)
         if port_err:
             return {"ok": False, "error": port_err}
+        for field, label in (("imap_host", "IMAP"), ("smtp_host", "SMTP")):
+            if data.get(field):
+                host_error = await run_in_threadpool(_check_mail_host, data[field], owner, label)
+                if host_error:
+                    return {"ok": False, "error": host_error}
         db = SessionLocal()
         try:
             _lock_email_account_owner_mutation(db, owner)
@@ -5693,6 +5737,11 @@ def setup_email_routes():
         """Update an email account. Passwords only overwrite if non-empty."""
         # Path param account_id — dep validated via Query, re-check the path-param value.
         _assert_owns_account(account_id, owner)
+        for field, label in (("imap_host", "IMAP"), ("smtp_host", "SMTP")):
+            if data.get(field):
+                host_error = await run_in_threadpool(_check_mail_host, data[field], owner, label)
+                if host_error:
+                    return {"ok": False, "error": host_error}
         from core.database import SessionLocal, EmailAccount
         db = SessionLocal()
         try:
