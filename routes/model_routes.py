@@ -29,6 +29,7 @@ from src.endpoint_resolver import (
     build_headers,
 )
 from src.auth_helpers import _auth_disabled, effective_user, owner_filter
+from src.url_safety import check_outbound_url
 
 logger = logging.getLogger(__name__)
 
@@ -1948,6 +1949,17 @@ def setup_model_routes(model_discovery):
         # keep those container-local when the frontend marks them as such.
         base_url = _rewrite_loopback_for_docker(base_url, container_local=_truthy(container_local))
 
+        # SSRF hardening: validate the user-supplied URL before any outbound
+        # request. Local-first means loopback/LAN endpoints are allowed by
+        # default; non-HTTP(S) schemes and the cloud metadata range are always
+        # rejected. Set MODELENDPOINT_BLOCK_PRIVATE_IPS=true for full lockdown.
+        ok, reason = check_outbound_url(
+            base_url,
+            block_private=os.getenv("MODELENDPOINT_BLOCK_PRIVATE_IPS", "false").lower() == "true",
+        )
+        if not ok:
+            raise HTTPException(400, f"Rejected endpoint URL: {reason}")
+
         # Auto-generate name from URL if not provided
         if not name.strip():
             name = base_url.replace("http://", "").replace("https://", "").split("/")[0]
@@ -2167,6 +2179,16 @@ def setup_model_routes(model_discovery):
         from src.endpoint_resolver import resolve_url
         base_url = resolve_url(base_url)
         base_url = _rewrite_loopback_for_docker(base_url)
+        # SSRF hardening: validate the user-supplied URL before any outbound
+        # request. Local-first means loopback/LAN endpoints are allowed by
+        # default; non-HTTP(S) schemes and the cloud metadata range are always
+        # rejected. Set MODELENDPOINT_BLOCK_PRIVATE_IPS=true for full lockdown.
+        ok, reason = check_outbound_url(
+            base_url,
+            block_private=os.getenv("MODELENDPOINT_BLOCK_PRIVATE_IPS", "false").lower() == "true",
+        )
+        if not ok:
+            raise HTTPException(400, f"Rejected endpoint URL: {reason}")
         requested_kind = _normalize_endpoint_kind(endpoint_kind)
         configured_timeout = _parse_positive_int(model_refresh_timeout, minimum=1, maximum=60)
         probe_timeout = _explicit_model_list_timeout(base_url, requested_kind, configured_timeout)
@@ -2487,6 +2509,15 @@ def setup_model_routes(model_discovery):
                             _new_base = _new_base[: -len(_suffix)].rstrip("/")
                     _new_base = _normalize_base(_new_base)
                     if _new_base:
+                        # SSRF hardening: PATCH rewrites the stored base_url, so
+                        # it needs the same guard as POST create/test — no
+                        # bypass through the update path.
+                        ok, reason = check_outbound_url(
+                            _new_base,
+                            block_private=os.getenv("MODELENDPOINT_BLOCK_PRIVATE_IPS", "false").lower() == "true",
+                        )
+                        if not ok:
+                            raise HTTPException(400, f"Rejected endpoint URL: {reason}")
                         ep.base_url = _new_base
             else:
                 ep.is_enabled = not ep.is_enabled

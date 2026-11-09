@@ -1275,6 +1275,7 @@ def _patch_create_deps(monkeypatch, db, settings=None):
     monkeypatch.setattr(model_routes, "_save_settings", lambda s: settings.update(s))
     monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda u: u)
     monkeypatch.setattr(auth_helpers, "get_current_user", lambda req: None)
+    monkeypatch.setattr(model_routes, "check_outbound_url", lambda *a, **k: (True, "ok"))
     return settings
 
 
