@@ -7,6 +7,7 @@ import shutil
 import uuid
 from pathlib import Path
 from fastapi import APIRouter, Request, File, UploadFile, HTTPException, Form
+from src.upload_handler import secure_filename
 from typing import List, Optional
 import logging
 from core.middleware import require_admin
@@ -149,20 +150,39 @@ def setup_upload_routes(upload_handler):
 
     def _resolve_upload_path(file_id: str) -> str:
         from src.constants import UPLOAD_DIR
-        upload_root = getattr(upload_handler, "upload_dir", UPLOAD_DIR)
-        direct = os.path.join(upload_root, file_id)
+        # Canonicalize the root once, with the same helper the containment
+        # checks use, so the string comparison below and _path_inside_upload_dir
+        # agree about what the root is (realpath, not normpath).
+        upload_root = _upload_root()
+        safe_id = secure_filename(os.path.basename(file_id))
+        direct = os.path.normpath(os.path.join(upload_root, safe_id))
+        if not direct.startswith(upload_root + os.sep) or not _path_inside_upload_dir(direct):
+            raise HTTPException(403, "Access denied")
         if os.path.lexists(direct):
-            if not _path_inside_upload_dir(direct):
-                raise HTTPException(403, "Access denied")
             if os.path.isfile(direct):
                 return direct
             raise HTTPException(404, "File not found")
 
+        # The stored uploads.json record may point at the file through a
+        # subdirectory or a symlinked directory. Resolve it through the same
+        # confinement check; an escape is a 403, not a "not found".
+        info = next(
+            (fi for fi in upload_handler._load_upload_index().values() if fi.get("id") == safe_id),
+            None,
+        )
+        stored_path = (info or {}).get("path")
+        if stored_path:
+            candidate = os.path.normpath(stored_path)
+            if not candidate.startswith(upload_root + os.sep) or not _path_inside_upload_dir(candidate):
+                raise HTTPException(403, "Access denied")
+            if os.path.isfile(candidate):
+                return candidate
+
         for root, _dirs, files in os.walk(upload_root, followlinks=False):
-            if file_id not in files:
+            if safe_id not in files:
                 continue
-            path = os.path.join(root, file_id)
-            if not _path_inside_upload_dir(path):
+            path = os.path.normpath(os.path.join(root, safe_id))
+            if not path.startswith(upload_root + os.sep) or not _path_inside_upload_dir(path):
                 raise HTTPException(403, "Access denied")
             if os.path.isfile(path):
                 return path
@@ -280,20 +300,27 @@ def setup_upload_routes(upload_handler):
             raise HTTPException(500, "Failed to get upload statistics")
 
     @router.get("/{file_id}")
+    @router.head("/{file_id}")
     async def download_file(request: Request, file_id: str, thumb: int = 0):
-        """Serve an uploaded non-image file by its ID."""
+        """Serve an uploaded non-image file by its ID.
+
+        HEAD is registered alongside GET so clients can probe existence and
+        size without downloading. FastAPI drops the body for HEAD, so the
+        response must not depend on side effects (this route has none).
+        """
         if not upload_handler.validate_upload_id(file_id):
             raise HTTPException(400, "Invalid file ID")
+        safe_file_id = secure_filename(os.path.basename(file_id))
         import mimetypes as _mt
         # Look up original filename and owner from uploads.json
-        original_name = file_id
+        original_name = safe_file_id
         # _load_upload_index() tolerates a missing/corrupt uploads.json (it falls
         # back to the .bak sibling, then to {}), so a truncated DB degrades to
         # "no metadata" instead of a 500 from an unhandled JSONDecodeError.
         db = upload_handler._load_upload_index()
-        info = next((fi for fi in db.values() if fi.get("id") == file_id), None)
+        info = next((fi for fi in db.values() if fi.get("id") == safe_file_id), None)
         if info:
-            original_name = info.get("name", file_id)
+            original_name = info.get("name", safe_file_id)
         auth_mgr = getattr(request.app.state, "auth_manager", None)
         auth_configured = bool(auth_mgr and auth_mgr.is_configured)
         current_user = effective_user(request)
@@ -303,7 +330,7 @@ def setup_upload_routes(upload_handler):
                 raise HTTPException(403, "Access denied")
             if file_owner != current_user and not auth_mgr.is_admin(current_user):
                 raise HTTPException(404, "File not found")
-        path = _resolve_upload_path(file_id)
+        path = _resolve_upload_path(safe_file_id)
         mime = (info or {}).get("mime") or _mt.guess_type(path)[0] or "application/octet-stream"
         from fastapi.responses import FileResponse
         return FileResponse(
