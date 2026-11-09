@@ -29,7 +29,7 @@ def _stub_heavy():
         sys.modules.setdefault(name, types.ModuleType(name))
 
 
-def _setup_isolated_db():
+def _setup_isolated_db(monkeypatch):
     import core.database as cd
     B = declarative_base()
 
@@ -56,10 +56,13 @@ def _setup_isolated_db():
 
     eng = create_engine("sqlite:///:memory:")
     B.metadata.create_all(eng)
-    cd.engine = eng
-    cd.SessionLocal = sessionmaker(bind=eng, autocommit=False, autoflush=False)
-    cd.ScheduledTask = ScheduledTask
-    cd.TaskRun = TaskRun
+    # monkeypatch, not plain assignment: leaving these attrs pointed at an
+    # in-memory engine that only knows the two task tables made later tests
+    # fail with "no such table: api_tokens" whenever they touched a real model.
+    monkeypatch.setattr(cd, "engine", eng, raising=False)
+    monkeypatch.setattr(cd, "SessionLocal", sessionmaker(bind=eng, autocommit=False, autoflush=False))
+    monkeypatch.setattr(cd, "ScheduledTask", ScheduledTask, raising=False)
+    monkeypatch.setattr(cd, "TaskRun", TaskRun, raising=False)
     return cd, ScheduledTask, TaskRun
 
 
@@ -75,7 +78,7 @@ def test_scheduler_utcnow_preserves_naive_utc_contract():
 def _drive_scheduler(monkeypatch, pre_start_setup=None):
     """Build a TaskScheduler bypassing __init__ and run start() + two polls."""
     _stub_heavy()
-    cd, ScheduledTask, TaskRun = _setup_isolated_db()
+    cd, ScheduledTask, TaskRun = _setup_isolated_db(monkeypatch)
 
     from src.task_scheduler import TaskScheduler
     sch = TaskScheduler.__new__(TaskScheduler)

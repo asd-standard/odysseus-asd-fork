@@ -80,8 +80,8 @@ The source tree reads **45** `ODYSSEUS_*` variables: 40 an operator may want to 
 
 | Variable | Default | Read in | What it does |
 |---|---|---|---|
-| `ODYSSEUS_DOCUMENT_OWNER` | `''` | `mcp_servers/email_server.py:183` | Owner stamped on documents the email MCP server creates. Stdio MCP tools get no authenticated user, so without this a draft is invisible. |
-| `ODYSSEUS_IMAP_TIMEOUT_SECONDS` | *unset* | `routes/email/email_helpers.py:1157` | IMAP socket timeout in seconds, clamped to 5-300. A non-numeric value falls back to 30 rather than failing. |
+| `ODYSSEUS_DOCUMENT_OWNER` | `''` | `mcp_servers/email_server.py:184` | Owner stamped on documents the email MCP server creates. Stdio MCP tools get no authenticated user, so without this a draft is invisible. |
+| `ODYSSEUS_IMAP_TIMEOUT_SECONDS` | *unset* | `routes/email/email_helpers.py:1158` | IMAP socket timeout in seconds, clamped to 5-300. A non-numeric value falls back to 30 rather than failing. |
 
 ### Calendar, notes and single-user mode
 
