@@ -105,6 +105,12 @@ def _setup_mocks(monkeypatch, db):
     fake_core_db = types.ModuleType("core.database")
     fake_core_db.SessionLocal = lambda: db
     fake_core_db.ModelEndpoint = _FakeModelEndpoint
+    # Our fork's agent tool package re-exports library tools, which import
+    # these names at module scope. Stubbing them keeps this SSRF test isolated
+    # without pulling in a real database.
+    fake_core_db.Document = _FakeModelEndpoint
+    fake_core_db.DocumentVersion = _FakeModelEndpoint
+    fake_core_db.Folder = _FakeModelEndpoint
     monkeypatch.setitem(sys.modules, "core.database", fake_core_db)
 
     monkeypatch.setattr(_url_safety, "check_outbound_url", _check_with_fake_resolver)
