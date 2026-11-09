@@ -7,7 +7,7 @@ Last updated: dev@e71f8ce | 2026-08-25
 This spec covers development and validation surfaces in:
 
 - `tests/`, `tests/conftest.py`, `tests/*.mjs`, and `tests/bombadil-spec.ts`;
-- `tests/run_focus.py`, `tests/run_order_report.py`, `tests/_taxonomy.py`, `tests/TESTING_STANDARD.md`, and `tests/LAYOUT_INVENTORY.md`;
+- `tests/run_focus.py`, `tests/run_order_report.py`, `tests/_taxonomy.py`, `tests/_shards.py`, `tests/TESTING_STANDARD.md`, `tests/README.md`, `tests/KNOWN_FAILURES.md`, and `tests/LAYOUT_INVENTORY.md`;
 - `pyproject.toml`;
 - `requirements.txt` and `requirements-optional.txt`;
 - `package.json` and `package-lock.json`;
@@ -37,11 +37,11 @@ Activated-venv `python -m pytest <test path>` is equivalent. System/global `pyte
 
 `tests/conftest.py` inserts the repo root on `sys.path` and conditionally stubs missing heavy/runtime dependencies such as SQLAlchemy, FastAPI, Starlette, Pydantic, httpx, bcrypt, and pyotp. Tests that need real dependencies use explicit imports/skips. Tests that stub `sys.modules`, environment variables, globals, or parent packages must restore them with `monkeypatch` or an equivalent cleanup pattern.
 
-The suite currently contains roughly 728 `test_*.py` files. Treat that count as a moving source metric, not a target; focused regression tests are still preferred for narrow changes.
+The suite currently contains roughly 750 `test_*.py` files and collects ~5.4k tests. Treat those counts as moving source metrics, not targets; focused regression tests are still preferred for narrow changes.
 
 Focused regression tests are preferred for narrow behavior changes. Broaden tests when touching shared contracts such as auth, owner filtering, OAuth/token custody, tool output, context building, provider calls, persistence, frontend rendering, or route/API shapes.
 
-`tests/run_focus.py` and `tests/_taxonomy.py` provide a local focused-run helper and category map. `.github/scripts/focused_test_guidance.py` maps changed files to suggested focused tests for PR review, while the configured full pytest CI job is authoritative. `tests/TESTING_STANDARD.md` documents expectations for targeted validation, and `tests/LAYOUT_INVENTORY.md` records the test-suite layout. CLI tests live under `tests/cli/`.
+`tests/run_focus.py` and `tests/_taxonomy.py` provide a local focused-run helper and category map. `.github/scripts/focused_test_guidance.py` maps changed files to suggested focused tests for PR review, while the configured full pytest CI job is authoritative. `tests/TESTING_STANDARD.md` documents expectations for targeted validation, and `tests/LAYOUT_INVENTORY.md` records the test-suite layout. CLI tests live under `tests/cli/`, and route-package shims keep their original flat import paths working (the email modules are the most recent example: `routes/email/` owns the code, `routes/email_*.py` are self-replacing shims so `monkeypatch`-based tests still patch the object the app uses). CI runs the suite as four `--shard N/M` sections; `tests/_shards.py` owns the partition and `tests/test_shards.py` pins the matrix in `.github/workflows/ci.yml` to `DEFAULT_SHARD_COUNT`.
 
 ## JS And UI Tests
 
