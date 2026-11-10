@@ -14,7 +14,7 @@ decided lives in the plan file referenced at the bottom.
 | `origin/main` | Upstream's curated release branch. **This fork tracks `main`, not `dev`.** |
 | `origin/dev` | Upstream's fast-moving branch (~767 commits ahead of `main` as of 2026-11-10). Read-only source of candidates. |
 | `local-odysseus` | The fork. Linear history on top of `origin/main`. |
-| `upstream/<YYYY-MM>` | One short-lived branch per intake round. Merged into `local-odysseus` when green. |
+| `upstream/<YYYY-MM>` | One short-lived branch per intake round (e.g. `upstream/2026-11`). Merged into `local-odysseus` when green. |
 
 `local-odysseus` is never force-pushed and never rebased. Ports land as
 ordinary commits on top, so the fork's history stays a readable record of what
@@ -149,6 +149,9 @@ These are pinned by tests; a port that breaks one is wrong, not the test:
 
 ## Ledger
 
-The per-commit record of the 2026-11 intake round is at
-`/home/asd/.opencode/plan/cherry-pick-plan.md`. For later rounds, add a new
-section (or a sibling file) rather than overwriting it.
+The per-commit record of each intake round lives in the repo:
+
+- [`docs/upstream/2026-11-intake.md`](docs/upstream/2026-11-intake.md) — the November 2026 round (24 commits).
+
+For later rounds, **add a new file** (`docs/upstream/2027-01-intake.md`, ...)
+rather than rewriting an existing one, and add the new section to this list.
