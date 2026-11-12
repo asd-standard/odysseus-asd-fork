@@ -8,7 +8,7 @@ import { byId } from './settings/dom.js';
 import {
   getSettingsRegistryIssues,
   isAdminManagedSettingsTab,
-} from './settings/registry.js';
+} from './settings/registry.js?v=20261112previewscroll1';
 import { bindSettingsSearch } from './settings/search.js';
 import { bindSettingsSidebar } from './settings/sidebar.js';
 import {

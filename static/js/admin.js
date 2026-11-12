@@ -3,7 +3,7 @@
 
 import uiModule from './ui.js';
 import settingsModule from './settings.js';
-import { initBackupAdmin, refreshBackupAdmin } from './backupAdmin.js';
+import { initBackupAdmin, refreshBackupAdmin } from './backupAdmin.js?v=20261112previewscroll1';
 import { providerLogo, providerLogoFromUrl } from './providers.js';
 import { sortModelObjects } from './modelSort.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
