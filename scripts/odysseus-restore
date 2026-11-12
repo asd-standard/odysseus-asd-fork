@@ -1,0 +1,495 @@
+#!/usr/bin/env python3
+"""odysseus-restore — restore a full-instance Odysseus backup.
+
+Full restore is a host-side operation because the running app cannot safely
+replace its own live database. The script stops the app container, keeps the
+current data directory as a timestamped rollback copy, restores the archive,
+fixes ownership/permissions, starts the stack and health-checks it.
+
+Examples:
+    sudo scripts/odysseus-restore --list
+    sudo scripts/odysseus-restore --verify /var/backups/odysseus/odysseus-full-auto-...tar.gz
+    sudo scripts/odysseus-restore --extract-to /tmp/restore-check --latest
+    sudo scripts/odysseus-restore --yes /var/backups/odysseus/odysseus-full-auto-...tar.gz
+    sudo scripts/odysseus-restore --yes --latest
+
+The archive format is created by Settings → Administration → Backup.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path, PurePosixPath
+
+ARCHIVE_RE = re.compile(r"^odysseus-full-(?:auto|manual)-\d{8}-\d{6}(?:-\d+)?\.tar\.gz$")
+SECRET_NAMES = {
+    ".app_key",
+    "auth.json",
+    "sessions.json",
+    "backup_settings.json",
+    "backup_state.json",
+}
+COUNT_TABLES = (
+    "sessions",
+    "chat_messages",
+    "documents",
+    "document_versions",
+    "notes",
+    "scheduled_tasks",
+    "task_runs",
+    "gallery_images",
+    "gallery_albums",
+    "memories",
+)
+
+
+def fail(message: str, code: int = 1) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_env(path: Path) -> dict:
+    values = {}
+    if not path.is_file():
+        return values
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            values[key] = value
+    except OSError as exc:
+        fail(f"could not read {path}: {exc}")
+    return values
+
+
+def fmt_size(value: int) -> str:
+    if value < 1024:
+        return f"{value} B"
+    if value < 1024 * 1024:
+        return f"{value / 1024:.1f} KiB"
+    if value < 1024 * 1024 * 1024:
+        return f"{value / (1024 * 1024):.1f} MiB"
+    return f"{value / (1024 * 1024 * 1024):.2f} GiB"
+
+
+def list_backups(backup_dir: Path) -> list[Path]:
+    if not backup_dir.is_dir():
+        return []
+    items = [p for p in backup_dir.iterdir() if p.is_file() and ARCHIVE_RE.match(p.name)]
+    items.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return items
+
+
+def print_backups(backup_dir: Path) -> None:
+    items = list_backups(backup_dir)
+    if not items:
+        print(f"No backups in {backup_dir}")
+        return
+    print(f"Backups in {backup_dir}:")
+    for path in items:
+        stat = path.stat()
+        stamp = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  {stamp}  {fmt_size(stat.st_size):>10}  {path.name}")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_archive(path: Path) -> dict:
+    if not path.is_file():
+        fail(f"backup not found: {path}")
+    if not ARCHIVE_RE.match(path.name):
+        fail(f"not an Odysseus full-backup name: {path.name}")
+
+    sha_path = Path(str(path) + ".sha256")
+    if sha_path.is_file():
+        try:
+            expected = sha_path.read_text(encoding="utf-8").split()[0].lower()
+        except (OSError, IndexError):
+            expected = ""
+        if re.fullmatch(r"[0-9a-f]{64}", expected or ""):
+            actual = sha256_file(path)
+            if actual != expected:
+                fail(
+                    f"checksum mismatch: expected {expected}, got {actual}. "
+                    "The archive is corrupt or incomplete."
+                )
+            print(f"checksum OK: {actual[:16]}…")
+    else:
+        print("warning: no .sha256 sidecar; only tar integrity will be checked")
+
+    try:
+        with tarfile.open(path, "r:gz") as archive:
+            members = archive.getmembers()
+            names = {member.name for member in members}
+            if "manifest.json" not in names:
+                fail("archive is missing manifest.json")
+            if not any(name == "data" or name.startswith("data/") for name in names):
+                fail("archive is missing the data/ directory")
+            manifest_file = archive.extractfile("manifest.json")
+            if manifest_file is None:
+                fail("archive manifest.json is unreadable")
+            manifest = json.load(manifest_file)
+            if not isinstance(manifest, dict) or manifest.get("format") != "odysseus-full-backup":
+                fail("archive manifest has an unexpected format")
+            for member in members:
+                pure = PurePosixPath(member.name)
+                if pure.is_absolute() or ".." in pure.parts:
+                    fail(f"unsafe archive member: {member.name!r}")
+                if member.issym() or member.islnk():
+                    fail(f"archive contains a link entry: {member.name!r}")
+                if not (member.isdir() or member.isfile()):
+                    fail(f"archive contains a special file: {member.name!r}")
+                if member.name != "manifest.json" and not (
+                    member.name == "data" or member.name.startswith("data/")
+                ):
+                    fail(f"archive contains an unexpected entry: {member.name!r}")
+    except (tarfile.TarError, OSError) as exc:
+        fail(f"could not read archive: {exc}")
+
+    return manifest
+
+
+def safe_extract(path: Path, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    try:
+        with tarfile.open(path, "r:gz") as archive:
+            for member in archive.getmembers():
+                pure = PurePosixPath(member.name)
+                if pure.is_absolute() or ".." in pure.parts:
+                    fail(f"unsafe archive member: {member.name!r}")
+                if member.issym() or member.islnk():
+                    fail(f"archive contains a link entry: {member.name!r}")
+                if not (member.isdir() or member.isfile()):
+                    fail(f"archive contains a special file: {member.name!r}")
+                if member.name != "manifest.json" and not (
+                    member.name == "data" or member.name.startswith("data/")
+                ):
+                    fail(f"archive contains an unexpected entry: {member.name!r}")
+
+                destination = target.joinpath(*pure.parts)
+                if member.isdir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    try:
+                        os.chmod(destination, member.mode & 0o777)
+                    except OSError:
+                        pass
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                source = archive.extractfile(member)
+                if source is None:
+                    fail(f"could not extract {member.name!r}")
+                with source, open(destination, "wb") as handle:
+                    shutil.copyfileobj(source, handle)
+                try:
+                    os.chmod(destination, member.mode & 0o777)
+                except OSError:
+                    pass
+    except (tarfile.TarError, OSError) as exc:
+        fail(f"extraction failed: {exc}")
+
+
+def check_database(data_dir: Path) -> None:
+    db_path = data_dir / "app.db"
+    if not db_path.is_file():
+        fail("restored data has no app.db")
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            result = connection.execute("PRAGMA integrity_check").fetchone()
+            if not result or str(result[0]).lower() != "ok":
+                fail(f"SQLite integrity check failed: {result!r}")
+            print("SQLite integrity: ok")
+            for table in COUNT_TABLES:
+                try:
+                    count = connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                    print(f"  {table}: {count}")
+                except sqlite3.Error:
+                    pass
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        fail(f"could not open restored app.db: {exc}")
+
+
+def run_compose(compose_dir: Path, project: str, args: list[str], check: bool = False) -> int:
+    command = ["docker", "compose", "-p", project, *args]
+    print("+ " + " ".join(command))
+    return subprocess.run(command, cwd=str(compose_dir), check=check).returncode
+
+
+def container_id(compose_dir: Path, project: str, service: str) -> str:
+    command = ["docker", "compose", "-p", project, "ps", "-q", service]
+    result = subprocess.run(
+        command, cwd=str(compose_dir), capture_output=True, text=True, check=False
+    )
+    return (result.stdout or "").strip().splitlines()[0] if result.stdout else ""
+
+
+def wait_for_health(compose_dir: Path, project: str, service: str, timeout: int = 240) -> bool:
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        cid = container_id(compose_dir, project, service)
+        if not cid:
+            last = "container not created"
+            time.sleep(3)
+            continue
+        result = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+                cid,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        status = (result.stdout or "").strip()
+        if status and status != last:
+            print(f"container status: {status}")
+            last = status
+        if status == "healthy":
+            return True
+        if status in {"exited", "dead"}:
+            return False
+        time.sleep(3)
+    return False
+
+
+def move_contents(source: Path, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for entry in os.scandir(source):
+        target = destination / entry.name
+        shutil.move(entry.path, target)
+
+
+def stash_data(data_dir: Path) -> Path:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stash = data_dir.with_name(f"{data_dir.name}.before-restore-{stamp}")
+    counter = 1
+    while stash.exists():
+        counter += 1
+        stash = data_dir.with_name(f"{data_dir.name}.before-restore-{stamp}-{counter}")
+    if data_dir.exists():
+        try:
+            os.rename(data_dir, stash)
+            print(f"previous data moved to {stash}")
+        except OSError:
+            stash.mkdir(parents=True, mode=0o700)
+            move_contents(data_dir, stash)
+            data_dir.rmdir()
+            print(f"previous data moved into {stash}")
+    return stash
+
+
+def restore_stash(stash: Path, data_dir: Path) -> None:
+    if data_dir.exists():
+        failed = data_dir.with_name(
+            f"{data_dir.name}.failed-restore-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        try:
+            os.rename(data_dir, failed)
+        except OSError:
+            failed.mkdir(parents=True, exist_ok=True)
+            move_contents(data_dir, failed)
+            data_dir.rmdir()
+        print(f"failed restore data kept at {failed}")
+    if stash.exists():
+        try:
+            os.rename(stash, data_dir)
+        except OSError:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            move_contents(stash, data_dir)
+            stash.rmdir()
+        print(f"rolled back to {data_dir}")
+
+
+def fix_permissions(data_dir: Path, uid: int, gid: int) -> None:
+    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+    for root, dirs, files in os.walk(data_dir):
+        if is_root:
+            try:
+                os.chown(root, uid, gid)
+            except OSError:
+                pass
+        for name in dirs:
+            path = Path(root) / name
+            if is_root:
+                try:
+                    os.chown(path, uid, gid)
+                except OSError:
+                    pass
+            try:
+                os.chmod(path, 0o700)
+            except OSError:
+                pass
+        for name in files:
+            path = Path(root) / name
+            if is_root:
+                try:
+                    os.chown(path, uid, gid)
+                except OSError:
+                    pass
+            if name in SECRET_NAMES or name.endswith(".db"):
+                try:
+                    os.chmod(path, 0o600)
+                except OSError:
+                    pass
+    try:
+        os.chmod(data_dir, 0o700)
+    except OSError:
+        pass
+    ssh_dir = data_dir / "ssh"
+    if ssh_dir.is_dir():
+        try:
+            os.chmod(ssh_dir, 0o700)
+        except OSError:
+            pass
+    for suffix in ("-journal", "-wal", "-shm"):
+        for path in data_dir.rglob(f"*{suffix}"):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="odysseus-restore",
+        description="Restore an Odysseus full-instance backup.",
+    )
+    parser.add_argument("archive", nargs="?", help="backup .tar.gz path")
+    parser.add_argument("--latest", action="store_true", help="use the newest backup")
+    parser.add_argument("--list", action="store_true", help="list available backups")
+    parser.add_argument("--verify", action="store_true", help="verify an archive only")
+    parser.add_argument("--extract-to", metavar="DIR", help="extract/verify into DIR without restoring")
+    parser.add_argument("--yes", action="store_true", help="confirm the destructive restore")
+    parser.add_argument("--compose-dir", default=None, help="repo/compose directory")
+    parser.add_argument("--data-dir", default=None, help="Odysseus data directory")
+    parser.add_argument("--backup-dir", default=None, help="host backup directory")
+    parser.add_argument("--project", default=None, help="Docker Compose project name")
+    parser.add_argument("--service", default="odysseus", help="Compose service name")
+    args = parser.parse_args()
+
+    script_root = Path(__file__).resolve().parent.parent
+    compose_dir = Path(args.compose_dir).expanduser().resolve() if args.compose_dir else script_root
+    env = load_env(compose_dir / ".env")
+
+    data_dir = Path(args.data_dir).expanduser() if args.data_dir else Path(
+        env.get("APP_DATA_DIR", "./data")
+    )
+    if not data_dir.is_absolute():
+        data_dir = (compose_dir / data_dir).resolve()
+    backup_dir = Path(args.backup_dir).expanduser() if args.backup_dir else Path(
+        env.get("APP_BACKUP_DIR", "/var/backups/odysseus")
+    )
+    if not backup_dir.is_absolute():
+        backup_dir = (compose_dir / backup_dir).resolve()
+    project = args.project or env.get("COMPOSE_PROJECT_NAME", "odysseus")
+    uid = int(env.get("PUID", "1002") or 1002)
+    gid = int(env.get("PGID", "1002") or 1002)
+
+    if args.list:
+        print_backups(backup_dir)
+        return 0
+
+    if args.latest:
+        items = list_backups(backup_dir)
+        if not items:
+            fail(f"no backups found in {backup_dir}")
+        archive_path = items[0]
+    elif args.archive:
+        archive_path = Path(args.archive).expanduser().resolve()
+    else:
+        fail("provide an archive path or --latest (or use --list)")
+
+    manifest = verify_archive(archive_path)
+    print(
+        "archive OK: "
+        f"{archive_path.name} · {manifest.get('created_at', '?')} · "
+        f"v{manifest.get('app_version', '?')} · {manifest.get('reason', '?')}"
+    )
+
+    if args.verify:
+        with tempfile.TemporaryDirectory(prefix="odysseus-verify-") as tmp:
+            safe_extract(archive_path, Path(tmp))
+            check_database(Path(tmp) / "data")
+        return 0
+
+    if args.extract_to:
+        target = Path(args.extract_to).expanduser().resolve()
+        if target.exists() and any(target.iterdir()):
+            fail(f"target is not empty: {target}")
+        safe_extract(archive_path, target)
+        check_database(target / "data")
+        print(f"extracted to {target}")
+        return 0
+
+    if not args.yes:
+        fail("restore is destructive; pass --yes after verifying the archive")
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        fail("run the restore with sudo so file ownership can be repaired")
+
+    print(f"restoring {archive_path.name}")
+    print(f"data dir: {data_dir}")
+    print(f"compose dir: {compose_dir}")
+    print(f"project: {project}")
+
+    # Validate/extract before stopping the app so a bad archive cannot cause
+    # downtime.
+    with tempfile.TemporaryDirectory(prefix="odysseus-restore-") as tmp:
+        extracted = Path(tmp)
+        safe_extract(archive_path, extracted)
+        check_database(extracted / "data")
+
+        run_compose(compose_dir, project, ["stop", args.service], check=False)
+        stash = stash_data(data_dir)
+        try:
+            shutil.copytree(extracted / "data", data_dir, dirs_exist_ok=True)
+            fix_permissions(data_dir, uid, gid)
+            code = run_compose(compose_dir, project, ["up", "-d", args.service], check=False)
+            if code != 0:
+                raise RuntimeError(f"docker compose up exited with {code}")
+            if not wait_for_health(compose_dir, project, args.service):
+                raise RuntimeError("the application did not become healthy")
+        except Exception as exc:
+            print(f"restore failed: {exc}", file=sys.stderr)
+            run_compose(compose_dir, project, ["stop", args.service], check=False)
+            restore_stash(stash, data_dir)
+            run_compose(compose_dir, project, ["up", "-d", args.service], check=False)
+            return 1
+
+    print("restore complete")
+    print(f"previous data kept at {stash}")
+    print("verify the app, then remove the stashed directory when satisfied")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

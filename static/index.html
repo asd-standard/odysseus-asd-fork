@@ -1477,6 +1477,10 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Users</span>
           </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="backup">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            <span>Backup</span>
+          </button>
           <button class="settings-nav-item admin-only" data-settings-tab="system">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v-.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"/></svg>
             <span>System</span>
@@ -2310,6 +2314,93 @@
         </div>
 
         <!-- ═══ SYSTEM TAB ═══ -->
+        <!-- ═══ BACKUP TAB (ADMIN) ═══ -->
+        <div data-settings-panel="backup" class="hidden">
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>Full Backups</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Automatic full-instance backups of every user, including account data and secrets. Admin only. Archives are written to the mounted backup folder, not inside the app data directory.</div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0;">
+              <div>
+                <div class="admin-toggle-label">Scheduled backups</div>
+                <div class="admin-toggle-sub">Run automatically while the app is running. Overdue backups run on the next startup.</div>
+              </div>
+              <label class="admin-switch" title="Enable scheduled full backups">
+                <input type="checkbox" id="backup-enabled">
+                <span class="admin-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-col" style="margin-top:8px;">
+              <div class="settings-row" style="align-items:flex-start;">
+                <label class="settings-label" style="margin-top:6px;">Backup folder<br><span style="font-weight:normal;font-size:10px;opacity:0.5;">container path</span></label>
+                <div style="flex:1;min-width:0;">
+                  <input type="text" id="backup-directory" class="settings-input" list="backup-root-list" placeholder="/app/backups" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+                  <datalist id="backup-root-list"></datalist>
+                  <div id="backup-roots" class="admin-toggle-sub" style="font-size:11px;margin-top:4px;line-height:1.5;"></div>
+                </div>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Every</label>
+                <input type="number" id="backup-interval" class="settings-input" min="1" max="168" step="1" style="max-width:96px;">
+                <span class="admin-toggle-sub" style="margin:0;">hours</span>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Keep</label>
+                <input type="number" id="backup-retention" class="settings-input" min="1" max="365" step="1" style="max-width:96px;">
+                <span class="admin-toggle-sub" style="margin:0;">automatic backups</span>
+              </div>
+
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0;">
+                <div>
+                  <div class="admin-toggle-label">Include mail attachments</div>
+                  <div class="admin-toggle-sub">Cached IMAP attachment extracts. Larger but preserves more.</div>
+                </div>
+                <label class="admin-switch"><input type="checkbox" id="backup-include-attachments"><span class="admin-slider"></span></label>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0;">
+                <div>
+                  <div class="admin-toggle-label">Include deep research</div>
+                  <div class="admin-toggle-sub">Saved research runs and reports.</div>
+                </div>
+                <label class="admin-switch"><input type="checkbox" id="backup-include-research"><span class="admin-slider"></span></label>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0;">
+                <div>
+                  <div class="admin-toggle-label">Notify on failure</div>
+                  <div class="admin-toggle-sub">Send a message to the local ntfy reminder topic when a backup fails.</div>
+                </div>
+                <label class="admin-switch"><input type="checkbox" id="backup-notify"><span class="admin-slider"></span></label>
+              </div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                <button class="admin-btn-add" id="backup-save-btn">Save settings</button>
+                <button class="admin-btn-sm" id="backup-run-btn">Run backup now</button>
+                <button class="admin-btn-sm" id="backup-refresh-btn">Refresh</button>
+              </div>
+              <div id="backup-msg" style="margin-top:6px;font-size:12px;"></div>
+              <div id="backup-status" class="admin-toggle-sub" style="margin-top:8px;font-size:11px;line-height:1.7;"></div>
+            </div>
+          </div>
+
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>Stored Backups</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Automatic backups rotate by the “Keep” count. Manual backups stay until deleted. Download full backups to another machine regularly; this server is not an offsite copy.</div>
+            <div id="backup-list" style="margin-top:8px;"></div>
+          </div>
+
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 3 3 9 9 9"/><path d="M12 7v5l3 2"/></svg>Full Restore</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">A full restore must stop the app, replace its data directory, fix ownership and restart. Run it on the host, not from this page. Download or locate a backup, then run:</div>
+            <div style="display:flex;gap:6px;align-items:flex-start;">
+              <code id="backup-restore-cmd" style="flex:1;min-width:0;display:block;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;"></code>
+              <button class="admin-btn-sm" id="backup-copy-restore-btn" title="Copy command">Copy</button>
+            </div>
+            <div id="backup-host-dir" class="admin-toggle-sub" style="margin-top:6px;font-size:11px;"></div>
+            <div class="admin-toggle-sub" style="margin-top:6px;font-size:11px;">The command keeps the previous data directory as <code>data.before-restore-&lt;timestamp&gt;</code> and rolls back automatically if the app fails to start.</div>
+          </div>
+        </div>
+
         <div data-settings-panel="system" class="hidden">
 
           <div class="admin-card" id="settings-system-logs-card">
@@ -2368,14 +2459,8 @@
             </div>
           </div>
           <div class="admin-card">
-            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Data Backup</h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Export or import your user data (memories, presets, settings, skills, preferences) as a JSON file.</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="admin-btn-add" id="adm-exportDataBtn">Export Data</button>
-              <button class="admin-btn-add" id="adm-importDataBtn">Import Data</button>
-              <input type="file" id="adm-importFile" accept=".json" style="display:none;">
-            </div>
-            <div id="adm-backupMsg" style="margin-top:6px;"></div>
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Full Backups</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Full-instance backups and restore are under <a href="#" data-go-settings-tab="backup" style="color:var(--accent, var(--red));text-decoration:underline;font-weight:600;">Administration → Backup</a>. The legacy JSON export/import API remains available for memories, presets, skills and preferences.</div>
           </div>
           <div class="admin-card admin-danger-card">
             <h2 style="color:#e55;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.75"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Danger Zone</h2>

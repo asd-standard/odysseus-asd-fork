@@ -1,11 +1,16 @@
 """Backup routes — export/import user data (memories, presets, settings, skills, preferences)."""
 
+import asyncio
 import json
 import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
+
 from core.middleware import require_admin
+from services.backup import BackupBusy, BackupError, BackupService
+from services.backup import config as backup_config
 from services.memory import MemoryStoreUnreadable
 from src.auth_helpers import get_current_user
 from src.settings import load_settings, save_settings, load_features, save_features
@@ -13,8 +18,15 @@ from src.settings import load_settings, save_settings, load_features, save_featu
 logger = logging.getLogger(__name__)
 
 
-def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRouter:
+def setup_backup_routes(
+    memory_manager,
+    preset_manager,
+    skills_manager,
+    backup_service: BackupService | None = None,
+) -> APIRouter:
     router = APIRouter(tags=["backup"])
+    if backup_service is None:
+        backup_service = BackupService()
 
     @router.get("/api/export")
     async def export_data(request: Request):
@@ -217,5 +229,113 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
             return {"ok": False, "message": "No recognized data found in the file"}
 
         return {"ok": True, "imported": imported, "message": f"Imported: {', '.join(imported)}"}
+
+    # ── Full-instance backups (admin console) ──────────────────────────
+
+    @router.get("/api/admin/backup/settings")
+    async def admin_backup_settings(request: Request):
+        """Return backup settings, state, mounted roots and disk information."""
+        require_admin(request)
+        return backup_service.status()
+
+    @router.put("/api/admin/backup/settings")
+    async def admin_backup_settings_update(request: Request, body: dict):
+        """Save backup settings after validating the destination folder."""
+        require_admin(request)
+        if not isinstance(body, dict):
+            raise HTTPException(400, "Expected a JSON object")
+
+        current = backup_config.load_settings()
+        candidate = dict(current)
+        for key in (
+            "enabled",
+            "directory",
+            "interval_hours",
+            "retention",
+            "include_attachments",
+            "include_research",
+            "notify_on_failure",
+        ):
+            if key in body:
+                candidate[key] = body[key]
+
+        try:
+            candidate["directory"] = backup_config.validate_directory(
+                str(candidate.get("directory") or "")
+            )
+            saved = backup_config.save_settings(candidate)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except Exception as exc:
+            logger.exception("Could not save backup settings")
+            raise HTTPException(500, f"Could not save backup settings: {exc}")
+
+        user = get_current_user(request)
+        logger.info(
+            "Backup settings updated by %s (enabled=%s, folder=%s, every=%sh, keep=%s)",
+            user or "admin",
+            saved.get("enabled"),
+            saved.get("directory"),
+            saved.get("interval_hours"),
+            saved.get("retention"),
+        )
+        return backup_service.status()
+
+    @router.get("/api/admin/backup/list")
+    async def admin_backup_list(request: Request):
+        """List existing full backups."""
+        require_admin(request)
+        try:
+            backups = await asyncio.to_thread(backup_service.list_backups)
+        except BackupError as exc:
+            raise HTTPException(400, str(exc))
+        return {"backups": backups}
+
+    @router.post("/api/admin/backup/run")
+    async def admin_backup_run(request: Request):
+        """Create a full backup immediately."""
+        require_admin(request)
+        user = get_current_user(request)
+        try:
+            info = await asyncio.to_thread(backup_service.create_backup, "manual")
+        except BackupBusy as exc:
+            raise HTTPException(409, str(exc))
+        except BackupError as exc:
+            raise HTTPException(500, str(exc))
+        except Exception as exc:
+            logger.exception("Manual backup failed")
+            raise HTTPException(500, f"Backup failed: {exc}")
+        logger.info("Manual backup created by %s: %s", user or "admin", info.get("name"))
+        return {"ok": True, "backup": info}
+
+    @router.get("/api/admin/backup/download/{name}")
+    async def admin_backup_download(request: Request, name: str):
+        """Download a backup archive (admin only; contains all users and secrets)."""
+        require_admin(request)
+        try:
+            path = await asyncio.to_thread(backup_service.resolve_backup, name)
+            await asyncio.to_thread(backup_service.mark_downloaded, name)
+        except BackupError as exc:
+            raise HTTPException(404, str(exc))
+        user = get_current_user(request)
+        logger.info("Full backup downloaded by %s: %s", user or "admin", name)
+        return FileResponse(
+            path,
+            media_type="application/gzip",
+            filename=name,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @router.delete("/api/admin/backup/{name}")
+    async def admin_backup_delete(request: Request, name: str):
+        """Delete a full backup and its sidecars."""
+        require_admin(request)
+        try:
+            await asyncio.to_thread(backup_service.delete_backup, name)
+        except BackupError as exc:
+            raise HTTPException(404, str(exc))
+        user = get_current_user(request)
+        logger.info("Full backup deleted by %s: %s", user or "admin", name)
+        return {"ok": True}
 
     return router

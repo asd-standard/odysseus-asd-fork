@@ -128,6 +128,14 @@ export const SETTINGS_PANELS = Object.freeze([
     keywords: ['users', 'accounts', 'admin'],
   }),
   definePanel({
+    id: 'backup',
+    label: 'Backup',
+    group: 'administration',
+    controller: 'admin',
+    adminOnly: true,
+    keywords: ['backup', 'restore', 'archive', 'snapshot', 'export'],
+  }),
+  definePanel({
     id: 'system',
     label: 'System',
     group: 'administration',
