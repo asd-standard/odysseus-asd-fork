@@ -368,6 +368,21 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "The same off switch for the in-process email pollers, when "
         "`odysseus-mail poll-scheduled` is the sole external driver.",
     ),
+    "ODYSSEUS_INPROCESS_BACKUPS": (
+        "Deployment and first run", USER,
+        "Set to 0, false, no or off to stop the in-process full-backup scheduler, "
+        "for deployments where backups are triggered externally.",
+    ),
+    "ODYSSEUS_NTFY_INTERNAL_URL": (
+        "Deployment and first run", INTERNAL,
+        "Base URL of the internal ntfy service used to notify about failed "
+        "full-instance backups. Defaults to the bundled compose service.",
+    ),
+    "ODYSSEUS_RESTORE_COMMAND": (
+        "Deployment and first run", USER,
+        "Command shown to admins for restoring a downloaded full backup. Point it "
+        "at the host-side `odysseus-restore` script and matching compose directory.",
+    ),
     "ODYSSEUS_STARTUP_WARMUPS": (
         "Deployment and first run", USER,
         "Opt-in startup pings of the configured model endpoints. Off by default "
@@ -399,6 +414,16 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
         "Data directories and paths", USER,
         "Dedicated override for the mail attachment store, which otherwise lives "
         "under the data directory.",
+    ),
+    "ODYSSEUS_BACKUP_ROOTS": (
+        "Data directories and paths", USER,
+        "Pathsep-separated directories the app may write full-instance backups "
+        "into. Docker mounts the chosen host folder at `/app/backups` by default.",
+    ),
+    "ODYSSEUS_BACKUP_HOST_DIR": (
+        "Data directories and paths", USER,
+        "Host path that corresponds to the container backup root, shown in the "
+        "admin console and used by the restore instructions.",
     ),
     "ODYSSEUS_INTERNAL_BASE": (
         "Auth and internal API", USER,

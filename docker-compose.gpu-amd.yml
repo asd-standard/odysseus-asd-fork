@@ -34,6 +34,10 @@ services:
       # land under /app/.local for the odysseus user. Persist them so a
       # container recreate does not silently remove installed serve engines.
       - ${APP_DATA_DIR:-./data}/local:/app/.local:z
+      # Admin full backups. Keep this outside APP_DATA_DIR so an archive never
+      # contains itself. The admin console can create subfolders below this
+      # root; set APP_BACKUP_DIR to another host path to use another disk/NAS.
+      - ${APP_BACKUP_DIR:-/var/backups/odysseus}:/app/backups:z
     extra_hosts:
       # Lets the container reach local services on the Docker host, including
       # Ollama at http://host.docker.internal:11434.
@@ -65,6 +69,11 @@ services:
       - CLEANUP_INTERVAL_HOURS=${CLEANUP_INTERVAL_HOURS:-24}
       - ODYSSEUS_INPROCESS_POLLERS=${ODYSSEUS_INPROCESS_POLLERS:-1}
       - ODYSSEUS_INPROCESS_TASKS=${ODYSSEUS_INPROCESS_TASKS:-1}
+      # Full-instance backups (Settings → Administration → Backup).
+      - ODYSSEUS_INPROCESS_BACKUPS=${ODYSSEUS_INPROCESS_BACKUPS:-1}
+      - ODYSSEUS_BACKUP_ROOTS=${ODYSSEUS_BACKUP_ROOTS:-/app/backups}
+      - ODYSSEUS_BACKUP_HOST_DIR=${APP_BACKUP_HOST_DIR:-}
+      - ODYSSEUS_RESTORE_COMMAND=${ODYSSEUS_RESTORE_COMMAND:-sudo /home/ldr/odysseus/app/scripts/odysseus-restore --latest}
       - ODYSSEUS_SCRIPT_HOST=${ODYSSEUS_SCRIPT_HOST:-localhost}
       - ODYSSEUS_CHAT_UPLOAD_MAX_BYTES=${ODYSSEUS_CHAT_UPLOAD_MAX_BYTES:-10485760}
       - ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES=${ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES:-104857600}

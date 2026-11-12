@@ -21,7 +21,7 @@ described as a switch that turns something off, the read rejects `0`, `false`,
 `no` and `off` and treats everything else as on. The `Default` column is the
 value the code falls back to when the variable is unset, quoted from the source.
 
-The source tree reads **45** `ODYSSEUS_*` variables: 40 an operator may want to set, and 5 that are internal - sentinels, fixture switches, capture hooks and development tooling. The internal ones are listed too, in their own section, so this page can be checked against the source mechanically.
+The source tree reads **50** `ODYSSEUS_*` variables: 44 an operator may want to set, and 6 that are internal - sentinels, fixture switches, capture hooks and development tooling. The internal ones are listed too, in their own section, so this page can be checked against the source mechanically.
 
 > This page is generated. Edit `scripts/generate_env_reference.py` and
 > re-run it; `tests/test_env_reference.py` enforces that the committed page
@@ -36,17 +36,21 @@ The source tree reads **45** `ODYSSEUS_*` variables: 40 an operator may want to 
 | `ODYSSEUS_ADMIN_PASSWORD` | `''` | `setup.py:101` (+3 more) | Password for the admin account created on first run. Setup refuses a value shorter than its minimum length rather than silently falling back. |
 | `ODYSSEUS_ADMIN_USER` | `''` | `setup.py:100` (+1 more) | Username for the admin account created on first run. Setup uses env vars first, then an interactive prompt, then a random password. |
 | `ODYSSEUS_ENABLE_HOST_DOCKER` | `''` | `src/host_docker_access.py:41` | Security-relevant. Must be exactly `true` before tools may use a mounted host Docker socket, and the socket itself must exist. |
+| `ODYSSEUS_INPROCESS_BACKUPS` | `'1'` | `services/backup/scheduler.py:52` | Set to 0, false, no or off to stop the in-process full-backup scheduler, for deployments where backups are triggered externally. |
 | `ODYSSEUS_INPROCESS_POLLERS` | `'1'` | `routes/email/email_pollers.py:1523` | The same off switch for the in-process email pollers, when `odysseus-mail poll-scheduled` is the sole external driver. |
-| `ODYSSEUS_INPROCESS_TASKS` | `'1'` | `app.py:1135` | Set to 0, false, no or off to stop the in-process scheduled-task runner, for deployments where an external worker drives task firing. |
-| `ODYSSEUS_MODEL_KEEPALIVE` | `''` | `app.py:1050` | Opt-in periodic model keep-alive pings. Off by default: the ping path runs model discovery, so stale LAN endpoints add background pressure. |
+| `ODYSSEUS_INPROCESS_TASKS` | `'1'` | `app.py:1160` | Set to 0, false, no or off to stop the in-process scheduled-task runner, for deployments where an external worker drives task firing. |
+| `ODYSSEUS_MODEL_KEEPALIVE` | `''` | `app.py:1075` | Opt-in periodic model keep-alive pings. Off by default: the ping path runs model discovery, so stale LAN endpoints add background pressure. |
+| `ODYSSEUS_RESTORE_COMMAND` | `'sudo /home/ldr/odysseus/app/scripts/odysseus-restore --latest'` | `services/backup/service.py:146` | Command shown to admins for restoring a downloaded full backup. Point it at the host-side `odysseus-restore` script and matching compose directory. |
 | `ODYSSEUS_SKIP_ADMIN_PROMPT` | *unset* | `setup.py:111` | Any non-empty value suppresses the interactive admin-credential prompt even on a TTY, for unattended installs. |
 | `ODYSSEUS_SLOW_REQUEST_LOG_SECONDS` | `'0.75'` | `app.py:232` | Request duration in seconds above which the middleware logs a slow-request warning. |
-| `ODYSSEUS_STARTUP_WARMUPS` | `''` | `app.py:1012` | Opt-in startup pings of the configured model endpoints. Off by default because they compete with the first seconds of UI use. |
+| `ODYSSEUS_STARTUP_WARMUPS` | `''` | `app.py:1037` | Opt-in startup pings of the configured model endpoints. Off by default because they compete with the first seconds of UI use. |
 
 ### Data directories and paths
 
 | Variable | Default | Read in | What it does |
 |---|---|---|---|
+| `ODYSSEUS_BACKUP_HOST_DIR` | `''` | `services/backup/config.py:72` | Host path that corresponds to the container backup root, shown in the admin console and used by the restore instructions. |
+| `ODYSSEUS_BACKUP_ROOTS` | `'/app/backups'` | `services/backup/config.py:52` | Pathsep-separated directories the app may write full-instance backups into. Docker mounts the chosen host folder at `/app/backups` by default. |
 | `ODYSSEUS_DATA_DIR` | `get_default_data_dir()` | `src/constants.py:12` | Root directory for every persisted file. Prefer this over the per-path overrides; the rest of `src/constants.py` derives from it. |
 | `ODYSSEUS_MAIL_ATTACHMENTS_DIR` | `os.path.join(DATA_DIR, 'mail-attachments')` | `src/constants.py:57` | Dedicated override for the mail attachment store, which otherwise lives under the data directory. |
 
@@ -128,6 +132,12 @@ The source tree reads **45** `ODYSSEUS_*` variables: 40 an operator may want to 
 
 Listed for completeness. Setting one of these on a real install is either a no-op or a way to break something quietly.
 
+### Deployment and first run
+
+| Variable | Default | Read in | What it does |
+|---|---|---|---|
+| `ODYSSEUS_NTFY_INTERNAL_URL` | `'http://ntfy:80'` | `services/backup/service.py:410` | Base URL of the internal ntfy service used to notify about failed full-instance backups. Defaults to the bundled compose service. |
+
 ### Model routing and providers
 
 | Variable | Default | Read in | What it does |
@@ -163,7 +173,7 @@ reads three ways, because no single pattern covers the codebase:
   lines, so one read lives inside a string literal.
 
 The three passes are not redundancy. A line-based grep for a direct
-`os.environ.get("ODYSSEUS_...` call finds 32 of the 45 variables on this
+`os.environ.get("ODYSSEUS_...` call finds 36 of the 50 variables on this
 page. What it misses is reads through an env-reader helper, reads whose call
 spans more than one line, reads whose variable name is held in a module
 constant, and reads through a mapping passed in as an argument - which is the
