@@ -151,7 +151,7 @@ These are pinned by tests; a port that breaks one is wrong, not the test:
 
 The per-commit record of each intake round lives in the repo:
 
-- [`docs/upstream/2026-11-intake.md`](docs/upstream/2026-11-intake.md) — the November 2026 round (24 commits).
+- [`specs/upstream/2026-11-intake.md`](specs/upstream/2026-11-intake.md) — the November 2026 round (24 commits).
 
-For later rounds, **add a new file** (`docs/upstream/2027-01-intake.md`, ...)
+For later rounds, **add a new file** (`specs/upstream/2027-01-intake.md`, ...)
 rather than rewriting an existing one, and add the new section to this list.
