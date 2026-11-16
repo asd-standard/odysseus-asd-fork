@@ -497,7 +497,8 @@ def test_applying_a_dock_announces_the_single_column_rule():
     assert "odysseus:edge-docked" in SNAP
     assert "detail: { id: windowId, side }" in SNAP
     assert "addEventListener('odysseus:edge-docked'" in MM
-    assert "requestAnimationFrame(() => _collapseOtherDockedColumns(id))" in MM
+    assert "_collapseOtherDockedColumns(id);" in MM
+    assert "_collapseEditorForDockedColumn(id, side);" in MM
     helper = MM[MM.index("function _collapseOtherDockedColumns("):]
     helper = helper[: helper.index("\n}")]
     assert "modal-left-docked" in helper
@@ -510,7 +511,31 @@ def test_hidden_docked_windows_do_not_reserve_workspace_padding():
     fn = fn[: fn.index("\n}")]
     assert "el.classList.contains('hidden')" in fn
     assert "el.classList.contains('modal-minimized')" in fn
+    assert "el.classList.contains('modal-closing')" in fn
     assert "cs.display === 'none'" in fn
+
+
+def test_a_docked_column_replaces_the_editor_except_the_email_split():
+    helper = MM[MM.index("function _collapseEditorForDockedColumn("):]
+    helper = helper[: helper.index("\n}")]
+    assert "_isEmailWindow(newId) && resolvedSide === 'left'" in helper
+    assert "_collapseLooseWindow('doc-panel')" in helper
+    # Called both for drag-time docking and for the deferred open-time check.
+    assert "_collapseEditorForDockedColumn(id, side)" in MM
+    assert "_collapseEditorForDockedColumn(childId)" in MM
+
+
+def test_library_open_actions_collapse_the_library_instead_of_closing_it():
+    assert "function libraryCollapseForDocument()" in LIB
+    assert "Modals.minimize('doclib-modal')" in LIB
+    doc_body = LIB[LIB.index("async function libraryOpenDocument(doc)"):]
+    doc_body = doc_body[: doc_body.index("async function libraryOpenInSession")]
+    assert "libraryCollapseForDocument();" in doc_body
+    assert "closeLibrary();" not in doc_body
+    session_body = LIB[LIB.index("async function libraryOpenInSession(doc)"):]
+    session_body = session_body[: session_body.index("async function libraryImportDocument")]
+    assert "libraryCollapseForDocument();" in session_body
+    assert "closeLibrary();" not in session_body
 
 
 def test_dock_is_a_vertical_bar_anchored_to_the_chat_corner():

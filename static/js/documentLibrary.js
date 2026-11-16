@@ -1759,8 +1759,20 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     if (legacy) legacy.style.display = 'none';
   }
 
-  async function libraryOpenDocument(doc) {
+  // Opening a document from the Library is not a dismissal: park the Library
+  // as a dock chip so it can be restored, and release its dock padding before
+  // the editor lays out its split. Falls back to a real close only when the
+  // manager cannot minimize the window.
+  function libraryCollapseForDocument() {
+    if (!_libraryOpen) return;
+    try {
+      if (Modals.minimize('doclib-modal')) return;
+    } catch (_) {}
     closeLibrary();
+  }
+
+  async function libraryOpenDocument(doc) {
+    libraryCollapseForDocument();
     // Orphaned doc (session deleted) — just open in editor without switching session
     if (!doc.session_id) {
       _loadDocument(doc.id);
@@ -1776,7 +1788,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
   /** Open a document in its linked session */
   async function libraryOpenInSession(doc) {
     if (!doc.session_id) return;
-    closeLibrary();
+    libraryCollapseForDocument();
 
     // Step 1: switch session if needed and wait for it to load
     const currentSessionId = sessionModule && sessionModule.getCurrentSessionId();
@@ -1866,7 +1878,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       });
       if (!res.ok) throw new Error('Failed to create document');
       const created = await res.json();
-      closeLibrary();
+      libraryCollapseForDocument();
       _addDocToTabs(created, sessionId);
       if (!_isOpenFn()) _openPanel();
 
@@ -4499,6 +4511,9 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
 
     // Escape key
     _libraryEscHandler = (e) => {
+      // A collapsed Library chip must not be destroyed by Escape while another
+      // window is in front.
+      if (Modals.isMinimized('doclib-modal')) return;
       if (e.key === 'Escape') {
         // Close the preview panel first, then the modal on a second Escape.
         if (_libraryPreviewId) {

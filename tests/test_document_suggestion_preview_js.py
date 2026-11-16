@@ -545,3 +545,42 @@ def test_window_keeps_a_short_line_whole():
     assert out["end"] == len(text)
     assert out["clippedLeft"] is False
     assert out["clippedRight"] is False
+
+
+# --------------------------------------------------------------------------
+# Preview mode → review in Write → return to Preview
+# --------------------------------------------------------------------------
+
+
+def test_suggestion_forces_write_mode_and_remembers_preview():
+    ensure = _function_from(DOC_JS, "function _ensureWriteModeForSuggestion()")
+    assert "_suggestionReturnToPreview = true" in ensure
+    assert "_suggestionReturnDocId = activeDocId" in ensure
+    assert "_setMarkdownPreviewActive(false, { remember: false, syncScroll: true })" in ensure
+    # Both suggestion entry paths arm it before rendering the card/diff.
+    for signature in ("function _restoreSuggestionsFromStorage(", "export function handleDocSuggestions("):
+        fn = _function_from(DOC_JS, signature)
+        assert "_ensureWriteModeForSuggestion();" in fn
+        assert fn.index("_ensureWriteModeForSuggestion();") < fn.index("_showCurrentSuggestion();")
+
+
+def test_draining_suggestions_returns_to_preview():
+    leave = _function_from(DOC_JS, "function _exitSuggestionPreview()")
+    assert "_suggestionReturnToPreview" in leave
+    assert "activeDocId === _suggestionReturnDocId" in leave
+    assert "_setMarkdownPreviewActive(true, { remember: false, syncScroll: true })" in leave
+    assert "_suggestionReturnToPreview = false" in leave
+
+
+def test_preview_toggle_is_blocked_while_reviewing():
+    toggle = _function_from(DOC_JS, "function toggleMarkdownPreview()")
+    assert "next && _suggestionPreviewActive" in toggle
+    assert "Finish reviewing the suggestion first" in toggle
+    setter = _function_from(DOC_JS, "function _setMarkdownPreviewActive(")
+    assert "if (active && _suggestionPreviewActive) return;" in setter
+
+
+def test_accepted_suggestions_keep_the_textarea_in_sync():
+    apply = _function_from(DOC_JS, "function _applySuggestion(")
+    assert "_suggestionPreviewOriginal = updated;" in apply
+    assert "if (textarea) textarea.value = updated;" in apply

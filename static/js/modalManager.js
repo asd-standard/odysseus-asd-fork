@@ -1306,6 +1306,29 @@ function _collapseLooseWindow(id) {
   minimize(id);
 }
 
+function _isEmailWindow(id) {
+  return id === 'email-lib-modal' || String(id || '').startsWith('email-reader-');
+}
+
+/**
+ * The document editor occupies the right-hand split without being an
+ * edge-docked modal. It still counts as a column: any other docked window
+ * replaces it, except Email's deliberate left-side reply split.
+ */
+function _collapseEditorForDockedColumn(newId, side) {
+  if (!newId || newId === 'doc-panel') return;
+  const el = _windowEl(newId);
+  const resolvedSide = side
+    || (el && (el.classList.contains('modal-left-docked') || el.classList.contains('email-snap-left'))
+      ? 'left' : 'right');
+  if (_isEmailWindow(newId) && resolvedSide === 'left') return;
+  const state = _state.get('doc-panel');
+  const pane = _windowEl('doc-panel');
+  if (!state || !pane) return;
+  if (pane.classList.contains('hidden') || pane.classList.contains('modal-minimized')) return;
+  _collapseLooseWindow('doc-panel');
+}
+
 /** Single-dock rule: only one edge-docked column may stay visible. */
 function _collapseOtherDockedColumns(newId) {
   const els = document.querySelectorAll(
@@ -1376,8 +1399,12 @@ function _scheduleColumnReconcile(childId) {
       if (attempt < 2) { setTimeout(() => check(attempt + 1), 40); return; }
       return;
     }
-    if (childId === 'doc-panel') _collapseOtherVisibleWindows(childId);
-    else _collapseOtherVisibleColumns(childId);
+    if (childId === 'doc-panel') {
+      _collapseOtherVisibleWindows(childId);
+    } else {
+      _collapseOtherVisibleColumns(childId);
+      _collapseEditorForDockedColumn(childId);
+    }
   };
   setTimeout(() => check(0), 0);
 }
@@ -1529,7 +1556,11 @@ if (typeof window !== 'undefined') {
   window.addEventListener('odysseus:edge-docked', (e) => {
     const id = e && e.detail && e.detail.id;
     if (!id) return;
-    requestAnimationFrame(() => _collapseOtherDockedColumns(id));
+    const side = e.detail && e.detail.side;
+    requestAnimationFrame(() => {
+      _collapseOtherDockedColumns(id);
+      _collapseEditorForDockedColumn(id, side);
+    });
   });
 }
 

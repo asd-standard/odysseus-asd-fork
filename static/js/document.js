@@ -7207,6 +7207,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   /** Tear down the retained pane and drop the window state. */
   function _destroyPanel() {
     isOpen = false;
+    try { _exitSuggestionPreview(); } catch (_) {}
+    _suggestionReturnToPreview = false;
+    _suggestionReturnDocId = null;
     isCollapsed = false;
     _collapsedUi = null;
     _minimizedDocId = null;
@@ -7247,6 +7250,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       return;
     }
     isOpen = false;
+    // Restore the real document text before saving/closing so a pending diff
+    // preview is never written to disk. The return-to-preview step is skipped
+    // because isOpen is already false.
+    try { _exitSuggestionPreview(); } catch (_) {}
+    _suggestionReturnToPreview = false;
+    _suggestionReturnDocId = null;
     // Leaving the foreground: hand the screen back to whatever this window
     // displaced (a minimize hands it back; a close restores it too).
     try { Modals.notifyLeft('doc-panel') } catch (_) {}
@@ -8508,6 +8517,12 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   // ── Inline Suggestion Comments (Google Docs style) ──
 
   let _activeSuggestions = []; // [{ id, find, replace, reason, highlightEl, bubbleEl }]
+  // If the user asked for the suggestion while reading in Markdown Preview,
+  // temporarily move to Write so the existing diff/card flow is visible, then
+  // return to Preview when the batch drains. The document's saved mode is not
+  // changed (both transitions use remember:false).
+  let _suggestionReturnToPreview = false;
+  let _suggestionReturnDocId = null;
 
   /** Persist suggestions to localStorage for the active doc */
   function _saveSuggestionsToStorage() {
@@ -8530,6 +8545,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _activeSuggestions = data.map(s => ({ id: s.id, find: s.find, replace: s.replace, reason: s.reason, cardEl: null }));
       _suggestionTotal = _activeSuggestions.length;
       _suggestionIndex = 0;
+      _ensureWriteModeForSuggestion();
       _showCurrentSuggestion();
     } catch {}
   }
@@ -8568,6 +8584,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     _saveSuggestionsToStorage();
 
+    // The diff is an editor-layer overlay, so make sure the Write surface is
+    // visible before the card/diff flow starts.
+    _ensureWriteModeForSuggestion();
+
     // If nothing was pending before, kick off the visual flow. Otherwise the
     // currently-shown suggestion stays on screen and the queue size update is
     // reflected in the next card's header.
@@ -8586,6 +8606,20 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         }
       }
     }
+  }
+
+  /**
+   * A suggestion is rendered as an in-editor diff, so a read-only Markdown
+   * Preview would hide it. Switch to Write for the review and remember to
+   * return to Preview once the queue drains.
+   */
+  function _ensureWriteModeForSuggestion() {
+    if (_suggestionPreviewActive) return;
+    const preview = document.getElementById('doc-md-preview');
+    if (!preview || preview.style.display === 'none') return;
+    _suggestionReturnToPreview = true;
+    _suggestionReturnDocId = activeDocId || null;
+    _setMarkdownPreviewActive(false, { remember: false, syncScroll: true });
   }
 
   /** Render the current suggestion card (one at a time) + inline diff in document */
@@ -9257,6 +9291,18 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       }
       syncGutterScroll();
     }
+
+    // If the suggestion was requested while reading in Markdown Preview, put
+    // the reader back there with the accepted/unchanged document rendered.
+    const returnToPreview = _suggestionReturnToPreview
+      && _suggestionReturnDocId
+      && activeDocId === _suggestionReturnDocId
+      && isOpen;
+    _suggestionReturnToPreview = false;
+    _suggestionReturnDocId = null;
+    if (returnToPreview) {
+      _setMarkdownPreviewActive(true, { remember: false, syncScroll: true });
+    }
   }
 
   // ---- Diff mode (line-level review) ----
@@ -9832,6 +9878,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (_suggestionPreviewDocId && docs.has(_suggestionPreviewDocId)) {
         docs.get(_suggestionPreviewDocId).content = updated;
       }
+      // Also keep the hidden textarea/model in sync with the accepted content
+      // (not the diff) so a Save during review cannot persist the stale text.
+      if (textarea) textarea.value = updated;
     } else if (textarea) {
       textarea.value = updated;
       syncHighlighting();
@@ -10882,6 +10931,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const wrap = document.getElementById('doc-editor-wrap');
     const textarea = document.getElementById('doc-editor-textarea');
     if (!preview || !wrap || !textarea) return;
+    // An in-editor suggestion diff needs the Write surface; a programmatic
+    // preview refresh must not hide it while the queue is being reviewed.
+    if (active && _suggestionPreviewActive) return;
 
     const wasActive = preview.style.display !== 'none';
     let targetRatio = ratio;
@@ -10933,6 +10985,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   function toggleMarkdownPreview() {
     const preview = document.getElementById('doc-md-preview');
     const next = !(preview && preview.style.display !== 'none');
+    if (next && _suggestionPreviewActive) {
+      if (uiModule?.showToast) uiModule.showToast('Finish reviewing the suggestion first');
+      return;
+    }
     _setMarkdownPreviewActive(next, { syncScroll: true });
   }
 

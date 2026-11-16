@@ -46,7 +46,9 @@ function _hasOtherDockedWindow(side, owner) {
     // same side), but it must NOT keep the workspace padding reserved. Without
     // this, collapsing the last visible column left an empty strip that
     // squeezed the chat next to a tiled/floating window.
-    if (el.classList.contains('hidden') || el.classList.contains('modal-minimized')) return false;
+    if (el.classList.contains('hidden')
+        || el.classList.contains('modal-minimized')
+        || el.classList.contains('modal-closing')) return false;
     try {
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden') return false;
