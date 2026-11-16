@@ -14399,9 +14399,27 @@ mark.doc-find-mark.current {
 }
 .doc-suggestion-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   /* Buttons stay pinned to the bottom of the card. */
   flex: 0 0 auto;
+}
+.doc-suggestion-edit-btn {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  opacity: 0.85;
+  transition: background 0.1s, opacity 0.1s;
+}
+.doc-suggestion-edit-btn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 .doc-suggestion-accept,
 .doc-suggestion-dismiss {
@@ -14434,6 +14452,113 @@ mark.doc-find-mark.current {
   from { opacity: 0; transform: translateX(10px); }
   to { opacity: 1; transform: translateX(0); }
 }
+/* ---- Inline suggestion editor (edit the replacement before accepting) ---- */
+.doc-suggestion-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 10px 48px;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+.doc-suggestion-editor-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+.doc-suggestion-editor-hint {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.45;
+  white-space: nowrap;
+}
+.doc-suggestion-editor-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.5;
+  flex: 0 0 auto;
+}
+.doc-suggestion-editor-old {
+  flex: 0 1 auto;
+  max-height: 22%;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 7px 9px;
+  border-radius: 4px;
+  border-left: 3px solid color-mix(in srgb, var(--red) 70%, transparent);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+.doc-suggestion-editor-input {
+  flex: 1 1 auto;
+  min-height: 100px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--green) 55%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--green) 5%, var(--bg));
+  color: var(--fg);
+  caret-color: var(--fg);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  outline: none;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.doc-suggestion-editor-input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 22%, transparent);
+}
+.doc-suggestion-editor-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.doc-suggestion-editor-actions button {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.doc-suggestion-editor-actions button:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.doc-suggestion-editor-actions .doc-suggestion-edit-done {
+  border-color: var(--accent, var(--red));
+  background: var(--accent, var(--red));
+  color: #fff;
+}
+.doc-suggestion-editor-actions .doc-suggestion-edit-done:hover {
+  filter: brightness(1.12);
+}
+@media (max-width: 768px) {
+  .doc-suggestion-editor { padding-left: 12px; }
+  .doc-suggestion-editor-hint { display: none; }
+}
+
 /* Mobile: suggestion card overlays top of editor (no room on side) */
 @media (max-width: 768px) {
   .doc-suggestion-card {

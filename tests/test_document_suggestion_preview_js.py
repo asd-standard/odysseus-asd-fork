@@ -584,3 +584,38 @@ def test_accepted_suggestions_keep_the_textarea_in_sync():
     apply = _function_from(DOC_JS, "function _applySuggestion(")
     assert "_suggestionPreviewOriginal = updated;" in apply
     assert "if (textarea) textarea.value = updated;" in apply
+
+
+# --------------------------------------------------------------------------
+# Editing the suggested replacement before accepting it
+# --------------------------------------------------------------------------
+
+
+def test_suggestion_card_exposes_an_edit_action():
+    assert "doc-suggestion-edit-btn" in SHOW_CURRENT
+    assert "_startSuggestionEdit(sugg)" in SHOW_CURRENT
+    # Accept/Next/Prev/Accept-All all settle the open editor first.
+    assert "_commitSuggestionEdit();" in SHOW_CURRENT
+    assert "_cancelSuggestionEdit();" in SHOW_CURRENT
+
+
+def test_suggestion_editor_edits_replace_not_the_diff_rows():
+    start = _function_from(DOC_JS, "function _renderSuggestionEditor(")
+    assert "_suggestionEditing = { id: sugg.id, originalReplace: sugg.replace || '' }" in DOC_JS
+    assert "sugg.replace = input.value;" in start
+    assert "_saveSuggestionsToStorage();" in start
+    assert "sugg.find" in start  # old text is shown read-only
+    commit = _function_from(DOC_JS, "function _commitSuggestionEdit()")
+    assert "_saveSuggestionsToStorage();" in commit
+    assert "_renderSuggestionPreview(sugg)" in commit
+    cancel = _function_from(DOC_JS, "function _cancelSuggestionEdit()")
+    assert "_suggestionEditing.originalReplace" in cancel
+
+
+def test_suggestion_editor_is_cleared_on_every_exit():
+    leave = _function_from(DOC_JS, "function _exitSuggestionPreview()")
+    assert "_removeSuggestionEditor();" in leave
+    clear = _function_from(DOC_JS, "function clearAllSuggestions()")
+    assert "_removeSuggestionEditor();" in clear
+    assert ".doc-suggestion-editor {" in CSS
+    assert ".doc-suggestion-editor-input" in CSS

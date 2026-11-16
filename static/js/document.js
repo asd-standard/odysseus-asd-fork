@@ -8517,6 +8517,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   // ── Inline Suggestion Comments (Google Docs style) ──
 
   let _activeSuggestions = []; // [{ id, find, replace, reason, highlightEl, bubbleEl }]
+  // Inline suggestion-text editor: { id, originalReplace } while the user is
+  // editing the proposed replacement on the editor surface.
+  let _suggestionEditing = null;
+  let _suggestionEditSaveTimer = null;
   // If the user asked for the suggestion while reading in Markdown Preview,
   // temporarily move to Write so the existing diff/card flow is visible, then
   // return to Preview when the batch drains. The document's saved mode is not
@@ -8807,6 +8811,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       </div>
       <div class="doc-suggestion-reason">${_esc(sugg.reason)}</div>
       <div class="doc-suggestion-actions">
+        <button class="doc-suggestion-edit-btn" title="Edit the suggested replacement">Edit</button>
         <button class="doc-suggestion-accept">Accept</button>
         <button class="doc-suggestion-dismiss">Skip</button>
         ${remaining > 1 ? '<button class="doc-suggestion-accept-all">Accept All</button>' : ''}
@@ -8815,7 +8820,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
     // Wire buttons
     card.querySelector('.doc-suggestion-close').addEventListener('click', clearAllSuggestions);
+    card.querySelector('.doc-suggestion-edit-btn').addEventListener('click', () => {
+      _startSuggestionEdit(sugg);
+    });
     card.querySelector('.doc-suggestion-prev').addEventListener('click', () => {
+      _commitSuggestionEdit();
       const current = _activeSuggestions.shift();
       _activeSuggestions.push(current);
       const prev = _activeSuggestions.pop();
@@ -8824,23 +8833,27 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _showCurrentSuggestion();
     });
     card.querySelector('.doc-suggestion-next').addEventListener('click', () => {
+      _commitSuggestionEdit();
       const current = _activeSuggestions.shift();
       _activeSuggestions.push(current);
       _suggestionIndex = (_suggestionIndex + 1) % _suggestionTotal;
       _showCurrentSuggestion();
     });
     card.querySelector('.doc-suggestion-accept').addEventListener('click', () => {
+      _commitSuggestionEdit();
       _applySuggestion(sugg);
       _activeSuggestions.shift();
       _animateNext();
     });
     card.querySelector('.doc-suggestion-dismiss').addEventListener('click', () => {
+      _cancelSuggestionEdit();
       _activeSuggestions.shift();
       _animateNext();
     });
     const acceptAllBtn = card.querySelector('.doc-suggestion-accept-all');
     if (acceptAllBtn) {
       acceptAllBtn.addEventListener('click', () => {
+        _commitSuggestionEdit();
         for (const s of _activeSuggestions) _applySuggestion(s);
         _activeSuggestions = [];
         _animateNext();
@@ -8884,6 +8897,139 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (textarea) textarea.removeEventListener('scroll', _reposition);
       window.removeEventListener('resize', _reposition);
     };
+  }
+
+  // ── Inline editing of the suggested replacement ──────────────────────────
+  //
+  // The diff rows are line-level and may include surrounding context, so they
+  // are not a safe source for `replace`. Instead, Edit opens a dedicated
+  // surface on the same editor overlay: the old span (read-only) and an
+  // editable textarea containing exactly `sugg.replace`.
+
+  function _suggestionEditorEl() {
+    return document.getElementById('doc-suggestion-editor');
+  }
+
+  function _removeSuggestionEditor() {
+    if (_suggestionEditSaveTimer) {
+      clearTimeout(_suggestionEditSaveTimer);
+      _suggestionEditSaveTimer = null;
+    }
+    const editor = _suggestionEditorEl();
+    if (editor) editor.remove();
+    const pre = _suggestionPreviewEl();
+    if (pre) pre.style.display = '';
+    _suggestionEditing = null;
+  }
+
+  function _renderSuggestionEditor(sugg) {
+    const wrap = document.getElementById('doc-editor-wrap');
+    if (!wrap || !sugg) return;
+    const pre = _suggestionPreviewEl();
+    if (pre) pre.style.display = 'none';
+    const old = _suggestionEditorEl();
+    if (old) old.remove();
+
+    const editor = document.createElement('div');
+    editor.id = 'doc-suggestion-editor';
+    editor.className = 'doc-suggestion-editor';
+    editor.innerHTML = `
+      <div class="doc-suggestion-editor-header">
+        <span>Edit suggested text</span>
+        <span class="doc-suggestion-editor-hint">Ctrl/Cmd+Enter to finish · Esc to cancel</span>
+      </div>
+      <div class="doc-suggestion-editor-label">Replacing</div>
+      <div class="doc-suggestion-editor-old"></div>
+      <div class="doc-suggestion-editor-label">Suggested replacement</div>
+      <textarea id="doc-suggestion-edit-input" class="doc-suggestion-editor-input" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Suggested replacement text"></textarea>
+      <div class="doc-suggestion-editor-actions">
+        <button type="button" class="doc-suggestion-edit-done">Done</button>
+        <button type="button" class="doc-suggestion-edit-revert">Revert</button>
+        <button type="button" class="doc-suggestion-edit-cancel">Cancel</button>
+      </div>
+    `;
+    editor.querySelector('.doc-suggestion-editor-old').textContent = sugg.find || '';
+    const input = editor.querySelector('#doc-suggestion-edit-input');
+    input.value = sugg.replace || '';
+
+    const saveSoon = () => {
+      if (_suggestionEditSaveTimer) clearTimeout(_suggestionEditSaveTimer);
+      _suggestionEditSaveTimer = setTimeout(() => {
+        _suggestionEditSaveTimer = null;
+        _saveSuggestionsToStorage();
+      }, 250);
+    };
+
+    input.addEventListener('input', () => {
+      sugg.replace = input.value;
+      saveSoon();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        _cancelSuggestionEdit();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        _commitSuggestionEdit();
+      }
+    });
+    editor.querySelector('.doc-suggestion-edit-done').addEventListener('click', _commitSuggestionEdit);
+    editor.querySelector('.doc-suggestion-edit-cancel').addEventListener('click', _cancelSuggestionEdit);
+    editor.querySelector('.doc-suggestion-edit-revert').addEventListener('click', () => {
+      if (!_suggestionEditing) return;
+      sugg.replace = _suggestionEditing.originalReplace || '';
+      input.value = sugg.replace;
+      _saveSuggestionsToStorage();
+      input.focus();
+    });
+
+    wrap.appendChild(editor);
+    requestAnimationFrame(() => {
+      input.focus();
+      const end = input.value.length;
+      try { input.setSelectionRange(end, end); } catch (_) {}
+    });
+  }
+
+  function _startSuggestionEdit(sugg) {
+    if (!sugg) return;
+    if (_suggestionEditing) {
+      if (_suggestionEditing.id === sugg.id) {
+        document.getElementById('doc-suggestion-edit-input')?.focus();
+        return;
+      }
+      _commitSuggestionEdit();
+    }
+    _suggestionEditing = { id: sugg.id, originalReplace: sugg.replace || '' };
+    _renderSuggestionEditor(sugg);
+  }
+
+  function _commitSuggestionEdit() {
+    if (!_suggestionEditing) return;
+    if (_suggestionEditSaveTimer) {
+      clearTimeout(_suggestionEditSaveTimer);
+      _suggestionEditSaveTimer = null;
+    }
+    _saveSuggestionsToStorage();
+    const sugg = _activeSuggestions.find(s => s.id === _suggestionEditing.id);
+    _removeSuggestionEditor();
+    if (sugg && _suggestionPreviewActive) _renderSuggestionPreview(sugg);
+  }
+
+  function _cancelSuggestionEdit() {
+    if (!_suggestionEditing) return;
+    if (_suggestionEditSaveTimer) {
+      clearTimeout(_suggestionEditSaveTimer);
+      _suggestionEditSaveTimer = null;
+    }
+    const sugg = _activeSuggestions.find(s => s.id === _suggestionEditing.id);
+    if (sugg) sugg.replace = _suggestionEditing.originalReplace || '';
+    _saveSuggestionsToStorage();
+    _removeSuggestionEditor();
+    if (sugg && _suggestionPreviewActive) _renderSuggestionPreview(sugg);
   }
 
   /** Show inline diff by modifying the code highlight element directly */
@@ -9244,6 +9390,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
    * pristine copy captured on entry, never from whatever is on screen.
    */
   function _exitSuggestionPreview() {
+    _removeSuggestionEditor();
     if (!_suggestionPreviewActive) return;
     const textarea = document.getElementById('doc-editor-textarea');
     const wrap = document.getElementById('doc-editor-wrap');
@@ -9928,6 +10075,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
    * they still wrote straight into the textarea. Do not reintroduce that path.
    */
   function clearAllSuggestions() {
+    _removeSuggestionEditor();
     _activeSuggestions = [];
     _suggestionTotal = 0;
     // A dragged card is reset here too: leaving it floating after the queue is
