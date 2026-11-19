@@ -91,6 +91,26 @@ function _safeResearchHref(raw) {
   return '';
 }
 
+/** Paste-ready `[Query](#research-<id>)` anchor for the chat composer. */
+function _researchReference(item) {
+  const id = typeof item === 'string' ? item : (item && item.id);
+  const query = String((item && item.query) || 'Research').replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim();
+  const label = query.length > 80 ? query.slice(0, 79).trimEnd() + '…' : query;
+  return id ? `[${label}](#research-${id})` : '';
+}
+
+async function _copyResearchReference(item) {
+  const ref = _researchReference(item);
+  if (!ref) return;
+  try {
+    if (uiModule.copyToClipboard) await uiModule.copyToClipboard(ref);
+    else await navigator.clipboard.writeText(ref);
+    if (uiModule) uiModule.showToast('Reference copied');
+  } catch {
+    if (uiModule) uiModule.showError('Failed to copy reference');
+  }
+}
+
 let _libraryEscHandler = null;
 let _librarySelectMode = false;
 let _librarySelectedIds = new Set();
@@ -3351,6 +3371,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         });
         card.querySelector('._arc-res-menu').addEventListener('click', (e) => { e.stopPropagation(); _showLibDropdown(e.currentTarget, [
           { label: 'Open', action: () => { const a = document.createElement('a'); a.href = '/api/research/report/' + r.id; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); } },
+          { label: 'Copy reference', action: () => _copyResearchReference(r) },
           { label: 'Restore', action: async () => { await fetch('/api/research/' + r.id + '/archive?archived=false', { method: 'POST', credentials: 'same-origin' }); _renderLibArchive(); } },
           { label: 'Delete', danger: true, action: async () => { if (!await window.styledConfirm(`Move "${r.query || 'this research'}" to Trash?`, { confirmText: 'Move to Trash', danger: true })) return; await fetch('/api/research/' + r.id, { method: 'DELETE', credentials: 'same-origin' }); _renderLibArchive(); if (uiModule) uiModule.showToast('Moved to Trash'); } },
         ], { onSelect: () => {
@@ -3562,6 +3583,10 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
             '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
             'Discuss' +
           '</button>') +
+          '<button class="doclib-chat-copy-ref-btn">' +
+            '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
+            'Copy reference' +
+          '</button>' +
           '<button class="doclib-chat-open-btn">' +
             '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>' +
             'Open' +
@@ -3588,6 +3613,10 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           discussBtn.innerHTML = _orig;
           if (uiModule) uiModule.showError('Could not start discussion: ' + (err.message || err));
         }
+      });
+      preview.querySelector('.doclib-chat-copy-ref-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _copyResearchReference({ id: item.id, query: detail.query || item.query || '' });
       });
       const openBtn = preview.querySelector('.doclib-chat-open-btn');
       if (openBtn) openBtn.addEventListener('click', (e) => {
@@ -3739,6 +3768,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const rid = btn.dataset.rid;
+          const _refItem = _researchItems.find(r => r.id === rid) || { id: rid, query: '' };
           _showLibDropdown(btn, [
             { label: 'Open', action: () => {
                 const a = document.createElement('a');
@@ -3749,6 +3779,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
                 a.click();
                 a.remove();
               } },
+            { label: 'Copy reference', action: () => _copyResearchReference(_refItem) },
             { label: _researchArchivedView ? 'Restore' : 'Archive', action: async () => {
                 const toArchived = !_researchArchivedView;
                 const card = btn.closest('.doclib-research-card');

@@ -1,6 +1,6 @@
 # Research
 
-Last updated: dev@e71f8ce | 2026-08-25
+Last updated: local-odysseus@20261119researchrefs1 | 2026-11-19
 
 ## Scope
 
@@ -30,6 +30,14 @@ This spec covers deep research behavior in:
 - scheduled research tasks that write compatible report JSON directly;
 - diagnostics `/api/test-research`;
 - report library, visual report, hide/unhide image, archive/delete, spinoff, and CLI list/show/report/search/delete flows.
+
+## Saved-Research References in Chat
+
+Completed reports expose a **Copy reference** action in the research panel and in the Library (row menu, preview footer, and archived menu). It copies the canonical anchor the agent already emits: `[query](#research-<id>)`.
+
+The composer measures referenced reports through `POST /api/research/refs/inspect` before sending. If the full injection exceeds 32,000 estimated tokens, the user chooses **Compact and send**, **Send as-is**, or **Cancel**. Compact is deterministic and rule-based (`compact_research_report`): it keeps headings and the first sentences of each block rather than making an extra LLM call.
+
+`routes/chat_routes.py` resolves the anchors for both streaming and non-streaming chat, injects owned reports as untrusted context, caps at five references, skips incognito chats, and uses the client's `research_ref_mode` (`compact`/`full`); API callers default to `auto`, which compacts only over-budget reports. Archived reports remain referenceable; Trash removes the file entirely. `manage_research action=read` also accepts a pasted anchor in addition to a bare id.
 
 ## Job Ownership
 

@@ -1,7 +1,7 @@
 /**
  * Deep Research side panel — open/close, form, job rendering, library.
  */
-import * as jobs from './jobs.js?v=20260630researchthumb';
+import * as jobs from './jobs.js?v=20261119researchrefs1';
 import themeModule from '../theme.js';
 import createResearchSynapse from '../researchSynapse.js';
 import spinnerModule from '../spinner.js';
@@ -203,6 +203,7 @@ const _cancelIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"
 const _trashIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
 const _externalIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 const _copyIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+const _refIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
 const _retryIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>';
 const _chevronIcon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 const _editIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
@@ -1007,6 +1008,7 @@ function _buildJobCard(job) {
         <button class="research-job-action research-job-action-report" data-action="report" title="Visual report">${_externalIcon} Visual Report</button>
         <button class="research-job-action" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon} Discuss</button>
         <button class="research-job-action research-job-action-dim" data-action="copy" title="Copy report to clipboard">${_copyIcon}</button>
+        <button class="research-job-action research-job-action-dim" data-action="reference" title="Copy reference for chat">${_refIcon}</button>
         <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Clear from list">${_cancelIcon}</button>
         <button class="research-job-action research-job-action-dim" data-action="delete" title="Delete from disk">${_trashIcon} Delete</button>
       </div>
@@ -1023,6 +1025,11 @@ function _buildJobCard(job) {
       const btn = e.currentTarget; // capture before await — currentTarget becomes null after
       if (!job.result) await _ensureResult(job);
       _copyResult(job, btn);
+    });
+    card.querySelector('[data-action="reference"]').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      await _copyReference(job, btn);
     });
     card.querySelector('[data-action="report"]').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1160,6 +1167,16 @@ async function _copyResult(job, btn) {
     const srcList = job.sources.map(s => `- [${s.title || s.url}](${s.url})`).join('\n');
     text += `\n\n---\n## Sources\n${srcList}`;
   }
+  return _copyText(text, btn);
+}
+
+async function _copyReference(job, btn) {
+  const query = String(job.query || 'Research').replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim();
+  const label = query.length > 80 ? query.slice(0, 79).trimEnd() + '…' : query;
+  return _copyText(`[${label}](#research-${job.id})`, btn);
+}
+
+async function _copyText(text, btn) {
   let ok = false;
   try {
     if (navigator.clipboard && window.isSecureContext) {
@@ -1204,6 +1221,7 @@ async function _copyResult(job, btn) {
       setTimeout(() => { btn.innerHTML = orig; }, 2000);
     }
   }
+  return ok;
 }
 
 // ── Chat about this research (server-side spinoff) ──

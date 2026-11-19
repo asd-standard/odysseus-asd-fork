@@ -7,7 +7,7 @@ import Storage from './storage.js';
 import themeModule from './theme.js';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
-import documentModule from './document.js?v=20261112previewscroll1';
+import documentModule from './document.js?v=20261119researchrefs1';
 
 // Tool approvals are control-plane submits for the current chat. chat.js
 // deliberately leaves the composer untouched, then programmatically clicks the
@@ -175,12 +175,12 @@ export function handleUIControl(uiData) {
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
       if (panel === 'documents') {
-        import('./documentLibrary.js?v=20261112previewscroll1').then(function(mod) {
+        import('./documentLibrary.js?v=20261119researchrefs1').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'email') {
-        import('./emailLibrary.js?v=20260815approvalsave1').then(function(mod) {
+        import('./emailLibrary.js?v=20261119researchrefs1').then(function(mod) {
           var fn = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
           if (fn) fn();
         }).catch(function(){});
@@ -224,7 +224,7 @@ export function handleUIControl(uiData) {
       } catch (e) {
         console.warn('open_email_reply existing draft update failed:', e);
       }
-      import('./emailInbox.js?v=20260815approvalsave1').then(function(mod) {
+      import('./emailInbox.js?v=20261119researchrefs1').then(function(mod) {
         var fn = mod.openReplyDraft || (mod.default && mod.default.openReplyDraft);
         if (fn) fn(uiData.uid, uiData.folder || 'INBOX', uiData.mode || 'reply', uiData.body || '');
       }).catch(function(e) {

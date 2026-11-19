@@ -11,6 +11,7 @@ import re
 from typing import Any, Dict, Optional
 
 from src.constants import DEEP_RESEARCH_DIR
+from src.research_utils import research_id_from_reference
 from src.tools._common import _parse_tool_args
 
 
@@ -27,7 +28,10 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
     if not isinstance(args, dict):
         args = {}
     action = (args.get("action") or "list").lower()
-    rid = (args.get("id") or args.get("session_id") or args.get("research_id") or "").strip()
+    _raw_rid = (args.get("id") or args.get("session_id") or args.get("research_id") or "").strip()
+    # Accept the clickable form the agent/user sees — `[Query](#research-rp-…)`
+    # or a bare `#research-rp-…` anchor — as well as a plain id.
+    rid = research_id_from_reference(_raw_rid) if _raw_rid else ""
     data_dir = _Path(DEEP_RESEARCH_DIR)
 
     # SECURITY: the research id is interpolated straight into a filesystem

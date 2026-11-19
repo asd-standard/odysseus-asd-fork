@@ -12,7 +12,7 @@ import emojiPicker from './emojiPicker.js';
 import markdownModule from './markdown.js';
 import { langIcon } from './langIcons.js';
 import spinnerModule from './spinner.js';
-import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261112previewscroll1';
+import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js?v=20261119researchrefs1';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -4006,7 +4006,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
             leadingIcon: 'check',
             action: 'View Message',
             onAction: () => {
-              import('./emailLibrary.js?v=20260815approvalsave1').then(mod => {
+              import('./emailLibrary.js?v=20261119researchrefs1').then(mod => {
                 const open = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
                 if (open) open({
                   account_id: data.account_id || activeAccountId || null,

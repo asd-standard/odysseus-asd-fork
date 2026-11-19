@@ -17,6 +17,13 @@ from src.endpoint_resolver import resolve_endpoint
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.owner_identity import REQUEST_SENTINEL_OWNERS
 from src.constants import DEEP_RESEARCH_DIR
+from src.research_utils import (
+    RESEARCH_REFERENCE_TOKEN_BUDGET,
+    estimate_research_tokens,
+    extract_research_reference_ids,
+    format_research_reference,
+    load_owned_research,
+)
 from src.trash_service import (
     empty_research_trash,
     list_research_trash,
@@ -442,6 +449,42 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         if data.get("owner") != user:
             raise HTTPException(404, "Research not found")
         return data
+
+    @router.post("/api/research/refs/inspect")
+    async def research_refs_inspect(request: Request):
+        """Measure saved reports referenced in a chat message.
+
+        The composer calls this before sending so an oversized reference can be
+        compacted (or sent as-is) with the user's consent instead of silently
+        blowing the prompt budget. Ownership is enforced by load_owned_research.
+        """
+        user = _require_user(request)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "Invalid JSON")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "Expected a JSON object")
+
+        refs = []
+        for rid in extract_research_reference_ids(body.get("message") or "")[:10]:
+            data = load_owned_research(rid, user)
+            if not data:
+                continue
+            text = format_research_reference(data)
+            tokens = estimate_research_tokens(text)
+            refs.append({
+                "id": rid,
+                "query": str(data.get("query") or ""),
+                "chars": len(text),
+                "tokens": tokens,
+                "over_budget": tokens > RESEARCH_REFERENCE_TOKEN_BUDGET,
+            })
+        return {
+            "refs": refs,
+            "over_budget": any(r["over_budget"] for r in refs),
+            "budget_tokens": RESEARCH_REFERENCE_TOKEN_BUDGET,
+        }
 
     @router.post("/api/research/{session_id}/archive")
     async def research_archive(session_id: str, request: Request, archived: bool = Query(True)):

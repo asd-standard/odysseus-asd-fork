@@ -17662,6 +17662,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 }
 .doclib-chat-preview-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
@@ -17677,6 +17678,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 .doclib-chat-archive-btn,
 .doclib-chat-restore-btn,
 .doclib-chat-discuss-btn,
+.doclib-chat-copy-ref-btn,
 .doclib-chat-copy-btn {
   display: inline-flex;
   align-items: center;
@@ -17692,6 +17694,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 .doclib-chat-archive-btn,
 .doclib-chat-restore-btn,
 .doclib-chat-discuss-btn,
+.doclib-chat-copy-ref-btn,
 .doclib-chat-copy-btn {
   color: var(--fg-muted);
   border: 1px solid var(--border);
@@ -17708,6 +17711,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 .doclib-chat-archive-btn { margin-right: auto; }
 .doclib-chat-archive-btn:hover,
 .doclib-chat-discuss-btn:hover,
+.doclib-chat-copy-ref-btn:hover,
 .doclib-chat-copy-btn:hover {
   color: var(--accent, var(--red));
   border-color: var(--accent, var(--red));

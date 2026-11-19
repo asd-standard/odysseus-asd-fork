@@ -1332,7 +1332,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
     assert "/test-approval`" in skills
     assert "approval_id: approval.approval_id" in skills
     assert "['approve', 'Allow once'" in skills
-    assert index.count("app.js?v=20261112previewscroll1") == 2
+    assert index.count("app.js?v=20261119researchrefs1") == 2
     assert "app.js?v=20260808startupshell1" not in index
     approval_module_sources = [
         (root / path).read_text()
@@ -1355,7 +1355,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
     )
     # Every approval-relevant module must be on a CURRENT version. Modules split
     # across two version groups since the active-document work: the chat/doc
-    # graph (20261112previewscroll1) and the settings/email graph
+    # graph (20261119researchrefs1) and the settings/email graph
     # (20260815approvalsave1). What matters is that no source is on a
     # superseded version, which would let the browser pair a cached copy.
     _stale = ("20260722emailfastindex1", "20260815toolapproval4-startup")
@@ -1364,7 +1364,7 @@ def test_frontend_tool_approval_uses_opaque_id_and_fixed_decisions():
         for source in approval_module_sources
     )
     assert all(
-        ("20261112previewscroll1" in source) or ("20260815approvalsave1" in source)
+        ("20261119researchrefs1" in source) or ("20260815approvalsave1" in source)
         or ("20260819approvalcontrol1" in source)
         for source in approval_module_sources
     )
@@ -1426,6 +1426,16 @@ def test_authorized_document_stream_precedes_completed_update(monkeypatch):
 
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
+    # This test is about streaming-event ordering, not the exact-approval
+    # security gate (covered by the tool-approval suites). Let the authorized
+    # block reach the executor so the doc_stream_* events can be observed.
+    from src.tool_capabilities import ToolGateDecision
+    monkeypatch.setattr(
+        agent_loop.ToolRunSecurityContext,
+        "decision_for",
+        lambda self, *args, **kwargs: ToolGateDecision(True),
+        raising=False,
+    )
 
     events = _collect_agent_events(
         agent_loop.stream_agent_loop(
@@ -1434,6 +1444,13 @@ def test_authorized_document_stream_precedes_completed_update(monkeypatch):
             [{"role": "user", "content": "update the active document"}],
             max_rounds=1,
             relevant_tools={"update_document"},
+            active_document=type("Doc", (), {
+                "id": "doc-1",
+                "title": "Existing",
+                "language": "markdown",
+                "version_count": 2,
+                "current_content": "Old body",
+            })(),
         )
     )
     event_types = [event.get("type") for event in events]

@@ -1373,7 +1373,7 @@ document.addEventListener('click', function(e) {
       } catch {}
     });
   } else if (kind === 'document') {
-    import('./document.js?v=20261112previewscroll1').then(mod => {
+    import('./document.js?v=20261119researchrefs1').then(mod => {
       const open = mod.loadDocument
         || mod.openDocument
         || (mod.default && (mod.default.loadDocument || mod.default.openDocument));
@@ -1392,7 +1392,7 @@ document.addEventListener('click', function(e) {
   } else if (kind === 'image') {
     // Image library support has been removed.
   } else if (kind === 'email') {
-    import('./emailLibrary.js?v=20260815approvalsave1').then(mod => {
+    import('./emailLibrary.js?v=20261119researchrefs1').then(mod => {
       const open = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
       if (open) open({ uid: id });
     }).catch(() => {});
@@ -1413,7 +1413,7 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'research') {
-    import('./research/panel.js').then(mod => {
+    import('./research/panel.js?v=20261119researchrefs1').then(mod => {
       const open = mod.openPanel || (mod.default && mod.default.openPanel);
       if (open) open(id);
     }).catch(() => {});

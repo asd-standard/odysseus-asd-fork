@@ -8,7 +8,7 @@ import { byId } from './settings/dom.js';
 import {
   getSettingsRegistryIssues,
   isAdminManagedSettingsTab,
-} from './settings/registry.js?v=20261112previewscroll1';
+} from './settings/registry.js?v=20261119researchrefs1';
 import { bindSettingsSearch } from './settings/search.js';
 import { bindSettingsSidebar } from './settings/sidebar.js';
 import {
@@ -2545,7 +2545,7 @@ async function initEmailAccountsSettings() {
 
   el('set-email-open-library-settings')?.addEventListener('click', async () => {
     try {
-      const mod = await import('./emailLibrary.js?v=20260815approvalsave1');
+      const mod = await import('./emailLibrary.js?v=20261119researchrefs1');
       if (typeof mod.openEmailLibrarySettings === 'function') {
         await mod.openEmailLibrarySettings();
       }

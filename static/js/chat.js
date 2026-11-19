@@ -8,17 +8,17 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
-import chatRenderer from './chatRenderer.js?v=20260819approvalcontrol1';
-import chatStream from './chatStream.js?v=20261112previewscroll1';
+import chatRenderer from './chatRenderer.js?v=20261119researchrefs1';
+import chatStream from './chatStream.js?v=20261119researchrefs1';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
-import documentModule from './document.js?v=20261112previewscroll1';
-import * as emailInbox from './emailInbox.js?v=20260815approvalsave1';
-import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js?v=20260815approvalsave1';
+import documentModule from './document.js?v=20261119researchrefs1';
+import * as emailInbox from './emailInbox.js?v=20261119researchrefs1';
+import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js?v=20261119researchrefs1';
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArrowUpRecall.js?v=20260714promptrecall';
@@ -654,6 +654,55 @@ import { loadPanel } from './panels.js';
     currentHolder = active ? active.holder : null;
     _setForegroundChatBusy(!!active || !!_sendInFlight);
     return active;
+  }
+
+  /** Ask the server whether pasted `#research-<id>` anchors exceed the budget.
+   *  Returns 'auto' | 'compact' | 'full', or null when the user cancels. */
+  async function _researchReferenceDecision(text) {
+    if (!text || !text.includes('#research-')) return 'auto';
+    let payload = null;
+    try {
+      const res = await fetch('/api/research/refs/inspect', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+      if (!res.ok) return 'auto';
+      payload = await res.json();
+    } catch (_) {
+      return 'auto';
+    }
+    const refs = Array.isArray(payload && payload.refs) ? payload.refs : [];
+    const big = refs.filter(r => r && r.over_budget);
+    if (!big.length) return 'auto';
+    const names = big.slice(0, 3)
+      .map(r => {
+        const q = String(r.query || r.id || 'research');
+        const label = q.length > 70 ? q.slice(0, 69).trimEnd() + '…' : q;
+        return `${label} (~${Number(r.tokens || 0).toLocaleString()} tokens)`;
+      })
+      .join('; ');
+    const more = big.length > 3 ? ` and ${big.length - 3} more` : '';
+    const confirmFn = uiModule.styledConfirm || window.styledConfirm;
+    let choice;
+    try {
+      choice = await confirmFn(
+        `${big.length} research reference${big.length === 1 ? '' : 's'} ` +
+        `${big.length === 1 ? 'exceeds' : 'exceed'} the 32,000-token budget: ` +
+        `${names}${more}. Compact before sending, or inject as-is?`,
+        {
+          title: 'Large research reference',
+          confirmText: 'Compact and send',
+          alternateText: 'Send as-is',
+          cancelText: 'Cancel',
+        }
+      );
+    } catch (_) {
+      return 'full';
+    }
+    if (choice === false) return null;
+    return choice === 'alternate' ? 'full' : 'compact';
   }
 
   function _touchStreamActivity(sessionId) {
@@ -1307,6 +1356,15 @@ import { loadPanel } from './panels.js';
     // attachment ids — a photo-only message still has something to send.
     if (!msg.trim() && !approvalForSend && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
 
+    // Pasted saved-research anchors: let the user compact an oversized report
+    // before the server injects it. Cancelling aborts before any session work.
+    let researchRefMode = 'auto';
+    if (!approvalForSend && msg.includes('#research-')) {
+      const decision = await _researchReferenceDecision(msg);
+      if (decision === null) { _releaseSendFlag(); return; }
+      researchRefMode = decision;
+    }
+
     // --- Slash commands: execute directly without AI (no session needed) ---
     if (!approvalForSend && isCommand(msg.trim())) {
       const handled = await handleSlashCommand(msg.trim());
@@ -1828,6 +1886,9 @@ import { loadPanel } from './panels.js';
       const fd = new FormData();
       fd.append('message', approvalForSend ? '' : _finalMsgWithInject);
       fd.append('session', streamSessionId);
+      if (researchRefMode && researchRefMode !== 'auto') {
+        fd.append('research_ref_mode', researchRefMode);
+      }
       if (approvalForSend) {
         fd.append('tool_approval_id', approvalForSend.approval_id);
         fd.append('tool_approval_decision', approvalForSend.decision);

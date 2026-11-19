@@ -13,6 +13,11 @@ class ChatRequest(BaseModel):
     time_filter: Optional[str] = Field(default=None, description="Time filter for search")
     preset_id: Optional[str] = Field(default=None, description="Preset identifier")
     selected_endpoint_id: Optional[str] = Field(default=None, description="Selected model endpoint ID")
+    research_ref_mode: Optional[str] = Field(
+        default=None,
+        max_length=20,
+        description="How to inject referenced research: auto|compact|full",
+    )
     
     @field_validator('message')
     @classmethod

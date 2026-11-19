@@ -39,6 +39,14 @@ from src.foreground_model_routing import (
 )
 from src.session_search import search_session_messages
 from src.prompt_security import untrusted_context_message
+from src.research_utils import (
+    RESEARCH_REFERENCE_TOKEN_BUDGET,
+    estimate_research_tokens,
+    extract_research_reference_ids,
+    format_research_reference,
+    load_owned_research,
+    research_report_text,
+)
 from core.exceptions import SessionNotFoundError
 from src.auth_helpers import (
     effective_user,
@@ -624,6 +632,41 @@ def _set_user_time_from_request(request: Request) -> None:
         pass
 
 
+def _research_reference_context(message, owner, mode: str = "auto") -> str:
+    """Build untrusted context for `#research-<id>` anchors pasted in a message.
+
+    `mode` comes from the composer after its pre-send budget check:
+      - "full"    → inject every report verbatim
+      - "compact" → compact any report over the token budget
+      - "auto"    → compact only when a report is over budget (API clients)
+    """
+    ids = extract_research_reference_ids(message)
+    if not ids:
+        return ""
+    blocks: list[str] = []
+    for rid in ids[:5]:
+        data = load_owned_research(rid, owner)
+        if not data:
+            continue
+        text = research_report_text(data)
+        if not text:
+            continue
+        full_block = format_research_reference(data, compact=False)
+        over_budget = estimate_research_tokens(full_block) > RESEARCH_REFERENCE_TOKEN_BUDGET
+        compact = over_budget and mode != "full"
+        block = format_research_reference(data, compact=compact)
+        if compact:
+            block += "\n\n[Compacted to fit the research reference token budget.]"
+        blocks.append(block)
+    if not blocks:
+        return ""
+    return (
+        "The user's message references saved research reports. Use these reports "
+        "as background context for the reply.\n\n"
+        + "\n\n---\n\n".join(blocks)
+    )
+
+
 def setup_chat_routes(
     session_manager,
     chat_handler,
@@ -712,6 +755,17 @@ def setup_chat_routes(
             allow_tool_preprocessing=allow_tool_preprocessing,
             defer_context_shaping=foreground_policy.enabled,
         )
+
+        # Pasted `#research-<id>` anchors: inject the saved report(s) so the
+        # model can answer about them without a tool round-trip.
+        _ref_context = _research_reference_context(
+            message, owner, str(getattr(chat_request, "research_ref_mode", "") or "auto").lower()
+        )
+        if _ref_context:
+            _ref_message = untrusted_context_message("research reference", _ref_context)
+            ctx.messages.insert(len(ctx.preface), _ref_message)
+            if foreground_policy.enabled:
+                getattr(ctx, "route_messages", ctx.messages).insert(len(ctx.preface), _ref_message)
 
         # Research injection
         research_blocked_by_policy = (
@@ -1268,6 +1322,20 @@ def setup_chat_routes(
             ),
             persist_user_message=not tool_approval_continuation,
         )
+
+        # Pasted `#research-<id>` anchors — inject owned report(s) as context.
+        # Incognito chats must not pull saved personal research into the prompt.
+        if not incognito:
+            _ref_context = _research_reference_context(
+                message,
+                owner,
+                str(form_data.get("research_ref_mode") or "auto").lower(),
+            )
+            if _ref_context:
+                _ref_message = untrusted_context_message("research reference", _ref_context)
+                ctx.messages.insert(len(ctx.preface), _ref_message)
+                if foreground_policy.enabled:
+                    getattr(ctx, "route_messages", ctx.messages).insert(len(ctx.preface), _ref_message)
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 
