@@ -213,7 +213,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     // Tell it how "collapse this window" works; the foreground stack uses this
     // when another window opens over the editor.
     try {
-      Modals.registerMinimizeHook('doc-panel', () => collapsePanel());
+      Modals.registerMinimizeHook('doc-panel', (opts) => collapsePanel(opts));
     } catch (e) { console.debug('doc-panel minimize hook not registered:', e); }
     initLibrary({
       apiBase,
@@ -7054,7 +7054,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
    * scroll, selection, find bar and preview state survive; only the layout
    * classes are removed and the manager hides the pane.
    */
-  export function collapsePanel() {
+  export function collapsePanel(options = {}) {
     if (!isOpen || isCollapsed) return;
     _captureCollapsedUi();
     _minimizedDocId = activeDocId;
@@ -7097,6 +7097,15 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       // renders the chip.
       try { Modals.minimize('doc-panel') } catch (_) {}
     };
+
+    // Displacement by another docked column must release the editor's layout
+    // synchronously; the slide-out would leave it visible (and keep doc-view /
+    // the right-dock margin active) for ~200ms, briefly squeezing the chat
+    // between two right-hand columns.
+    if (options && options.immediate) {
+      _finishCollapse();
+      return;
+    }
 
     if (pane) {
       // Slide out in the direction the pane already sits; on mobile this reads

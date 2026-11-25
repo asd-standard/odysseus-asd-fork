@@ -61,16 +61,21 @@ function _applyRememberedDock(id) {
   try { applyEdgeDock(modal, side); } catch (e) { console.warn('apply remembered dock failed', e); }
 }
 
-// Monotonic stacking counter so the most-recently-surfaced tool window always
-// sits on top. Tool modals otherwise carry fixed CSS z-indexes (base .modal
-// = 250, theme = 260, …), so restoring one from the dock could leave
-// it BEHIND an already-open tool with a higher static z-index. Start above
-// those statics and bump on every bring-to-front. When no other tool window is
-// visible the counter resets, so a long session cannot climb into the split /
-// dock / chip tiers.
-let _modalTopZ = Z.windowRaised;
+// Monotonic stacking counter so the most-recently-surfaced floating tool
+// window always sits on top. Floating windows live above the dock/chip tiers
+// (a chip must never paint over an open window); edge-docked columns are kept
+// in the split-pane tier below them.
+let _modalTopZ = Z.floatingWindow;
 function _bringToFront(modal) {
   if (!modal) return;
+  // Edge-docked columns are background layout, not foreground windows: they
+  // stay in the split-pane tier, below the chip dock. Keep this declaration
+  // non-important so the doc/email split rules can still choose their exact
+  // split-pane layer.
+  if (_isEdgeDocked(modal)) {
+    modal.style.setProperty('z-index', String(Z.splitPane - 1));
+    return;
+  }
   let anyOtherVisible = false;
   try {
     document.querySelectorAll(TOOL_WINDOW_SELECTOR).forEach((el) => {
@@ -80,11 +85,14 @@ function _bringToFront(modal) {
       anyOtherVisible = true;
     });
   } catch (_) {}
-  if (!anyOtherVisible) _modalTopZ = Z.windowRaised;
+  // Floating tool windows are foreground content. Their tier starts above
+  // free chips and the chip dock so a collapsed window's chip can never paint
+  // over an open floating window.
+  if (!anyOtherVisible) _modalTopZ = Z.floatingWindow;
   const z = nextToolWindowZ({
     exclude: modal,
     current: getComputedStyle(modal).zIndex,
-    floor: _modalTopZ,
+    floor: Math.max(_modalTopZ, Z.floatingWindow),
   });
   _modalTopZ = Math.max(_modalTopZ, z);
   modal.style.setProperty('z-index', String(z), 'important');
@@ -264,6 +272,18 @@ function _loadDockState() {
   } catch {}
 }
 
+// Width reserved by an active right-docked tool column, in px. The chat's
+// margin-right is CSS-transitioned, so a synchronous re-anchor (for example
+// when a restored dock collapses the editor) measures the pre-transition
+// full-width chat and would park the chip bar over the docked window. The
+// custom property is already at its final value, so it is the reliable floor.
+function _reservedRightDockWidth() {
+  if (!document.body.classList.contains('right-dock-active')) return 0;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--right-dock-w');
+  const n = parseFloat(raw || '');
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 // Anchor the collapsed-window bar to the chat's top-right corner (just below
 // its top bar). Keeping it away from the bottom-right leaves the
 // scroll-to-bottom button and composer clear.
@@ -274,6 +294,7 @@ function _positionDock(dock = document.getElementById('minimized-dock')) {
   const topBar = document.querySelector('.chat-top-bar');
   const topBarRect = topBar ? topBar.getBoundingClientRect() : null;
   const margin = 10;
+  const dockWidth = _reservedRightDockWidth();
   dock.style.left = 'auto';
   dock.style.bottom = 'auto';
   dock.style.transform = 'none';
@@ -281,24 +302,32 @@ function _positionDock(dock = document.getElementById('minimized-dock')) {
     const anchorTop = (topBarRect && topBarRect.height > 0)
       ? Math.min(topBarRect.bottom, chatRect.bottom)
       : chatRect.top;
+    // `chatRect.right` can still sit behind the animated margin during a
+    // dock transition; never place the bar to the right of the reserved column.
+    const rightGap = Math.max(window.innerWidth - chatRect.right, dockWidth);
     dock.style.top = Math.max(margin, Math.round(anchorTop + 8)) + 'px';
-    dock.style.right = Math.max(margin, Math.round(window.innerWidth - chatRect.right + margin)) + 'px';
+    dock.style.right = Math.max(margin, Math.round(rightGap + margin)) + 'px';
   } else {
-    // Chat hidden (full-screen doc/email) — keep the bar in the corner.
+    // Chat hidden (full-screen doc/email) — keep the bar in the corner, but
+    // still outside an active dock column.
     dock.style.top = '12px';
-    dock.style.right = '12px';
+    dock.style.right = Math.max(12, Math.round(dockWidth + 12)) + 'px';
   }
 }
 
 let _dockAnchorObs = null;
 function _watchDockAnchor() {
   const bar = document.querySelector('.chat-input-bar');
-  if (bar && !_dockAnchorObs && typeof ResizeObserver !== 'undefined') {
+  const chat = document.getElementById('chat-container');
+  if (!_dockAnchorObs && typeof ResizeObserver !== 'undefined' && (bar || chat)) {
     _dockAnchorObs = new ResizeObserver(() => _positionDock());
-    _dockAnchorObs.observe(bar);
+    // The composer is capped at 800px, so resizing a wider chat does not
+    // resize it. Observe the chat itself so divider drags, dock margins and
+    // sidebar changes all keep the chips at its live top-right corner.
+    if (chat) _dockAnchorObs.observe(chat);
+    if (bar) _dockAnchorObs.observe(bar);
   }
   const reanchor = () => _positionDock();
-  const chat = document.getElementById('chat-container');
   if (chat && typeof MutationObserver !== 'undefined' && !chat._mmDockObs) {
     chat._mmDockObs = new MutationObserver(reanchor);
     chat._mmDockObs.observe(chat, { attributes: true, attributeFilter: ['class', 'style'] });
@@ -1296,10 +1325,10 @@ function _collapseForDisplacement(id) {
 // Collapse a visible column that fell out of the foreground stack (for example
 // a side column preserved while a floating window was open). It has no pending
 // restoration pair, so it is minimized without suppression.
-function _collapseLooseWindow(id) {
+function _collapseLooseWindow(id, options) {
   const hook = _minimizeHooks.get(id);
   if (hook) {
-    try { hook(); } catch (e) { console.error('minimize hook failed for', id, e); }
+    try { hook(options); } catch (e) { console.error('minimize hook failed for', id, e); }
     _renderDock();
     return;
   }
@@ -1326,7 +1355,10 @@ function _collapseEditorForDockedColumn(newId, side) {
   const pane = _windowEl('doc-panel');
   if (!state || !pane) return;
   if (pane.classList.contains('hidden') || pane.classList.contains('modal-minimized')) return;
-  _collapseLooseWindow('doc-panel');
+  // The editor's normal collapse is a ~150ms slide-out. When another docked
+  // column is taking its place, release the split synchronously instead so
+  // the chat never spans two right-hand columns for a frame.
+  _collapseLooseWindow('doc-panel', { immediate: true });
 }
 
 /** Single-dock rule: only one edge-docked column may stay visible. */
@@ -1551,16 +1583,25 @@ if (typeof window !== 'undefined') {
     if (id) _fgOpened(id);
   });
   // At most one edge-docked column: docking another window collapses the
-  // previously docked one to a chip. Deferred so the docking drag/commit and
-  // body classes settle first.
+  // previously docked one to a chip. This runs synchronously (inside the same
+  // task that applied the dock) so the displaced column releases its layout
+  // before the next paint; deferring it paints one frame with two columns and
+  // squeezes the chat.
   window.addEventListener('odysseus:edge-docked', (e) => {
     const id = e && e.detail && e.detail.id;
     if (!id) return;
     const side = e.detail && e.detail.side;
-    requestAnimationFrame(() => {
-      _collapseOtherDockedColumns(id);
-      _collapseEditorForDockedColumn(id, side);
-    });
+    _collapseOtherDockedColumns(id);
+    _collapseEditorForDockedColumn(id, side);
+  });
+  // A window that leaves its dock returns to the floating tier, above the
+  // chip dock. Docked windows stay in the split tier below chips.
+  window.addEventListener('odysseus:edge-undocked', (e) => {
+    const id = e && e.detail && e.detail.id;
+    if (!id) return;
+    const modal = _windowEl(id);
+    if (!modal || modal.classList.contains('hidden') || modal.classList.contains('modal-minimized')) return;
+    if (_ownsWindowZ(modal)) _bringToFront(modal);
   });
 }
 

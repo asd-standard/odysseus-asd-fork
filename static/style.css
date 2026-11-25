@@ -69,7 +69,9 @@
 
   /* ── Window stacking scale ──
      Keep in sync with static/js/zLayers.js (tests assert they match).
-     windows < drag ghost < edge hint < split pane < portal < dock < chips. */
+     windows < drag ghost < edge hint < split pane < portal < dock < chips
+     < floating window. Edge-docked columns stay below the chips; floating
+     tool windows paint above them. */
   --z-window: 250;
   --z-window-raised: 300;
   --z-split-underlay: 260;
@@ -83,6 +85,7 @@
   --z-dock: 10040;
   --z-chip-free: 10050;
   --z-chip-drag: 10060;
+  --z-floating-window: 10070;
 }
 
 :root.light {

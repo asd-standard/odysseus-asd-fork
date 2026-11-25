@@ -63,6 +63,22 @@ function _hasAnyOtherDockedWindow(owner) {
 
 export function clearDockSide(side, owner = null) {
   if (side !== 'left' && side !== 'right') return;
+  // An owner that just lost its dock class returns to the floating tier. The
+  // manager promotes it above the chip dock; without this an undocked window
+  // would stay in the split tier and paint under other windows' chips.
+  if (owner
+      && !owner.classList?.contains('modal-left-docked')
+      && !owner.classList?.contains('modal-right-docked')
+      && !owner.classList?.contains('email-snap-left')) {
+    const id = owner.getAttribute?.('data-window-id') || owner.id;
+    if (id) {
+      try {
+        window.dispatchEvent(new CustomEvent('odysseus:edge-undocked', {
+          detail: { id },
+        }));
+      } catch (_) {}
+    }
+  }
   if (_hasOtherDockedWindow(side, owner)) return;
   document.body.classList.remove(side === 'left' ? 'left-dock-active' : 'right-dock-active');
   document.documentElement.style.removeProperty(side === 'left' ? '--left-dock-w' : '--right-dock-w');
@@ -522,6 +538,10 @@ function _applyDockInternal(modal, side, dockClass) {
   }
   content._dockSide = side;
   content._dockOwner = modal;
+  // Docked columns are background layout: stay in the split tier, below the
+  // chip dock and below floating tool windows. Non-important so the
+  // doc/email split CSS can still select the exact split-pane layer.
+  modal.style.setProperty('z-index', String(Z.splitPane - 1));
   _positionEdgeDockResizeHandles();
   // Watch for the docked modal disappearing (removed from DOM or hidden
   // via .hidden class) and clean up the body padding + sidebar in that

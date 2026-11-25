@@ -429,7 +429,7 @@ def test_notes_collapse_keeps_the_pane_mounted():
 
 
 def test_editor_collapse_keeps_the_pane_mounted():
-    collapse = DOC[DOC.index("export function collapsePanel() {"):]
+    collapse = DOC[DOC.index("export function collapsePanel(options = {}) {"):]
     collapse = collapse[: collapse.index("\n  }")]
     assert "Modals.minimize('doc-panel')" in collapse
     assert "is-collapsed" in collapse
@@ -519,10 +519,36 @@ def test_a_docked_column_replaces_the_editor_except_the_email_split():
     helper = MM[MM.index("function _collapseEditorForDockedColumn("):]
     helper = helper[: helper.index("\n}")]
     assert "_isEmailWindow(newId) && resolvedSide === 'left'" in helper
-    assert "_collapseLooseWindow('doc-panel')" in helper
+    # The editor must release its split synchronously; its normal slide-out
+    # would leave doc-view (and the right-dock margin) active for a frame.
+    assert "_collapseLooseWindow('doc-panel', { immediate: true })" in helper
     # Called both for drag-time docking and for the deferred open-time check.
     assert "_collapseEditorForDockedColumn(id, side)" in MM
     assert "_collapseEditorForDockedColumn(childId)" in MM
+
+
+def test_dock_single_column_rule_runs_before_the_next_paint():
+    listener = MM[MM.index("addEventListener('odysseus:edge-docked'"):]
+    listener = listener[: listener.index("  });")]
+    assert "requestAnimationFrame" not in listener
+    assert listener.index("_collapseOtherDockedColumns(id);") < listener.index(
+        "_collapseEditorForDockedColumn(id, side);"
+    )
+    # The immediate path exists in the editor and hooks receive the option.
+    assert "if (options && options.immediate)" in DOC
+    assert "_finishCollapse();" in DOC
+    assert "hook(options);" in MM
+
+
+def test_editor_displacement_does_not_animate_the_slide_out():
+    collapse = DOC[DOC.index("export function collapsePanel(options = {}) {"):]
+    collapse = collapse[: collapse.index("\n  }")]
+    immediate = collapse[collapse.index("if (options && options.immediate)"):]
+    immediate = immediate[: immediate.index("return;")]
+    assert "_finishCollapse();" in immediate
+    # The slide-out styles only run on the normal path.
+    assert "translateY(100%)" not in immediate
+    assert "translateX(" not in immediate
 
 
 def test_library_open_actions_collapse_the_library_instead_of_closing_it():
@@ -548,6 +574,22 @@ def test_dock_is_a_vertical_bar_anchored_to_the_chat_corner():
     assert "document.querySelector('.chat-top-bar')" in MM
 
 
+def test_chip_bar_stays_left_of_an_active_right_dock():
+    # The chat's dock margin is animated, so a synchronous render can measure
+    # the pre-transition full-width chat. The reserved column width is the
+    # floor that keeps the chip bar over the chat, not over the dock.
+    assert "function _reservedRightDockWidth()" in MM
+    assert "getPropertyValue('--right-dock-w')" in MM
+    fn = MM[MM.index("function _positionDock("):]
+    fn = fn[: fn.index("\n}")]
+    assert "Math.max(window.innerWidth - chatRect.right, dockWidth)" in fn
+    assert "Math.max(12, Math.round(dockWidth + 12))" in fn
+    # Wide chats outgrow the 800px composer, so observe the chat itself.
+    watch = MM[MM.index("function _watchDockAnchor()"):]
+    watch = watch[: watch.index("\n}")]
+    assert "_dockAnchorObs.observe(chat)" in watch
+
+
 def test_mobile_chip_keeps_a_visible_close_affordance():
     assert ".minimized-dock-label { display: none !important; }" in CSS
     assert ".minimized-dock-x {\n        display: flex !important;" in CSS
@@ -565,6 +607,17 @@ def test_free_chips_sit_above_the_dock():
     free = int(z[z.index("chipFree:"):].split(":")[1].split(",")[0])
     dockz = int(z[z.index("dock:"):].split(":")[1].split(",")[0])
     assert free > dockz
+
+
+def test_floating_windows_paint_above_chips_but_docked_columns_do_not():
+    # Foreground/floating windows sit in the floating tier above chips.
+    assert "Z.floatingWindow" in MM
+    assert "floor: Math.max(_modalTopZ, Z.floatingWindow)" in MM
+    # Docked columns are background columns: below the chip dock.
+    assert "modal.style.setProperty('z-index', String(Z.splitPane - 1))" in SNAP
+    # Undocking returns the window to floating foreground.
+    assert "odysseus:edge-undocked" in SNAP
+    assert "addEventListener('odysseus:edge-undocked'" in MM
 
 
 # ── the ✕ is a button, not a drag handle ───────────────────────────────────

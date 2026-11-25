@@ -27,6 +27,7 @@ CSS_VAR = {
     "dock": "--z-dock",
     "chipFree": "--z-chip-free",
     "chipDrag": "--z-chip-drag",
+    "floatingWindow": "--z-floating-window",
 }
 
 
@@ -54,6 +55,9 @@ def test_tiers_are_ordered():
     assert v["windowBase"] < v["windowRaised"] < v["dragGhost"] < v["edgeHint"]
     assert v["edgeHint"] < v["splitPane"] < v["splitPaneRaised"]
     assert v["splitPaneRaised"] < v["portalFloor"] < v["dock"] < v["chipFree"] < v["chipDrag"]
+    # Floating tool windows are foreground content and must paint above the
+    # chips; edge-docked columns stay in the split tier below them.
+    assert v["chipDrag"] < v["floatingWindow"]
 
 
 def test_dock_and_split_rules_use_the_scale():
@@ -82,4 +86,8 @@ def test_portal_menus_clear_a_dragged_chip():
 def test_allocator_resets_when_no_window_is_open():
     fn = MM[MM.index("function _bringToFront(modal)"):]
     fn = fn[: fn.index("\n}")]
-    assert "if (!anyOtherVisible) _modalTopZ = Z.windowRaised;" in fn
+    assert "if (!anyOtherVisible) _modalTopZ = Z.floatingWindow;" in fn
+    assert "floor: Math.max(_modalTopZ, Z.floatingWindow)" in fn
+    # Docked columns are never lifted into the floating tier.
+    assert "if (_isEdgeDocked(modal))" in fn
+    assert "String(Z.splitPane - 1)" in fn

@@ -14,6 +14,11 @@
  *   dock (chip dock pad)
  *   chipFree (a chip displaced out of the dock)
  *   chipDrag (a chip being dragged)
+ *   floatingWindow (a restored/floating tool window above chips)
+ *
+ * Edge-docked columns stay in the splitPane tier, below the chip dock, so
+ * chips remain reachable; a floating tool window is foreground content and
+ * must paint over other windows' chips.
  */
 export const Z = Object.freeze({
   windowBase: 250,
@@ -28,6 +33,7 @@ export const Z = Object.freeze({
   dock: 10040,
   chipFree: 10050,
   chipDrag: 10060,
+  floatingWindow: 10070,
 });
 
 export default Z;
