@@ -115,6 +115,9 @@ let _libraryEscHandler = null;
 let _librarySelectMode = false;
 let _librarySelectedIds = new Set();
 let _libraryImportMode = false;
+// Destination captured when the Import button is clicked, so a folder change
+// while the OS file picker is open does not retarget the upload.
+let _libraryImportDestination = null;
 let _libScrollBound = false;   // infinite-scroll listener attached once
 let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
@@ -626,6 +629,18 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     if (!_libraryFolderId) return 'All files';
     const node = _folderFind(_libraryFolders, _libraryFolderId);
     return node ? node.name : 'Folder';
+  }
+
+  // Destination used by Create/Import: the folder currently open in the
+  // library, or the root when the user is viewing "All files"/"Unfiled".
+  function _libraryDestination() {
+    if (_libraryFolderId && _libraryFolderId !== 'unfiled') {
+      return {
+        folderId: _libraryFolderId,
+        label: _folderPath(_libraryFolderId) || _folderCurrentLabel(),
+      };
+    }
+    return { folderId: null, label: 'Unfiled (root)' };
   }
 
   async function _moveDocToFolder(docId, folderId) {
@@ -2200,8 +2215,8 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     });
   }
 
-  /** Import files from disk into the document library */
-  async function libraryImportFiles(fileList) {
+  /** Import files from disk into the document library (optional folder). */
+  async function libraryImportFiles(fileList, folderId = null) {
     const EXT_TO_LANG = {
       '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
       '.html': 'html', '.htm': 'html', '.css': 'css', '.md': 'markdown',
@@ -2242,6 +2257,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           // view, and plain PDFs get the static page-image viewer.
           const fd = new FormData();
           fd.append('file', file);
+          if (folderId) fd.append('folder_id', folderId);
           const res = await fetch(`${API_BASE}/api/documents/import-pdf`, {
             method: 'POST',
             body: fd,
@@ -2262,6 +2278,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           // both (rich body + comments) in one request.
           const fd = new FormData();
           fd.append('file', file);
+          if (folderId) fd.append('folder_id', folderId);
           const res = await fetch(`${API_BASE}/api/documents/import-office`, {
             method: 'POST',
             body: fd,
@@ -2295,7 +2312,12 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
             const res = await fetch(`${API_BASE}/api/document`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ title: sheetTitle, language: 'csv', content: csv }),
+              body: JSON.stringify({
+                title: sheetTitle,
+                language: 'csv',
+                content: csv,
+                folder_id: folderId || null,
+              }),
             });
             if (!res.ok) throw new Error('Server error');
           }
@@ -2305,7 +2327,12 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           const res = await fetch(`${API_BASE}/api/document`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: baseTitle, language, content }),
+            body: JSON.stringify({
+              title: baseTitle,
+              language,
+              content,
+              folder_id: folderId || null,
+            }),
           });
           if (!res.ok) throw new Error('Server error');
           imported++;
@@ -2321,7 +2348,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
       (failed ? `, ${failed} failed${_firstErr ? ' — ' + _firstErr : ''}` : '');
     if (failed && uiModule) uiModule.showError(msg);
     else if (uiModule) uiModule.showToast(msg);
-    await libraryFetch(false);
+    await Promise.all([folderFetch(), libraryFetch(false)]);
   }
 
   export function openLibrary(opts) {
@@ -4370,11 +4397,27 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     const importFileBtn = document.getElementById('doclib-import-file-btn');
     const fileInput = document.getElementById('doclib-file-input');
     if (importFileBtn && fileInput) {
-      importFileBtn.addEventListener('click', () => fileInput.click());
+      importFileBtn.addEventListener('click', () => {
+        _libraryImportDestination = _libraryDestination();
+        fileInput.click();
+      });
       fileInput.addEventListener('change', async () => {
         if (fileInput.files.length === 0) return;
         const files = Array.from(fileInput.files);
         fileInput.value = '';
+        const destination = _libraryImportDestination || _libraryDestination();
+        _libraryImportDestination = null;
+        const names = files.map((f) => f.name);
+        const what = files.length === 1
+          ? `"${names[0]}"`
+          : `${files.length} files (${names.join(', ')})`;
+        if (uiModule && uiModule.styledConfirm) {
+          const ok = await uiModule.styledConfirm(
+            `Do you want to import ${what} into "${destination.label}"?`,
+            { confirmText: 'Import', title: 'Import file' }
+          );
+          if (!ok) return;
+        }
         // Swap the import icon for a whirlpool while files upload.
         const _orig = importFileBtn.innerHTML;
         importFileBtn.disabled = true;
@@ -4387,7 +4430,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
           importFileBtn.appendChild(document.createTextNode('Import'));
         } catch {}
         try {
-          await libraryImportFiles(files);
+          await libraryImportFiles(files, destination.folderId);
         } finally {
           try { _sp && _sp.stop(); } catch {}
           importFileBtn.innerHTML = _orig;
@@ -4400,13 +4443,21 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     const createBtn = document.getElementById('doclib-create-btn');
     if (createBtn) {
       createBtn.addEventListener('click', async () => {
+        const destination = _libraryDestination();
+        if (uiModule && uiModule.styledConfirm) {
+          const ok = await uiModule.styledConfirm(
+            `Do you want to create a new file in "${destination.label}"?`,
+            { confirmText: 'Create', title: 'Create file' }
+          );
+          if (!ok) return;
+        }
         try {
           if (_newDocument) {
-            await _newDocument();
+            await _newDocument({ folderId: destination.folderId });
           } else {
             const sessionId = sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId();
             if (!sessionId) throw new Error('No active session');
-            await _createDocument(sessionId);
+            await _createDocument(sessionId, { folderId: destination.folderId });
           }
           closeLibrary();
           setTimeout(() => _openPanel(), 50);
@@ -4579,6 +4630,7 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
     _librarySelectMode = false;
     _librarySelectedIds.clear();
     _libraryImportMode = false;
+    _libraryImportDestination = null;
     libraryHidePreview();
     clearTimeout(_librarySearchDebounce);
 

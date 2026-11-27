@@ -49,6 +49,8 @@ from src.tool_capabilities import (
     tool_result_should_arm_gate,
 )
 from src.tool_approvals import (
+    EXTERNAL_CONTEXT_APPROVAL_CATEGORY,
+    LIBRARY_FOLDER_APPROVAL_CATEGORY,
     ExactToolApproval,
     document_content_digest,
     tool_approval_store,
@@ -383,7 +385,8 @@ _DOMAIN_RULES = {
 - Use `list_library_files` to discover what's available; filter by keyword when the user names a specific document.
 - Use `list_library_files folder=<name|id>` to list a folder's contents; with no folder it shows folders + unfiled documents.
 - Use `read_library_file folder=<name|id>` to read EVERY document in a folder in one call; use `name=` for a single document.
-- Use `make_library_file` to create a new document in the library (it lands in 'Unfiled documents'; e.g. save research results, notes, reports).
+- Use `make_library_file` to create a new document in the library. Omit `folder` to land in 'Unfiled documents', or pass `folder=<id|path|name>` to create it directly in a folder. Creating outside Unfiled needs explicit human approval through the card shown in chat.
+- Use `manage_documents action=move` with `document_id` (or a unique `title`) and `folder=<id|path|name>` (or `folder='unfiled'`) to move a file between folders. Every move needs explicit human approval through the card shown in chat.
 - These tools read the document library; do not use any other tool to find library documents.""",
     "settings": """\
 ## Settings/API rules
@@ -488,9 +491,10 @@ Read a non-image file attached to this chat when its inline text was truncated o
     "make_library_file": """\
 ```make_library_file
 name: my-notes.md
+folder: /optional folder id, path, or unique name; omit for Unfiled/
 content: <full file body>
 ```
-Create a new document in the library (Unfiled). Takes a simple filename (no path separators; just the name, e.g. 'notes.md' or 'report.txt') and the complete body text. The document appears immediately in list_library_files (under 'Unfiled documents') and is readable by read_library_file. Use this to persist research results, save notes, or store generated documents in the library. Only creates text documents — cannot create PDFs, images, or binary files.""",
+Create a new document in the library. Takes a simple filename (no path separators; just the name, e.g. 'notes.md' or 'report.txt') and the complete body text. With no `folder` the document lands in 'Unfiled documents'; pass `folder` (an id, a full path like 'Work/Reports', or a unique folder name) to file it directly in that folder. Creating in a real folder is a human-authorised boundary: the turn pauses with an approval card naming the destination, and the action runs only after the user clicks Allow once. The document then appears immediately in list_library_files and is readable by read_library_file. Only creates text documents — cannot create PDFs, images, or binary files.""",
 
     "create_document": """\
 ```create_document
@@ -544,7 +548,7 @@ FIND must be copied EXACTLY from the document. If you read it with `manage_docum
     "manage_mcp": "- ```manage_mcp``` — Manage MCP (Model Context Protocol) tool servers — external tools that extend your capabilities. Args (JSON): {\"action\": \"list|add|delete|reconnect|list_tools\", ...}",
     "manage_webhooks": "- ```manage_webhooks``` — Configure outgoing webhooks (HTTP notifications on events like chat completion). Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}",
     "manage_tokens": "- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {\"action\": \"list|create|delete\", ...}",
-    "manage_documents": "- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {\"action\": \"list|read|delete|tidy\", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) returns a document's text. Target it one of two ways: by `title` (the name the user said, e.g. 'report.md', with or without extension), or by `document_id` copied from a list anchor. With NEITHER, it reads the document currently OPEN in the editor — that is how you see the active document, whose text is never preloaded into your context. There is no 'most recent document' fallback: never substitute the newest document for the one the user means. When the user asks \"open/show/read my notes\" or \"what documents do I have\", use this — do NOT shell out, do NOT curl.",
+    "manage_documents": "- ```manage_documents``` — List, read/open, move, delete, or tidy documents in the editor panel. Args (JSON): {\"action\": \"list|read|move|delete|tidy\", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) returns a document's text. Target it one of two ways: by `title` (the name the user said, e.g. 'report.md', with or without extension), or by `document_id` copied from a list anchor. With NEITHER, it reads the document currently OPEN in the editor — that is how you see the active document, whose text is never preloaded into your context. There is no 'most recent document' fallback: never substitute the newest document for the one the user means. `move` takes `document_id` (or a unique `title`) plus a destination `folder`/`folder_id` (folder id, full path like 'Work/Reports', or unique name; 'unfiled' for the root). Every move is a human-authorised boundary: the turn pauses with an approval card naming the destination, and the action runs only after the user clicks Allow once. When the user asks \"open/show/read my notes\" or \"what documents do I have\", use this — do NOT shell out, do NOT curl.",
     "manage_research": "- ```manage_research``` — List, read/open, or delete saved DEEP RESEARCH results from the Library. Args (JSON): {\"action\": \"list|read|delete\", \"id\": \"<id>\", \"search\": \"...\"}. `list` returns rows like `[query](#research-<id>) — N sources` MOST-RECENT FIRST; the user clicks to open. `read` (aliases: open/view/get) takes `id` (bare id or a pasted `#research-<id>` anchor) and returns the report text + sources. Use when the user says \"open/read/find/delete my research\" or \"that report\". This IS how you read a finished report: when the user refers to a just-completed deep-research job (\"check it out\", \"read that report\", \"summarize the research\") WITHOUT giving an id, call `manage_research` with `action:list` to get the most-recent id, then `action:read` with that id, and answer from the returned text. Do NOT `web_fetch`/`app_api` the `/api/research/report/{id}` URL — that endpoint renders HTML for the browser, not clean text — and do NOT start a fresh `web_search`/`trigger_research` just to read an existing report. To START new research, use trigger_research instead.",
     "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool\",\"tool\":\"search\"}` (aliases: search/browser/documents/memory/skills/tasks/notes/calendar/email), list disabled: `{\"action\":\"list_tools\"}`. You cannot re-enable a disabled tool: that is done by the user in Settings > Agent Tools.",
     "manage_notes": """\
@@ -5299,6 +5303,26 @@ async def stream_agent_loop(
             blocked_by_disabled_tools = bool(
                 disabled_tools and not policy_names.isdisjoint(disabled_tools)
             )
+            # Library folder writes (create in a folder / move a file) are a
+            # human-authorised boundary even when the run's content is trusted.
+            # Resolve the destination now so the sealed approval card names the
+            # exact folder the action will touch.
+            library_review = None
+            if block.tool_type in {"make_library_file", "manage_documents"}:
+                try:
+                    from src.agent_tools.library_tools import (
+                        library_action_approval_review,
+                    )
+                    library_review = library_action_approval_review(
+                        block.tool_type,
+                        block.content,
+                        owner,
+                    )
+                except Exception:
+                    logger.debug(
+                        "library action approval review failed",
+                        exc_info=True,
+                    )
             if (
                 (blocked_by_tool_policy or blocked_by_disabled_tools)
                 and not _ody_clamped_tool_allowed
@@ -5324,7 +5348,21 @@ async def stream_agent_loop(
                     "Tool blocked before approval by current policy: %s",
                     block.tool_type,
                 )
-            elif not security_decision.allowed:
+            elif library_review is not None or not security_decision.allowed:
+                approval_category = (
+                    LIBRARY_FOLDER_APPROVAL_CATEGORY
+                    if library_review is not None
+                    else EXTERNAL_CONTEXT_APPROVAL_CATEGORY
+                )
+                approval_question = (
+                    library_review.get("question") if library_review else None
+                )
+                approval_description = (
+                    library_review.get("description") if library_review else None
+                )
+                approval_display_content = (
+                    library_review.get("display_content") if library_review else None
+                )
                 approval_document = (
                     active_document
                     if block.tool_type
@@ -5398,6 +5436,10 @@ async def stream_agent_loop(
                             block.tool_type,
                             block.content,
                         ),
+                        approval_category=approval_category,
+                        question=approval_question,
+                        description=approval_description,
+                        display_content=approval_display_content,
                     )
                     desc = f"{block.tool_type}: APPROVAL REQUIRED"
                     result = {

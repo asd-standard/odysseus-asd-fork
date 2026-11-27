@@ -340,7 +340,10 @@ def test_route_context_agent_frontend_and_cache_bust_wire_the_contract():
     assert "json.type === 'tool_approval_resolved'" in frontend
     assert "if (aq.resolved) return null;" in renderer
     assert "ev.ask_user && !ev.ask_user.resolved" in renderer
-    assert '"label": "Allow once"' not in approvals
+    # Library-folder approvals add an explicit one-action card; the original
+    # external-context card still offers the task/chat scopes below.
+    assert "LIBRARY_FOLDER_APPROVAL_CATEGORY" in approvals
+    assert '"label": "Allow once"' in approvals
     assert '"label": "Allow for this task"' in approvals
     assert '"label": "Allow for this chat session"' in approvals
     assert "scope_for_decision(normalized_decision)" in approvals

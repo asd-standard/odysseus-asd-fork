@@ -30,6 +30,12 @@ from src.tool_capabilities import ToolCapabilities, capabilities_for_action
 DEFAULT_APPROVAL_TTL_SECONDS = 10 * 60
 DEFAULT_MAX_PENDING_APPROVALS = 2048
 
+# Approval categories. External-context approvals keep their original
+# task/chat-session scopes. Library-folder approvals are one exact action and
+# never widen into a run-long bypass.
+EXTERNAL_CONTEXT_APPROVAL_CATEGORY = "external_context"
+LIBRARY_FOLDER_APPROVAL_CATEGORY = "library_folder"
+
 
 def _normalized_owner(owner: Any) -> str:
     return str(owner or "").strip().casefold()
@@ -117,6 +123,10 @@ def _binding_payload(
     continuation_query: Any,
     effects: tuple[str, ...],
     result_integrity: str,
+    approval_category: str = EXTERNAL_CONTEXT_APPROVAL_CATEGORY,
+    question: Any = None,
+    description: Any = None,
+    display_content: Any = None,
 ) -> dict[str, Any]:
     return {
         "owner": _normalized_owner(owner),
@@ -137,6 +147,12 @@ def _binding_payload(
         "continuation_query": _normalized_continuation_query(continuation_query),
         "effects": list(effects),
         "result_integrity": str(result_integrity),
+        "approval_category": str(
+            approval_category or EXTERNAL_CONTEXT_APPROVAL_CATEGORY
+        ),
+        "question": str(question or ""),
+        "description": str(description or ""),
+        "display_content": str(display_content or ""),
     }
 
 
@@ -162,21 +178,46 @@ class PendingToolApproval:
     # exposed in the browser payload.
     selected_tools: tuple[str, ...] = ()
     continuation_query: str = ""
+    approval_category: str = EXTERNAL_CONTEXT_APPROVAL_CATEGORY
+    # Optional human-readable card copy. Defaults preserve the original
+    # external-context approval card exactly.
+    question: str = ""
+    description: str = ""
+    display_content: str = ""
+
+    @property
+    def requires_external_context(self) -> bool:
+        return self.approval_category != LIBRARY_FOLDER_APPROVAL_CATEGORY
 
     def public_payload(self, *, reason: str | None = None) -> dict[str, Any]:
-        return {
-            "kind": "tool_approval",
-            "approval_id": self.approval_id,
-            # The browser already owns this chat id. Persisting it with the
-            # resolved card lets history-derived session grants remain bound to
-            # this exact chat and prevents inheritance by a forked session.
-            "session_id": self.session_id,
-            "question": "Allow this task to continue?",
-            "description": reason or (
+        is_library = self.approval_category == LIBRARY_FOLDER_APPROVAL_CATEGORY
+        default_description = (
+            "The assistant wants to change a file's library folder. "
+            "Approving runs only this exact action once."
+            if is_library
+            else (
                 "Untrusted context influenced this run, so continuing with "
                 "otherwise-gated actions needs your explicit approval."
-            ),
-            "options": [
+            )
+        )
+        if is_library:
+            options = [
+                {
+                    "label": "Allow once",
+                    "value": TASK_APPROVAL_DECISION,
+                    "description": (
+                        "Execute this exact action once. A later folder change "
+                        "will ask again."
+                    ),
+                },
+                {
+                    "label": "Deny",
+                    "value": DENY_APPROVAL_DECISION,
+                    "description": "Do not execute the proposed action.",
+                },
+            ]
+        else:
+            options = [
                 {
                     "label": "Allow for this task",
                     "value": TASK_APPROVAL_DECISION,
@@ -200,12 +241,22 @@ class PendingToolApproval:
                     "value": DENY_APPROVAL_DECISION,
                     "description": "Do not execute the proposed action.",
                 },
-            ],
+            ]
+        return {
+            "kind": "tool_approval",
+            "approval_id": self.approval_id,
+            # The browser already owns this chat id. Persisting it with the
+            # resolved card lets history-derived session grants remain bound to
+            # this exact chat and prevents inheritance by a forked session.
+            "session_id": self.session_id,
+            "question": self.question or "Allow this task to continue?",
+            "description": self.description or reason or default_description,
+            "options": options,
             "action": {
                 "tool": self.tool_name,
                 # Show the complete sealed input so approval never hides
                 # trailing lines.  This is not read back as authority.
-                "content": self.content,
+                "content": self.display_content or self.content,
                 "digest": self.digest[:16],
                 "effects": list(self.effects),
                 "workspace": self.workspace or None,
@@ -270,6 +321,10 @@ class ExactToolApproval:
             continuation_query=self.pending.continuation_query,
             effects=effects,
             result_integrity=result_integrity,
+            approval_category=self.pending.approval_category,
+            question=self.pending.question,
+            description=self.pending.description,
+            display_content=self.pending.display_content,
         )
         return _canonical_digest(expected) == self.pending.digest
 
@@ -352,6 +407,10 @@ class ToolApprovalStore:
         continuation_query: Any = None,
         external_untrusted_context_seen: bool,
         capabilities: ToolCapabilities,
+        approval_category: Any = EXTERNAL_CONTEXT_APPROVAL_CATEGORY,
+        question: Any = None,
+        description: Any = None,
+        display_content: Any = None,
     ) -> PendingToolApproval:
         now = time.time()
         effects = tuple(sorted(effect.value for effect in capabilities.effects))
@@ -371,6 +430,10 @@ class ToolApprovalStore:
             continuation_query=continuation_query,
             effects=effects,
             result_integrity=result_integrity,
+            approval_category=approval_category,
+            question=question,
+            description=description,
+            display_content=display_content,
         )
         pending = PendingToolApproval(
             approval_id=secrets.token_urlsafe(32),
@@ -393,6 +456,10 @@ class ToolApprovalStore:
             expires_at=now + self._ttl_seconds,
             selected_tools=tuple(payload["selected_tools"]),
             continuation_query=payload["continuation_query"],
+            approval_category=payload["approval_category"],
+            question=payload["question"],
+            description=payload["description"],
+            display_content=payload["display_content"],
         )
         with self._lock:
             self._purge_expired_locked(now)
@@ -461,6 +528,14 @@ class ToolApprovalStore:
         scope = scope_for_decision(normalized_decision)
         if scope is None:
             return None
+        if pending.approval_category == LIBRARY_FOLDER_APPROVAL_CATEGORY:
+            # Folder changes are deliberately per-action even though the card
+            # reuses the task-scope wire value for its "Allow once" button.
+            return ExactToolApproval(
+                pending,
+                scope=ToolApprovalScope.SINGLE_ACTION,
+                allow_remaining_actions=False,
+            )
         if not allow_continuation:
             return ExactToolApproval(
                 pending,

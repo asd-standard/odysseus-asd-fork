@@ -542,6 +542,33 @@ _APP_API_BLOCKLIST_PREFIXES = (
     "/api/backup/restore", # destructive restore
 )
 
+def _app_api_method_path_blocked(method: str, path: str) -> bool:
+    """Whether a method+path pair is reserved for a dedicated (guarded) tool.
+
+    The folder-aware document tools need a human approval for creating outside
+    Unfiled and for moving files. These raw routes would otherwise let the agent
+    bypass that boundary, so they are reserved for the named tools / UI.
+    """
+    normalized_method = str(method or "").upper()
+    if any(
+        normalized_method == blocked_method and path.startswith(blocked_path)
+        for blocked_method, blocked_path in _APP_API_BLOCKLIST_METHOD_PATH
+    ):
+        return True
+    trimmed = path.rstrip("/")
+    if normalized_method == "POST" and trimmed == "/api/document":
+        return True
+    if (
+        normalized_method == "PATCH"
+        and path.startswith("/api/folders/")
+        and trimmed.endswith("/move")
+    ):
+        return True
+    if normalized_method == "DELETE" and path.startswith("/api/folders/"):
+        return True
+    return False
+
+
 # (method, prefix) pairs to refuse specifically. Used for endpoints
 # where GET is fine but writes are destructive or host-control shaped.
 # Use dedicated tools or UI flows instead.
@@ -634,7 +661,7 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
             for method, op in methods.items():
                 if method.lower() not in ("get", "post", "put", "patch", "delete"):
                     continue
-                if any(method.upper() == m and path.startswith(p) for m, p in _APP_API_BLOCKLIST_METHOD_PATH):
+                if _app_api_method_path_blocked(method, path):
                     continue
                 summary = (op or {}).get("summary") or (op or {}).get("description") or ""
                 if isinstance(summary, str):
@@ -667,6 +694,13 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
     method = (args.get("method") or "GET").upper()
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return {"error": f"Unsupported method: {method}", "exit_code": 1}
+    trimmed_path = path.rstrip("/")
+    if method == "POST" and trimmed_path == "/api/document":
+        return {"error": "Don't create documents via app_api — use `make_library_file` for library files (folder placement is human-approved) or `create_document` for the editor. Those tools enforce owner scope and the folder-approval boundary.", "exit_code": 1}
+    if method == "PATCH" and path.startswith("/api/folders/") and trimmed_path.endswith("/move"):
+        return {"error": "Don't move folders via app_api — moving a folder would move its files without the per-file approval. Use the Library UI, or `manage_documents` action=move for individual files.", "exit_code": 1}
+    if method == "DELETE" and path.startswith("/api/folders/"):
+        return {"error": "Don't delete folders via app_api — use the Library UI. Deleting a folder moves its documents to Trash and is not a per-file approval surface.", "exit_code": 1}
     if any(method == m and path.startswith(p) for m, p in _APP_API_BLOCKLIST_METHOD_PATH):
         if "/api/email/accounts" in path:
             return {"error": "Don't use /api/email/accounts via app_api — it is owner-filtered in tool context and may return empty. Use the `list_email_accounts` email tool, then pass `account` to list_emails/read_email.", "exit_code": 1}

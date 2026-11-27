@@ -216,6 +216,47 @@ async def test_app_api_cannot_bypass_document_writes():
     assert "Don't mutate documents via app_api" in result["error"]
 
 
+@pytest.mark.asyncio
+async def test_app_api_cannot_bypass_folder_approval():
+    """Raw create/move routes must not bypass the library folder approval."""
+    from src.tools.system import do_app_api
+
+    create = await do_app_api(
+        json.dumps({
+            "action": "call",
+            "method": "POST",
+            "path": "/api/document",
+            "body": {"title": "x", "content": "y", "folder_id": "folder-1"},
+        }),
+        owner="tester",
+    )
+    assert create["exit_code"] == 1
+    assert "make_library_file" in create["error"]
+
+    move = await do_app_api(
+        json.dumps({
+            "action": "call",
+            "method": "PATCH",
+            "path": "/api/folders/folder-1/move",
+            "body": {"parent_id": "folder-2"},
+        }),
+        owner="tester",
+    )
+    assert move["exit_code"] == 1
+    assert "manage_documents" in move["error"]
+
+    delete = await do_app_api(
+        json.dumps({
+            "action": "call",
+            "method": "DELETE",
+            "path": "/api/folders/folder-1",
+        }),
+        owner="tester",
+    )
+    assert delete["exit_code"] == 1
+    assert "Library UI" in delete["error"]
+
+
 def test_schema_and_document_rules_state_the_policy():
     from src.agent_loop import _DOMAIN_RULES
     from src.tool_schemas import FUNCTION_TOOL_SCHEMAS

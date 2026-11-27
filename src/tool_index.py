@@ -77,7 +77,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
     "list_library_files": "List files in the document library. With no folder, shows the root view (top-level folders + unfiled documents). Pass folder=<id|name> to list that folder's contents.",
     "read_library_file": "Read a document from the library, or bulk-read every document in a folder. Pass name=<exact document name> for a single file, or folder=<id|name> to read all documents in a folder concatenated with headers. Long content pages in ~20000-char chunks: call again with offset=next_offset to read more.",
-    "make_library_file": "Create a new document in the library (Unfiled). Provide a name (e.g. 'notes.md') and the full body text. The document appears immediately in list_library_files. Use to persist research results, save notes, or create new documents in the library.",
+    "make_library_file": "Create a new document in the library. Provide a name (e.g. 'notes.md') and the full body text. Omit folder for Unfiled; pass folder=<id|path|name> to create it directly in a library folder. Creating outside Unfiled requires human approval. The document appears immediately in list_library_files.",
     "read_upload": "Read a non-image file attached to this chat by its upload id when the inline text was truncated or omitted. Supports text files and PDFs, paged with offset/limit.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
     "edit_document": "Preferred tool for editing an existing document — targeted find-and-replace. Use for any small change: add a function, fix a bug, tweak a section, rename things.",
@@ -96,7 +96,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_webhooks": "Webhook management: list, add, delete, enable, or disable webhooks.",
     "api_call": "Call a configured API integration by name (Home Assistant, Miniflux, Gitea, Linkding, Jellyfin, RSS reader, git forge, bookmark manager, smart home, or any other registered service). Make a GET/POST/PUT/PATCH/DELETE request to the integration's endpoint path, with an optional JSON body. Use whenever the user asks to query or control one of their connected integrations/services.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",
-    "manage_documents": "List, read, delete, or tidy documents in the editor panel. action='list' returns clickable rows (most-recent first) so the user can open any doc by clicking. action='read' (aka view/open/get) with document_id returns the content; supports offset=<N> + limit=<N> to page through large docs (response includes next_offset when more remains, so you can keep calling with offset=next_offset). action='delete' with document_id removes a doc (only way to delete). Use this for ANY 'show/read/list/open my documents/docs/files/notes' request — never shell or curl.",
+    "manage_documents": "List, read, move, delete, or tidy documents in the editor panel. action='list' returns clickable rows (most-recent first) so the user can open any doc by clicking. action='read' (aka view/open/get) with document_id returns the content; supports offset=<N> + limit=<N> to page through large docs (response includes next_offset when more remains, so you can keep calling with offset=next_offset). action='move' with document_id (or a unique title) + folder=<id|path|name> (or 'unfiled') files a document into a library folder; every move requires human approval. action='delete' with document_id removes a doc (only way to delete). Use this for ANY 'show/read/list/open/move my documents/docs/files/notes' request — never shell or curl.",
     "manage_research": "List, read/open, or delete saved DEEP RESEARCH results from the Library. action='list' returns clickable [query](#research-<id>) rows (most-recent first). action='read' (aka open/view/get) with id returns the report + sources; id accepts the bare id or a pasted `#research-<id>` anchor. action='delete' with id removes it. Use this for ANY 'open/read/find/delete my research / that report / the research on X' request. NOTE: this is for EXISTING research; to START new research use trigger_research.",
     "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, search engine + result count, default/teacher/task/utility/research models, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'search engine', 'default model', 'teacher model', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/list_tools; re-enabling is Settings-only). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
     "create_session": "Create a new chat with a name and model.",
@@ -444,8 +444,13 @@ class ToolIndex:
             {"list_library_files", "read_library_file"},
         frozenset({"save to library", "save as file", "write to library",
                    "store in library", "add to library", "save this as",
-                   "save the result", "save my notes", "save to my"}):
+                   "save the result", "save my notes", "save to my",
+                   "create in folder", "save in folder", "file in folder"}):
             {"make_library_file"},
+        frozenset({"move document", "move file", "move my file", "move my doc",
+                   "move to folder", "move into folder", "move it to",
+                   "organize my files", "reorganize my files"}):
+            {"manage_documents", "list_library_files"},
         # Theme / UI control intent
         frozenset({"theme", "color scheme", "colors of the ui", "make it dark",
                    "make it light", "make the ui", "switch theme", "change theme",

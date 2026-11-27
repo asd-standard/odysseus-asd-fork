@@ -207,10 +207,11 @@ def render_plain_pdf_markdown(upload_id: str, title: str, body_text: Optional[st
 
 
 def create_plain_pdf_document(
-    session_id: str,
+    session_id: Optional[str],
     upload_id: str,
     title: str,
     body_text: Optional[str] = None,
+    folder_id: Optional[str] = None,
 ) -> Optional[str]:
     """Create a markdown Document for a non-form PDF and set it active.
 
@@ -235,6 +236,7 @@ def create_plain_pdf_document(
             current_content=content,
             version_count=1,
             is_active=True,
+            folder_id=folder_id,
             owner=_sess.owner if _sess else None,
         )
         ver = DocumentVersion(
@@ -389,11 +391,12 @@ def render_form_as_markdown(
 
 
 def create_form_markdown_document(
-    session_id: str,
+    session_id: Optional[str],
     fields: list[dict[str, Any]],
     upload_id: str,
     title: str,
     intro_text: Optional[str] = None,
+    folder_id: Optional[str] = None,
 ) -> Optional[str]:
     """Create a markdown Document for an editable form and set it active.
 
@@ -418,6 +421,7 @@ def create_form_markdown_document(
             current_content=content,
             version_count=1,
             is_active=True,
+            folder_id=folder_id,
             owner=_sess.owner if _sess else None,
         )
         ver = DocumentVersion(

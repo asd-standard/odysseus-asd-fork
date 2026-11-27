@@ -295,7 +295,7 @@ _PRIVATE_ACTION_WRITES: Mapping[str, frozenset[str]] = MappingProxyType(
             {"create_event", "update_event", "delete_event"}
         ),
         "manage_contact": frozenset({"add", "update", "edit", "delete"}),
-        "manage_documents": frozenset({"delete", "tidy"}),
+        "manage_documents": frozenset({"move", "delete", "tidy"}),
         "manage_memory": frozenset({"add", "edit", "delete"}),
         "manage_notes": frozenset({"add", "update", "delete", "toggle_item"}),
         "manage_research": frozenset({"delete"}),

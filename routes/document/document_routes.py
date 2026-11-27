@@ -33,6 +33,21 @@ def _get_session_or_404(db, session_id: str, user: Optional[str]):
     return session
 
 
+def _validated_folder_id(db, user: Optional[str], folder_id: Optional[str]) -> Optional[str]:
+    """Return an owned folder id, or None for the library root.
+
+    Import routes accept a destination folder so the Library's Import button
+    can file PDF/Office uploads directly into the folder currently open.
+    """
+    if not folder_id:
+        return None
+    folder = db.query(Folder).filter(Folder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(404, "Folder not found")
+    _verify_folder_owner(db, folder, user)
+    return folder.id
+
+
 def _aggregate_language_facets(lang_rows):
     """Sum document counts per display language for the library facet.
 
@@ -241,6 +256,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         request: Request,
         file: UploadFile = File(...),
         session_id: Optional[str] = Form(None),
+        folder_id: Optional[str] = Form(None),
     ) -> Dict[str, Any]:
         """Upload a PDF and create the matching Document.
 
@@ -264,12 +280,15 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         # session_id is optional — a library import isn't tied to a chat. When
         # given, validate it; otherwise the PDF becomes a session-less library
         # doc (the doc creators below already handle a missing session).
-        if session_id:
-            db = SessionLocal()
-            try:
+        # folder_id files the import directly into the folder the Library is
+        # currently showing.
+        db = SessionLocal()
+        try:
+            if session_id:
                 _get_session_or_404(db, session_id, user)
-            finally:
-                db.close()
+            folder_id = _validated_folder_id(db, user, folder_id)
+        finally:
+            db.close()
 
         if upload_handler is None:
             raise HTTPException(500, "Upload handler not configured")
@@ -309,6 +328,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 upload_id=upload_id,
                 title=title,
                 intro_text=body_text,
+                folder_id=folder_id,
             )
         else:
             doc_id = create_plain_pdf_document(
@@ -316,6 +336,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 upload_id=upload_id,
                 title=title,
                 body_text=body_text,
+                folder_id=folder_id,
             )
 
         if not doc_id:
@@ -343,6 +364,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         request: Request,
         file: UploadFile = File(...),
         session_id: Optional[str] = Form(None),
+        folder_id: Optional[str] = Form(None),
     ) -> Dict[str, Any]:
         """Upload a .docx/.odt and create a Document with its comments kept.
 
@@ -359,12 +381,13 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
         user = require_privilege(request, "can_use_documents")
 
-        if session_id:
-            db = SessionLocal()
-            try:
+        db = SessionLocal()
+        try:
+            if session_id:
                 _get_session_or_404(db, session_id, user)
-            finally:
-                db.close()
+            folder_id = _validated_folder_id(db, user, folder_id)
+        finally:
+            db.close()
 
         if upload_handler is None:
             raise HTTPException(500, "Upload handler not configured")
@@ -408,6 +431,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             title=title,
             body_text=result.markdown,
             comment_count=result.comment_count,
+            folder_id=folder_id,
         )
         if not doc_id:
             raise HTTPException(500, "Failed to create a document from the import")

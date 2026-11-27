@@ -94,12 +94,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "make_library_file",
-            "description": "Create a new document in the library (Unfiled). Provide a filename (e.g. 'notes.md') and the full text content. The document is immediately available via list_library_files and read_library_file. Only supports text-based formats — NOT PDFs, images, or binary files.",
+            "description": "Create a new document in the library. Provide a filename (e.g. 'notes.md') and the full text content. With no `folder` it lands in Unfiled; pass a folder id, full path like 'Work/Reports', or unique folder name to create it directly in that folder. Creating in a real folder requires explicit human approval. The document is immediately available via list_library_files and read_library_file. Only supports text-based formats — NOT PDFs, images, or binary files.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Filename (e.g. 'notes.md', 'report.txt'). Must not contain path separators — bare name only."},
-                    "content": {"type": "string", "description": "Full text content of the file"}
+                    "content": {"type": "string", "description": "Full text content of the file"},
+                    "folder": {"type": "string", "description": "Optional destination: folder id, full path (e.g. 'Work/Reports'), or unique folder name. Omit (or use 'unfiled') for the library root. Creating outside Unfiled requires human approval."}
                 },
                 "required": ["name", "content"]
             }
@@ -678,13 +679,15 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_documents",
-            "description": "Manage the user's documents. action=read returns a document's text. Target it either by `title` (the document's name, e.g. '26-10-07-Riassunto-Incontro.md' or a path) or by `document_id`; with neither, it reads the document currently open in the editor panel. There is no 'most recent document' fallback — always target the active document or one the user named. action=list lists documents with clickable [Title](#document-<id>) anchors. Also supports delete and tidy.",
+            "description": "Manage the user's documents. action=read returns a document's text. Target it either by `title` (the document's name, e.g. '26-10-07-Riassunto-Incontro.md' or a path) or by `document_id`; with neither, it reads the document currently open in the editor panel. There is no 'most recent document' fallback — always target the active document or one the user named. action=list lists documents with clickable [Title](#document-<id>) anchors. action=move files a document into a library folder (folder id, full path, or unique name; 'unfiled' for the root) — every move requires explicit human approval. Also supports delete and tidy.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "read", "delete", "tidy"]},
-                    "title": {"type": "string", "description": "For read: the document's title or path, exactly as the user said it. A filename with or without extension works. Ignored when document_id is given."},
-                    "document_id": {"type": "string", "description": "Document UUID copied from a manage_documents list anchor. Omit for read to read the active editor document; required for delete. Never invent an id."},
+                    "action": {"type": "string", "enum": ["list", "read", "move", "delete", "tidy"]},
+                    "title": {"type": "string", "description": "The document's title or path, exactly as the user said it. A filename with or without extension works. Used for read and move; ignored when document_id is given."},
+                    "document_id": {"type": "string", "description": "Document UUID copied from a manage_documents list anchor. Omit for read to read the active editor document; required for delete. For move, provide this or a unique title. Never invent an id."},
+                    "folder": {"type": "string", "description": "For move: destination folder id, full path (e.g. 'Work/Reports'), or unique name. Use 'unfiled' to move to the library root. Every move requires human approval."},
+                    "folder_id": {"type": "string", "description": "For move: destination folder id (alternative to `folder`)."},
                     "offset": {"type": "integer", "description": "For read: character offset to start from (default 0)"},
                     "limit": {"type": "integer", "description": "For read: max characters to return (defaults to the read cap). For list: max results (default 50)"},
                     "search": {"type": "string", "description": "Search query (for list)"},
@@ -1143,7 +1146,11 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             "limit": args.get("limit"),
         })
     elif tool_type == "make_library_file":
-        content = json.dumps({"name": args.get("name", ""), "content": args.get("content", "")})
+        content = json.dumps({
+            "name": args.get("name", ""),
+            "content": args.get("content", ""),
+            "folder": args.get("folder") or args.get("folder_id", ""),
+        })
     elif tool_type == "create_document":
         parts = [args.get("title", "Untitled")]
         if args.get("language"):

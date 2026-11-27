@@ -21,7 +21,7 @@ from tests.helpers.import_state import clear_fake_database_modules
 clear_fake_database_modules()
 
 import core.database as cdb  # noqa: E402
-from core.database import Document, Session as DbSession  # noqa: E402
+from core.database import Document, Folder, Session as DbSession  # noqa: E402
 from src.office_doc import create_office_document  # noqa: E402
 
 _TMPDB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -109,6 +109,27 @@ def test_real_session_id_is_still_preserved():
     assert _row(doc_id).session_id == "sess-keep"
 
 
+def test_folder_id_is_stored_for_library_import():
+    """The Library's Import button can file a session-less Office import."""
+    folder_id = str(uuid.uuid4())
+    db = _TS()
+    try:
+        db.add(Folder(id=folder_id, name="Work", owner="tester", sort_order=0))
+        db.commit()
+    finally:
+        db.close()
+
+    doc_id = create_office_document(
+        session_id=None,
+        upload_id="up-folder",
+        title="Filed doc",
+        body_text="Body.",
+        folder_id=folder_id,
+    )
+    assert doc_id
+    assert _row(doc_id).folder_id == folder_id
+
+
 def test_version_summary_records_the_comment_count():
     doc_id = create_office_document(
         session_id="",
@@ -147,6 +168,25 @@ def test_route_passes_none_not_empty_string_for_library_imports():
 
     assert "session_id=session_id or None" in route
     assert 'session_id=session_id or ""' not in route
+
+
+def test_import_routes_accept_folder_id():
+    """Both library import routes must forward the open folder."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "routes/document/document_routes.py"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        '    @router.post("/api/documents/import-pdf")',
+        '    @router.post("/api/documents/import-office")',
+    ):
+        start = src.index(marker)
+        end = src.index("# ---- ", start + len(marker))
+        route = src[start:end]
+        assert "folder_id: Optional[str] = Form(None)" in route
+        assert "folder_id=folder_id" in route
 
 
 def test_chat_processor_also_normalises():

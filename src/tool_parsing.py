@@ -726,7 +726,11 @@ def _raw_openai_tool_call_to_block(value) -> Optional[ToolBlock]:
             "limit": args.get("limit"),
         })
     elif tool_type == "make_library_file":
-        content = json.dumps({"name": args.get("name", ""), "content": args.get("content", "")})
+        content = json.dumps({
+            "name": args.get("name", ""),
+            "content": args.get("content", ""),
+            "folder": args.get("folder") or args.get("folder_id", ""),
+        })
     else:
         content = json.dumps(args) if args else ""
     return ToolBlock(tool_type, str(content or ""))

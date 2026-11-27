@@ -29,7 +29,7 @@ from src.tool_security import (
     owner_is_admin_or_single_user,
 )
 from src.tool_capabilities import ToolRunSecurityContext, blocked_tool_result
-from src.tool_approvals import ExactToolApproval
+from src.tool_approvals import ExactToolApproval, LIBRARY_FOLDER_APPROVAL_CATEGORY
 from src.tool_policy import ToolPolicy
 from src.constants import (
     MAX_OUTPUT_CHARS,
@@ -777,9 +777,22 @@ async def execute_tool_block(
 
     approval_claimed = False
     if exact_approval is not None:
-        if (
-            not isinstance(security_context, ToolRunSecurityContext)
-            or not security_context.external_untrusted_context_seen
+        requires_external_context = (
+            exact_approval.pending.approval_category
+            != LIBRARY_FOLDER_APPROVAL_CATEGORY
+        )
+        if not isinstance(security_context, ToolRunSecurityContext):
+            return (
+                f"{getattr(block, 'tool_type', None)}: BLOCKED",
+                {
+                    "error": "Exact-action approval requires an armed run security context.",
+                    "exit_code": 1,
+                    "blocked": True,
+                    "policy": "exact_tool_approval",
+                },
+            )
+        if requires_external_context and (
+            not security_context.external_untrusted_context_seen
             or not exact_approval.pending.external_untrusted_context_seen
         ):
             return (

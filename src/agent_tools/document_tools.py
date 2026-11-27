@@ -306,6 +306,100 @@ def _resolve_document_target(
     return None, None, requested
 
 
+def _resolve_move_request(db, owner: Optional[str], args: dict):
+    """Resolve a ``manage_documents action=move`` request.
+
+    Returns ``(doc, destination_folder, destination_label, error)`` where
+    ``destination_folder`` is ``None`` for Unfiled. The same function is used by
+    the tool and by the human-approval review, so the card describes exactly
+    the move that will execute.
+    """
+    from core.database import Document
+    from src.agent_tools.library_tools import (
+        _resolve_folder_strict,
+        is_unfiled_folder,
+    )
+
+    document_id = args.get("document_id") or args.get("id") or args.get("uid")
+    title_arg = args.get("title") or args.get("name") or args.get("path")
+
+    doc = None
+    if document_id:
+        doc = _get_owned_document(db, Document, str(document_id), owner)
+        if not doc:
+            return None, None, None, {
+                "error": f"Document '{document_id}' not found",
+                "exit_code": 1,
+            }
+    elif title_arg:
+        target_name = str(title_arg).strip()
+        candidates = _find_documents_by_title(db, Document, owner, target_name)
+        active_candidates = [d for d in candidates if d.is_active]
+        if active_candidates:
+            candidates = active_candidates
+        if len(candidates) == 1:
+            doc = candidates[0]
+        elif len(candidates) > 1:
+            listing = "\n".join(
+                f"- [{d.title}](#document-{d.id})" for d in candidates[:10]
+            )
+            return None, None, None, {
+                "error": (
+                    f"More than one document matches '{target_name}'. "
+                    "Pass one of these ids: \n" + listing
+                ),
+                "exit_code": 1,
+                "ambiguous_title": True,
+            }
+        else:
+            return None, None, None, {
+                "error": f"Document '{target_name}' not found",
+                "exit_code": 1,
+            }
+    else:
+        return None, None, None, {
+            "error": (
+                "manage_documents move: pass 'document_id' (or a unique "
+                "'title') and a destination 'folder'/'folder_id'. Use "
+                "'unfiled' to move to the library root."
+            ),
+            "exit_code": 1,
+        }
+
+    has_destination = any(
+        key in args for key in ("folder", "folder_id", "to", "destination")
+    )
+    if not has_destination:
+        return None, None, None, {
+            "error": (
+                "manage_documents move: a destination is required. Pass "
+                "'folder'/'folder_id' with a folder id, path, or unique name, "
+                "or 'unfiled' for the library root. Use list_library_files "
+                "to see folder paths and ids."
+            ),
+            "exit_code": 1,
+        }
+    destination_arg = (
+        args.get("folder")
+        if "folder" in args
+        else args.get("folder_id")
+        if "folder_id" in args
+        else args.get("to")
+        if "to" in args
+        else args.get("destination")
+    )
+    if is_unfiled_folder(destination_arg):
+        return doc, None, "Unfiled", None
+
+    folder, folder_error = _resolve_folder_strict(db, owner, destination_arg)
+    if folder_error:
+        return None, None, None, folder_error
+    from src.agent_tools.library_tools import folder_path
+
+    destination = folder_path(db, owner, folder) or folder.name
+    return doc, folder, destination, None
+
+
 def _approved_document_version_error(doc: Any, ctx: dict) -> Optional[Dict]:
     """Reject a sealed document action when its target changed meanwhile."""
     expected_version = ctx.get("expected_document_version")
@@ -1193,7 +1287,7 @@ class SuggestDocumentTool:
 # ---------------------------------------------------------------------------
 class ManageDocumentTool:
     async def execute(self, content: str, ctx: dict) -> Dict:
-        """Manage documents: list, read/view/open, delete, tidy.
+        """Manage documents: list, read/view/open, move, delete, tidy.
 
         Output format mirrors `manage_session`: list rows include a
         clickable `[Title](#document-<id>)` anchor + relative timestamps
@@ -1351,6 +1445,40 @@ class ManageDocumentTool:
                         "active": is_active_editor_doc,
                     },
                     "exit_code": 0,
+                }
+
+            elif action == "move":
+                doc, destination_folder, destination_label, move_error = (
+                    _resolve_move_request(db, owner, args)
+                )
+                if move_error:
+                    return move_error
+                doc_title = doc.title
+                doc.folder_id = (
+                    destination_folder.id
+                    if destination_folder is not None
+                    else None
+                )
+                db.commit()
+                return {
+                    "response": (
+                        f'Moved document "{doc_title}" to "{destination_label}"'
+                    ),
+                    "exit_code": 0,
+                    "document": {
+                        "id": doc.id,
+                        "title": doc_title,
+                        "folder_id": (
+                            destination_folder.id
+                            if destination_folder is not None
+                            else None
+                        ),
+                        "folder": (
+                            destination_label
+                            if destination_folder is not None
+                            else None
+                        ),
+                    },
                 }
 
             elif action == "delete":
