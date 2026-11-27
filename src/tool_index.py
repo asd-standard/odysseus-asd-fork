@@ -48,6 +48,7 @@ ALWAYS_AVAILABLE = frozenset({
     "list_library_files",
     "read_library_file",
     "make_library_file",
+    "manage_library_folders",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -78,6 +79,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "list_library_files": "List files in the document library. With no folder, shows the root view (top-level folders + unfiled documents). Pass folder=<id|name> to list that folder's contents.",
     "read_library_file": "Read a document from the library, or bulk-read every document in a folder. Pass name=<exact document name> for a single file, or folder=<id|name> to read all documents in a folder concatenated with headers. Long content pages in ~20000-char chunks: call again with offset=next_offset to read more.",
     "make_library_file": "Create a new document in the library. Provide a name (e.g. 'notes.md') and the full body text. Omit folder for Unfiled; pass folder=<id|path|name> to create it directly in a library folder. Creating outside Unfiled requires human approval. The document appears immediately in list_library_files.",
+    "manage_library_folders": "Create, move, or rename folders in the document library. action=create takes name + optional parent; action=move takes folder + destination parent; action=rename takes folder + new name. Folder arguments accept an id, full path like 'Work/Reports', or a unique name. Every create/move/rename requires human approval through a one-use card. Use list_library_files to discover folder ids and paths.",
     "read_upload": "Read a non-image file attached to this chat by its upload id when the inline text was truncated or omitted. Supports text files and PDFs, paged with offset/limit.",
     "create_document": "Create a new document in the editor panel. For code, articles, text content longer than 15 lines, unless an already-open document/email draft is the obvious target. If an email compose draft is open, edit that draft instead of creating another document.",
     "edit_document": "Preferred tool for editing an existing document — targeted find-and-replace. Use for any small change: add a function, fix a bug, tweak a section, rename things.",
@@ -451,6 +453,10 @@ class ToolIndex:
                    "move to folder", "move into folder", "move it to",
                    "organize my files", "reorganize my files"}):
             {"manage_documents", "list_library_files"},
+        frozenset({"create folder", "new folder", "make folder", "add folder",
+                   "create a folder", "new subfolder", "move folder",
+                   "rename folder", "rename the folder", "organize folders"}):
+            {"manage_library_folders", "list_library_files"},
         # Theme / UI control intent
         frozenset({"theme", "color scheme", "colors of the ui", "make it dark",
                    "make it light", "make the ui", "switch theme", "change theme",

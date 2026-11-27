@@ -387,7 +387,8 @@ _DOMAIN_RULES = {
 - Use `read_library_file folder=<name|id>` to read EVERY document in a folder in one call; use `name=` for a single document.
 - Use `make_library_file` to create a new document in the library. Omit `folder` to land in 'Unfiled documents', or pass `folder=<id|path|name>` to create it directly in a folder. Creating outside Unfiled needs explicit human approval through the card shown in chat.
 - Use `manage_documents action=move` with `document_id` (or a unique `title`) and `folder=<id|path|name>` (or `folder='unfiled'`) to move a file between folders. Every move needs explicit human approval through the card shown in chat.
-- These tools read the document library; do not use any other tool to find library documents.""",
+- Use `manage_library_folders` to create, move, or rename folders (`action=create|move|rename`). Parent/destination args accept an id, path like 'Work/Reports', or unique name; `unfiled`/`root` means the library root. Every folder action needs explicit human approval through the card shown in chat.
+- These tools work with the document library; do not use any other tool to find or organize library documents.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -411,7 +412,12 @@ _DOMAIN_TOOL_MAP = {
     "notes_calendar_tasks": {"manage_notes", "manage_calendar", "manage_tasks"},
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
-    "library": {"list_library_files", "read_library_file", "make_library_file"},
+    "library": {
+        "list_library_files",
+        "read_library_file",
+        "make_library_file",
+        "manage_library_folders",
+    },
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
@@ -495,6 +501,12 @@ folder: /optional folder id, path, or unique name; omit for Unfiled/
 content: <full file body>
 ```
 Create a new document in the library. Takes a simple filename (no path separators; just the name, e.g. 'notes.md' or 'report.txt') and the complete body text. With no `folder` the document lands in 'Unfiled documents'; pass `folder` (an id, a full path like 'Work/Reports', or a unique folder name) to file it directly in that folder. Creating in a real folder is a human-authorised boundary: the turn pauses with an approval card naming the destination, and the action runs only after the user clicks Allow once. The document then appears immediately in list_library_files and is readable by read_library_file. Only creates text documents — cannot create PDFs, images, or binary files.""",
+
+    "manage_library_folders": """\
+```manage_library_folders
+{"action": "create|move|rename", "name": "Reports", "folder": "Work/Reports", "parent": "Archive"}
+```
+Create, move, or rename folders in the document library. `create` takes `name` + optional `parent`; `move` takes `folder` + destination `parent`; `rename` takes `folder` + new `name`. Folder/parent arguments accept an id, a full path like 'Work/Reports', or a unique folder name; `unfiled`/`root` means the library root. Every action is a human-authorised boundary: the turn pauses with an approval card naming the exact folder change, and the action runs only after the user clicks Allow once. Use list_library_files to discover folder ids and paths.""",
 
     "create_document": """\
 ```create_document
@@ -5308,7 +5320,11 @@ async def stream_agent_loop(
             # Resolve the destination now so the sealed approval card names the
             # exact folder the action will touch.
             library_review = None
-            if block.tool_type in {"make_library_file", "manage_documents"}:
+            if block.tool_type in {
+                "make_library_file",
+                "manage_library_folders",
+                "manage_documents",
+            }:
                 try:
                     from src.agent_tools.library_tools import (
                         library_action_approval_review,

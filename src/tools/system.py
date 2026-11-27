@@ -558,11 +558,9 @@ def _app_api_method_path_blocked(method: str, path: str) -> bool:
     trimmed = path.rstrip("/")
     if normalized_method == "POST" and trimmed == "/api/document":
         return True
-    if (
-        normalized_method == "PATCH"
-        and path.startswith("/api/folders/")
-        and trimmed.endswith("/move")
-    ):
+    if normalized_method == "POST" and trimmed == "/api/folders":
+        return True
+    if normalized_method == "PATCH" and path.startswith("/api/folders/"):
         return True
     if normalized_method == "DELETE" and path.startswith("/api/folders/"):
         return True
@@ -697,8 +695,10 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
     trimmed_path = path.rstrip("/")
     if method == "POST" and trimmed_path == "/api/document":
         return {"error": "Don't create documents via app_api — use `make_library_file` for library files (folder placement is human-approved) or `create_document` for the editor. Those tools enforce owner scope and the folder-approval boundary.", "exit_code": 1}
-    if method == "PATCH" and path.startswith("/api/folders/") and trimmed_path.endswith("/move"):
-        return {"error": "Don't move folders via app_api — moving a folder would move its files without the per-file approval. Use the Library UI, or `manage_documents` action=move for individual files.", "exit_code": 1}
+    if method == "POST" and trimmed_path == "/api/folders":
+        return {"error": "Don't create folders via app_api — use `manage_library_folders` action=create. Folder changes require a one-use human approval card.", "exit_code": 1}
+    if method == "PATCH" and path.startswith("/api/folders/"):
+        return {"error": "Don't rename or move folders via app_api — use `manage_library_folders` action=rename/move. Folder changes require a one-use human approval card.", "exit_code": 1}
     if method == "DELETE" and path.startswith("/api/folders/"):
         return {"error": "Don't delete folders via app_api — use the Library UI. Deleting a folder moves its documents to Trash and is not a per-file approval surface.", "exit_code": 1}
     if any(method == m and path.startswith(p) for m, p in _APP_API_BLOCKLIST_METHOD_PATH):

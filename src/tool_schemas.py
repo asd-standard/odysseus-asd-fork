@@ -109,6 +109,25 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_library_folders",
+            "description": "Create, move, or rename folders in the document library. Use list_library_files to discover folder ids and paths. action=create takes name + optional parent (id/path/name; omitted = root). action=move takes folder + parent (id/path/name; 'unfiled'/'root' = root). action=rename takes folder + name. Every action requires explicit human approval through a one-use card.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create", "move", "rename"]},
+                    "name": {"type": "string", "description": "Folder name for create/rename."},
+                    "folder": {"type": "string", "description": "For move/rename: folder id, full path (e.g. 'Work/Reports'), or unique folder name."},
+                    "folder_id": {"type": "string", "description": "For move/rename: folder id (alternative to `folder`)."},
+                    "parent": {"type": "string", "description": "For create/move: destination parent folder id, full path, unique name, or 'unfiled'/'root' for the library root."},
+                    "parent_id": {"type": "string", "description": "For create/move: parent folder id (alternative to `parent`)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_document",
             "description": "Create a new document in the editor panel. Use this when the user asks to write, create, build, make, or generate code, scripts, programs, games, apps, or any long-form or structured content that is more than a short paragraph, AND there is no already-open document/email draft that the request refers to. If a document or email draft is already open, use suggest_document for changes to it; never create a replacement. NEVER put large generated content directly in chat — use this tool instead.",
             "parameters": {

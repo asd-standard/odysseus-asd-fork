@@ -123,6 +123,7 @@ _register(
         "manage_skills",
         "manage_tasks",
         "make_library_file",
+        "manage_library_folders",
         "suggest_document",
         "todowrite",
     },

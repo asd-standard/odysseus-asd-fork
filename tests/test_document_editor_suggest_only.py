@@ -233,6 +233,18 @@ async def test_app_api_cannot_bypass_folder_approval():
     assert create["exit_code"] == 1
     assert "make_library_file" in create["error"]
 
+    create_folder = await do_app_api(
+        json.dumps({
+            "action": "call",
+            "method": "POST",
+            "path": "/api/folders",
+            "body": {"name": "Work"},
+        }),
+        owner="tester",
+    )
+    assert create_folder["exit_code"] == 1
+    assert "manage_library_folders" in create_folder["error"]
+
     move = await do_app_api(
         json.dumps({
             "action": "call",
@@ -243,7 +255,19 @@ async def test_app_api_cannot_bypass_folder_approval():
         owner="tester",
     )
     assert move["exit_code"] == 1
-    assert "manage_documents" in move["error"]
+    assert "manage_library_folders" in move["error"]
+
+    rename = await do_app_api(
+        json.dumps({
+            "action": "call",
+            "method": "PATCH",
+            "path": "/api/folders/folder-1",
+            "body": {"name": "Archive"},
+        }),
+        owner="tester",
+    )
+    assert rename["exit_code"] == 1
+    assert "manage_library_folders" in rename["error"]
 
     delete = await do_app_api(
         json.dumps({

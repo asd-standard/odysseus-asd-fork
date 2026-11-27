@@ -615,6 +615,71 @@ def library_action_approval_review(
             ),
         }
 
+    if tool_name == "manage_library_folders":
+        args = _parse_args(content)
+        action = str(args.get("action") or "").strip().casefold()
+        if action not in {"create", "move", "rename"}:
+            return None
+        from src.agent_tools.folder_tools import (
+            resolve_folder_create,
+            resolve_folder_move,
+            resolve_folder_rename,
+        )
+
+        db = SessionLocal()
+        try:
+            if action == "create":
+                plan, error = resolve_folder_create(db, owner, args)
+                if error:
+                    return None
+                name = plan["name"]
+                parent_path = plan["parent_path"]
+                if parent_path:
+                    question = (
+                        f'Do you want to create folder "{name}" in '
+                        f'"{parent_path}"?'
+                    )
+                    display = f'create folder "{name}" in "{parent_path}"'
+                else:
+                    question = (
+                        f'Do you want to create folder "{name}" at the '
+                        "library root?"
+                    )
+                    display = f'create folder "{name}" at the library root'
+            elif action == "move":
+                plan, error = resolve_folder_move(db, owner, args)
+                if error:
+                    return None
+                old_path = plan["old_path"]
+                new_path = plan["new_path"]
+                question = (
+                    f'Do you want to move folder "{old_path}" to '
+                    f'"{new_path}"?'
+                )
+                display = f'move folder "{old_path}" to "{new_path}"'
+            else:
+                plan, error = resolve_folder_rename(db, owner, args)
+                if error:
+                    return None
+                old_path = plan["old_path"]
+                new_path = plan["new_path"]
+                question = (
+                    f'Do you want to rename folder "{old_path}" to '
+                    f'"{new_path}"?'
+                )
+                display = f'rename folder "{old_path}" to "{new_path}"'
+        finally:
+            db.close()
+        return {
+            "category": LIBRARY_FOLDER_APPROVAL_CATEGORY,
+            "question": question,
+            "description": (
+                "The assistant wants to change the library folder structure. "
+                "Approving runs only this exact action once."
+            ),
+            "display_content": display,
+        }
+
     if tool_name == "manage_documents":
         args = _parse_args(content)
         action = str(args.get("action") or "").strip().casefold()

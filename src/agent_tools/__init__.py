@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 from .web_tools import WebSearchTool, WebFetchTool
 from .library_tools import ListLibraryFilesTool, ReadLibraryFileTool, MakeLibraryFileTool
+from .folder_tools import ManageLibraryFoldersTool
 from .upload_tools import ReadUploadTool
 from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
 from .interaction_tools import AskUserTool, UpdatePlanTool
@@ -43,6 +44,7 @@ TOOL_HANDLERS = {
     "list_library_files": ListLibraryFilesTool().execute,
     "read_library_file": ReadLibraryFileTool().execute,
     "make_library_file": MakeLibraryFileTool().execute,
+    "manage_library_folders": ManageLibraryFoldersTool().execute,
     "read_upload": ReadUploadTool().execute,
     "ask_user": AskUserTool().execute,
     "update_plan": UpdatePlanTool().execute,
@@ -67,7 +69,8 @@ PYTHON_TIMEOUT = 30
 
 # Tool types that trigger execution
 TOOL_TAGS = {"web_search", "web_fetch",
-             "list_library_files", "read_library_file", "make_library_file", "read_upload",
+             "list_library_files", "read_library_file", "make_library_file",
+             "manage_library_folders", "read_upload",
              "create_document", "update_document", "edit_document",
              "search_chats",
              "chat_with_model", "create_session", "list_sessions",

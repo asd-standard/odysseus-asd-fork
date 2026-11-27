@@ -1005,7 +1005,13 @@ async def _execute_tool_block_impl(
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)
-    elif tool in ("list_library_files", "read_library_file", "make_library_file", "read_upload"):
+    elif tool in (
+        "list_library_files",
+        "read_library_file",
+        "make_library_file",
+        "manage_library_folders",
+        "read_upload",
+    ):
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb, session_id=session_id, owner=owner) \
