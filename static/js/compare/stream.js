@@ -6,6 +6,7 @@ import markdownModule from '../markdown.js';
 import spinnerModule from '../spinner.js';
 import uiModule from '../ui.js';
 import presetsModule from '../presets.js';
+import { scheduleLibraryRefresh } from '../libraryRefresh.js';
 
 var escapeHtml = uiModule.esc;
 
@@ -604,6 +605,7 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
               aiMsgEl._textEl = null;
               accumulated = '';
             }
+            scheduleLibraryRefresh(json);
             if (hist) hist.scrollTop = hist.scrollHeight;
           } else if (json.delta) {
             // Skip text deltas if we already rendered an image

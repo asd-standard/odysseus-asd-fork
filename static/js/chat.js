@@ -35,6 +35,7 @@ import {
 } from './chatModelProvenance.js';
 import { createTerminalStreamError, isRecoverableStreamError } from './chatStreamErrors.js';
 import { loadPanel } from './panels.js';
+import { scheduleLibraryRefresh } from './libraryRefresh.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -3848,6 +3849,10 @@ import { loadPanel } from './panels.js';
                   window._manageMemoryTimer = setTimeout(
                     () => window.dispatchEvent(new CustomEvent('memory-refresh')), 600);
                 }
+                // --- Live-refresh the document library after library changes ---
+                // Covers LLM-created/moved files and folders, so an open Library
+                // window reflects the new tree without a manual reload.
+                scheduleLibraryRefresh(json);
                 // --- Apply UI control actions embedded in tool_output ---
                 if (json.ui_event) {
                   chatStream.handleUIControl(json);

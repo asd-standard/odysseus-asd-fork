@@ -9,6 +9,7 @@ import { providerLogo } from './providers.js';
 import { PROMPT_TEMPLATES, getUserTemplates } from './presets.js';
 import { sortModelObjects } from './modelSort.js';
 import Storage from './storage.js';
+import { scheduleLibraryRefresh } from './libraryRefresh.js';
 
 let API_BASE = '';
 let _active = false;
@@ -916,6 +917,7 @@ async function _streamToHolder(modelIdx, sessionId, msg, holderEl, abortCtrl) {
             outDiv.style.cssText = 'font-size:10px;opacity:0.4;padding:2px 0;font-family:monospace;max-height:60px;overflow:hidden;';
             outDiv.textContent = (json.output || '').substring(0, 200);
             bodyEl.appendChild(outDiv);
+            scheduleLibraryRefresh(json);
           }
           // Generated image
           else if (json.type === 'generated_image' && json.url) {

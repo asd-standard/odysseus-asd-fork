@@ -4658,3 +4658,13 @@ let _libraryPreviewUnreg = null; // escMenuStack unregister for the preview pane
   export function isLibraryOpen() {
     return _libraryOpen;
   }
+
+  // Live-refresh when the agent creates/moves library files or folders.
+  // chat.js / compare / group dispatch `library-refresh` after a successful
+  // library tool result, so an open Library window reflects the new tree
+  // without a manual reload. Refresh only while the modal actually exists;
+  // opening it already fetches fresh data.
+  window.addEventListener('library-refresh', () => {
+    if (!_libraryOpen || !document.getElementById('doclib-modal')) return;
+    Promise.all([folderFetch(), libraryFetch(false)]).catch(() => {});
+  });
